@@ -56,10 +56,15 @@ Long story short, point precision refers to how precise your click must be near 
 
 ## Hotkeys
 'z' : Zoom mode enabled
+
 't' : Trashing mode enabled
+
 'm' : Merging mode enabled
+
 '1' : Lower z-plane
+
 '2' : Higher z-plane
+
 'n' : New ROI
 
 # Manual Segmenter
