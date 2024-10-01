@@ -29,7 +29,7 @@ Once data is loaded in, the GUI should display the plane z=0 with the ROIs overl
 ## Using the tool
 The current ROI being merged is displayed in the top-right of the screen.
 ### Merging (Merge Mode)
-The tool begins in merge mode (hotkey 'm), in which, clicking on the edges of a cluster will associate it with the current ROI. After the desired number of clusters are selected, you can hit the space key to 'lock in'this roi selection. It should now become visible in the side-bar, while also beginning merging of the next cluster (as evidenced by a higher current ROI count). Clicking on a cluster in the sidebar will zoom and centre on it.
+The tool begins in merge mode (hotkey 'm'), in which, clicking on the edges of a cluster will associate it with the current ROI. After the desired number of clusters are selected, you can hit the space key to 'lock in'this roi selection. It should now become visible in the side-bar, while also beginning merging of the next cluster (as evidenced by a higher current ROI count). Clicking on a cluster in the sidebar will zoom and centre on it.
 To edit an existing selection, click on the ROI in the side bar, and you may continue to add or remove clusters from the ROI. After doing so, to begin merging a
 new ROI, press 'n' (new ROI) or de-select the currently selected ROI tab.
 
