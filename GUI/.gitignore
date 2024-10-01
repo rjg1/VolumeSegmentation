@@ -1,0 +1,4 @@
+/debug/
+.env/
+*.tif
+*.csv
