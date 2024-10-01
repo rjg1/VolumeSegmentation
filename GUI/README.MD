@@ -4,12 +4,15 @@ In order to run the GUIs, a Python environment with the required libraries shoul
 1. Create the Environment
 
 `py -3.11 -m venv .env` 
+
 2. Activate the Environment
 
 `./.env/scripts/activate`
+
 3. Install the required dependencies
 
 `python -m pip install -r requirements.txt`
+
 4. Ensure your interpreter is set to use this environment (for quick run in VSCode)
 In VSCode, `ctrl+shift+p` will allow you to select an interpreter. The interpreter path should be manually defined as: `./.env/scripts/python.exe`
 
