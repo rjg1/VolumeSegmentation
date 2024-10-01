@@ -63,6 +63,8 @@ Long story short, point precision refers to how precise your click must be near 
 
 '1' : Lower z-plane
 
+'space' : Lock-in current merge and move to next merge
+
 '2' : Higher z-plane
 
 'n' : New ROI
