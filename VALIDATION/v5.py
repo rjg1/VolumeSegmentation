@@ -148,15 +148,10 @@ def calculate_accuracy(gt_volume_ids, alg_volume_ids, row_ind, col_ind, ground_t
             # Correct ROIs are those in both matched volumes using the matching function
             matched_rois = match_rois_with_tolerance(gt_rois, alg_rois, tolerance)
             correctly_classified_rois += len(matched_rois)
-            # Count mismatched ROIs
-            incorrectly_classified_rois += count_mismatched_rois(gt_rois, alg_rois, tolerance)
-            incorrectly_classified_rois += count_mismatched_rois(alg_rois, gt_rois, tolerance)
         elif gt_idx < len(gt_volume_ids):  # Ground truth volume matched with a dummy algorithmic volume
             unmatched_gt.add(gt_volume_ids[gt_idx])
-            incorrectly_classified_rois += len(ground_truth_volumes[gt_volume_ids[gt_idx]])
         elif alg_idx < len(alg_volume_ids):  # Algorithmic volume matched with a dummy ground truth volume
             unmatched_alg.add(alg_volume_ids[alg_idx])
-            incorrectly_classified_rois += len(algorithmic_volumes[alg_volume_ids[alg_idx]])
 
     # Calculate the accuracy score directly
     accuracy_score = correctly_classified_rois / len(total_rois) if total_rois else 0
