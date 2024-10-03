@@ -2,10 +2,5 @@ pyvista
 numpy
 matplotlib
 shapely
-math
-pickle
-os
 pandas
-collections
-csv
-sklearn
+scikit-learn

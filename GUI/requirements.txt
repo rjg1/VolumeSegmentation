@@ -3,5 +3,4 @@ pandas
 numpy
 tifffile
 shapely
-alphashape
-scipy
+scikit-learn

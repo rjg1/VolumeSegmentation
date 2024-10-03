@@ -1,5 +1,4 @@
 pandas
-scipy
+scikit-learn
 numpy
 matplotlib
-mpl_toolkits.mplot3d

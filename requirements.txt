@@ -1,19 +1,11 @@
+# For 3d library - ignore if not needed
 pyvista
+# For performing 2d segmentation - ignore if dataset already generated
+cellpose
+# Pretty much all essential below
 numpy
 matplotlib
 shapely
-math
-pickle
-os
 pandas
-collections
-csv
-sklearn
-cellpose
-scipy
-skimage
+scikit-learn
 tifffile
-alphashape
-mpl_toolkits.mplot3d
-region
-volume

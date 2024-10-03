@@ -1,9 +1,5 @@
 numpy
 shapely
-scipy
-region
-volume
+scikit-learn
 pandas
 matplotlib
-mpl_toolkits.mplot3d
-sklearn
