@@ -1,0 +1,9 @@
+numpy
+shapely
+scipy
+region
+volume
+pandas
+matplotlib
+mpl_toolkits.mplot3d
+sklearn

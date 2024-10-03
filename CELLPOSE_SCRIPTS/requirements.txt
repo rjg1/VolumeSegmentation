@@ -1,0 +1,8 @@
+numpy
+matplotlib
+csv
+cellpose
+pandas
+scipy
+skimage
+tifffile

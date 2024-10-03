@@ -34,7 +34,7 @@ def main():
     # DEBUG: Cache XZ ROIS
     if not os.path.exists(XZ_IO_PATH):
         print("Generating XZ Planes...")
-        xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024, include_xy_id=RESTRICTED_MODE)
+        xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024)
         out_xz_points = []
         for x,y,z in xz_roi_points:
             out_xz_points.append([x, y, z])

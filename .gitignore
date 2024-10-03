@@ -3,3 +3,4 @@
 *.tif
 *.csv
 *.npy
+__pycache__/
