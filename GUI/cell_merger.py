@@ -14,8 +14,6 @@ import alphashape
 from scipy.spatial import distance
 from shapely.geometry import LineString
 
-
-
 POINT_PRECISION = 2 # Lower = more precise clicks required, but can select ROIs in dense areas easier
 NUM_INTERPOLATION_POINTS = 75 # Higher = hopefully better, but more cost at the end (helps prevent overlap in new hulls)
 
