@@ -12,7 +12,6 @@ print(image_stack.shape)
 # Initialize Cellpose model
 model = models.CellposeModel(pretrained_model='./DRG_xyzmodel_20220705')
 
-
 # Placeholder list to store segmentation masks for each Z-plane
 output_list = []
 
