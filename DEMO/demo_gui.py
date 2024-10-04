@@ -35,7 +35,7 @@ class DemoGUIApp:
         self.active_scenario = None # No active scenario on startup
 
         # Create scenario section
-        self.create_label = tk.Label(self.root, text="Create scenario", font=("Arial", 12, "bold"))
+        self.create_label = tk.Label(self.root, text="Create Scenario", font=("Arial", 12, "bold"))
         self.create_label.grid(row=0, column=0, padx=5, pady=10, sticky="w")
 
         # Create a frame to hold the entry, checkboxes, and button
@@ -63,7 +63,7 @@ class DemoGUIApp:
         self.create_button.pack(side="left", padx=5, pady=1)
 
         # Load scenario section
-        self.load_label = tk.Label(self.root, text="Load scenario", font=("Arial", 12, "bold"))
+        self.load_label = tk.Label(self.root, text="Load Scenario", font=("Arial", 12, "bold"))
         self.load_label.grid(row=3, column=0, padx=5, pady=10, sticky="w")
 
         # Create a frame to hold the dropdown and load button
@@ -118,18 +118,18 @@ class DemoGUIApp:
 
         # Upper frame content (Tools label and buttons)
         tools_label = tk.Label(self.upper_right_frame, text="Tools", font=("Arial", 12, "bold"))
-        tools_label.grid(row=0, column=0, padx=10, pady=10)
+        tools_label.grid(row=0, column=0, padx=10, pady=5)
 
         self.upper_right_frame.grid_columnconfigure(0, weight=1)
 
-        data_view_button = tk.Button(self.upper_right_frame, text="Raw Data Viewer", width=15, command=self.generate_data_plot)
-        data_view_button.grid(row=1, column=0, padx=5, pady=5, sticky="ew") 
+        self.data_view_button = tk.Button(self.upper_right_frame, text="Raw Data Viewer", width=15, command=self.generate_data_plot)
+        self.data_view_button.grid(row=1, column=0, padx=5, pady=2, sticky="ew") 
 
-        cell_merger_button = tk.Button(self.upper_right_frame, text="Cell Merger", width=15, command=self.cell_merger_tool)
-        cell_merger_button.grid(row=2, column=0, padx=5, pady=5, sticky="ew")  
+        self.cell_merger_button = tk.Button(self.upper_right_frame, text="Cell Merger", width=15, command=self.cell_merger_tool)
+        self.cell_merger_button.grid(row=2, column=0, padx=5, pady=2, sticky="ew")  
 
-        volume_segmenter_button = tk.Button(self.upper_right_frame, text="Volume Segmenter", width=15, command=self.volume_segmenter_tool)
-        volume_segmenter_button.grid(row=3, column=0, padx=5, pady=5, sticky="ew")  
+        self.volume_segmenter_button = tk.Button(self.upper_right_frame, text="Volume Segmenter", width=15, command=self.volume_segmenter_tool)
+        self.volume_segmenter_button.grid(row=3, column=0, padx=5, pady=2, sticky="ew")  
 
         # Checkbox for requiring data to be reduced inside the frame
         self.reduce_var2 = tk.IntVar(value=1)
@@ -138,9 +138,13 @@ class DemoGUIApp:
         if FORCE_REQUIRE_REDUCED_DATA:
             self.reduce_checkbox2.config(state='disabled')
 
+        # Filter/reduce data button
+        self.reduce_data_button = tk.Button(self.upper_right_frame, text="Reduce Data", width=15, command=self.reduce_data)
+        self.reduce_data_button.grid(row=5, column=0, padx=5, pady=2, sticky="ew")  
+
         # Lower frame content (Commands label, checkboxes, and execute button)
         commands_label = tk.Label(self.lower_right_frame, text="Commands", font=("Arial", 12, "bold"))
-        commands_label.grid(row=0, column=0, padx=10, pady=10)
+        commands_label.grid(row=0, column=0, padx=10, pady=5)
 
         self.lower_right_frame.grid_columnconfigure(0, weight=1)
 
@@ -164,7 +168,7 @@ class DemoGUIApp:
 
         # Execute button with fixed width
         execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        execute_button.grid(row=5, column=0, padx=5, pady=10, sticky="ew")
+        execute_button.grid(row=5, column=0, padx=5, pady=2, sticky="ew")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()
@@ -289,17 +293,36 @@ class DemoGUIApp:
                     self.scenarios = self.load_scenarios_from_json(filepath=SCENARIOS_PATH)
 
                     if tool_name == "volume_segmenter_tool":
-                        # TODO Check to see if reduction is required and perform it if necessary
-                        pass
+                        # Check to see if reduction is required and perform it if necessary
+                        auto_reduce = self.reduce_var2.get()
+                        requires_reduction = self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"]
+                        is_reduced = self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]
+                        if auto_reduce and requires_reduction and not is_reduced:
+                            self.reduce_data()
                     # Update info labels
                     self.update_info_labels()
-                    # Update checkbox enable states
-                    self.update_checkbox_enable_state()
             else:
                 print(f"Error occurred in {tool_name}: {status}")
         except queue.Empty:
             # If no result yet, check again after 100ms
             self.root.after(100, self.check_queue)
+
+    def reduce_data(self):
+        print(f"Performing reduction on datasets for {self.active_scenario}")
+        self.update_info_labels()
+        pass
+
+    def update_reduction_button(self):
+        if self.active_scenario:
+            is_reduced = self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]
+            if is_reduced:
+                self.reduce_data_button.config(state="disabled", bg='darkgray')
+            else:
+                requires_reduction = self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"]
+                if requires_reduction:
+                    self.reduce_data_button.config(state="normal", bg='lightgreen')
+                else:
+                    self.reduce_data_button.config(state="normal", bg='lightgray')
 
 
     def update_scenario_from_checkboxes(self):
@@ -319,7 +342,6 @@ class DemoGUIApp:
 
             # Update info frame
             self.update_info_labels()
-            self.update_checkbox_enable_state()
         else:
             print("No active scenario to update.")
 
@@ -364,7 +386,10 @@ class DemoGUIApp:
             else:
                 self.reduce_var2.set(0)
                 # Optionally may reduce
-                self.reduce_checkbox2.config(state="normal")
+                if self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]:
+                    self.reduce_checkbox2.config(state="disabled")
+                else:
+                    self.reduce_checkbox2.config(state="normal")
 
             if self.scenarios[self.active_scenario]["PLOT_TYPE"].lower() == "both": # Plot both
                 self.gt_var.set(1)
@@ -380,7 +405,7 @@ class DemoGUIApp:
                 self.algo_var.set(0)
             self.ffp_var.set(1 if scenario_data.get("RESTRICTED_MODE", None) else 0)
             self.seg_var.set(1 if scenario_data.get("RUN_SEGMENTATION", None) else 0)
-            self.update_checkbox_enable_state()
+            self.update_info_labels()
         else:
             print(f"Unable to load scenario: {scenario_name}")
 
@@ -422,8 +447,12 @@ class DemoGUIApp:
             for idx, (key, value) in enumerate(scenario_data.items()):
                 value_label = tk.Label(self.right_info_frame, text=str(value), anchor="w", justify="left")
                 value_label.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
+            # Update other fields
+            self.update_reduction_button()
+            self.update_checkbox_enable_state()
         else:
             print("No active scenario to display.")
+        
 
     def on_closing(self):
         # Export scenarios json
