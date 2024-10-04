@@ -8,14 +8,20 @@ import time
 import tifffile as tif
 import numpy as np
 import random
+from PIL import Image, ImageTk
 import colorsys
 import os
 import alphashape
+import argparse
 from scipy.spatial import distance
 from shapely.geometry import LineString
+import json
+
 
 POINT_PRECISION = 2 # Lower = more precise clicks required, but can select ROIs in dense areas easier
 NUM_INTERPOLATION_POINTS = 75 # Higher = hopefully better, but more cost at the end (helps prevent overlap in new hulls)
+UP_BUTTON_IMG = "up_button.png"
+DOWN_BUTTON_IMG = "down_button.png"
 
 class VolumeSegmentationApp:
     def __init__(self, root):
@@ -51,47 +57,75 @@ class VolumeSegmentationApp:
         self.image_updated = False
         self.opened_listbox = None  # Track the currently opened listbox
 
+        # Load parameters if passed
+        self.parser = argparse.ArgumentParser(description="Set parameters for cell merger.")
+        self.parser.add_argument('--cell_data_path', help='Path to the cell data csv')
+        self.parser.add_argument('--tif_file_path', help='Path to the 3D .tif image file')
+        self.parser.add_argument('--scenarios_path', help = "Path to scenarios json file")
+        self.parser.add_argument('--active_scenario', help = "Name of the currently active scenario")
+        self.parser.add_argument('--autosave_exit_path', help='Path to export and save to on exit')
+        self.parser.add_argument('--up_img_path', help='Path to up button image')
+        self.parser.add_argument('--down_img_path', help='Path to down button image')
+        # Parse command-line arguments
+        self.input_args = self.parser.parse_args()
+
+        up_button_path = self.input_args.up_img_path or UP_BUTTON_IMG
+        down_button_path = self.input_args.down_img_path or DOWN_BUTTON_IMG
+
+        # Icons for z navigation buttons
+        self.up_button_img = ImageTk.PhotoImage(Image.open(up_button_path).resize((20, 20)))  
+        self.down_button_img = ImageTk.PhotoImage(Image.open(down_button_path).resize((20, 20))) 
+
         # Setup icons and GUI
         self.setup_gui()
 
+        # Load cell data and tif file if specified:
+        if self.input_args.cell_data_path and self.input_args.tif_file_path:
+            self.load_csv(path = self.input_args.cell_data_path)
+            self.load_tif_file(path = self.input_args.tif_file_path)
+
+
         # Hotkey bindings
-        self.root.bind("1", lambda event: self.prev_z())
-        self.root.bind("2", lambda event: self.next_z())
+        self.root.bind("q", lambda event: self.prev_z())
+        self.root.bind("w", lambda event: self.next_z())
         self.root.bind("m", lambda event: self.toggle_merge_mode())
         self.root.bind("n", lambda event: self.new_cluster())
         self.root.bind("z", lambda event: self.toggle_zoom())
         self.root.bind("t", lambda event: self.toggle_trash_mode())
+        self.root.bind("r", lambda event: self.reset_zoom())
         self.root.bind("<space>", lambda event: self.merge_selected_clusters())
+
+
 
     def setup_gui(self):
         # Create the menu bar
         menu_bar = tk.Menu(self.root)
         self.root.config(menu=menu_bar)
+        if not self.input_args.cell_data_path and not self.input_args.tif_file_path:
+            # File menu
+            file_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="File", menu=file_menu)
+            file_menu.add_command(label="Open CSV", command=self.load_csv)
+            file_menu.add_command(label="Open TIF", command=self.load_tif_file)
+        if not self.input_args.autosave_exit_path:
+            # Export menu
+            export_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="Export", menu=export_menu)
+            export_menu.add_command(label="Export ROI Data", command=self.export_roi_data)
 
-        # File menu
-        file_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open CSV", command=self.load_csv)
-        file_menu.add_command(label="Open TIF", command=self.load_tif_file)
-
-         # Export menu
-        export_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="Export", menu=export_menu)
-        export_menu.add_command(label="Export ROI Data", command=self.export_roi_data)
-
-        # Import menu
-        import_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="Import", menu=import_menu)
-        import_menu.add_command(label="Import GUI State", command=self.import_gui_state)
+            # Import menu
+            import_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="Import", menu=import_menu)
+            import_menu.add_command(label="Import GUI State", command=self.import_gui_state)
 
         # Navigation frame
         control_frame = tk.Frame(self.root)
         control_frame.pack(side=tk.TOP, fill=tk.X)
 
-        self.prev_button = tk.Button(control_frame, text="Previous Z", command=self.prev_z)
+        self.prev_button = tk.Button(control_frame, image=self.down_button_img, command=self.prev_z)
         self.prev_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.next_button = tk.Button(control_frame, text="Next Z", command=self.next_z)
+        self.next_button = tk.Button(control_frame, image=self.up_button_img, command=self.next_z)
         self.next_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Entry to jump to a specific z-plane
@@ -115,7 +149,7 @@ class VolumeSegmentationApp:
         self.trash_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Reset zoom button
-        self.reset_zoom_button = tk.Button(control_frame, text="Reset Zoom", command=self.reset_zoom)
+        self.reset_zoom_button = tk.Button(control_frame, text="Reset Zoom (r)", command=self.reset_zoom)
         self.reset_zoom_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Current ROI
@@ -249,10 +283,11 @@ class VolumeSegmentationApp:
 
         tk.messagebox.showinfo("Import Complete", "ROI and trash data have been successfully imported.")
 
-    def export_roi_data(self):
+    def export_roi_data(self, path = None):
         if self.data is None or self.data.empty:
             tk.messagebox.showerror("Error", "No data loaded to export.")
             return
+        print("Processing data to export...")
 
         # Make a copy of the original data
         export_data = self.data.copy()
@@ -329,12 +364,13 @@ class VolumeSegmentationApp:
                         export_data = pd.concat([export_data, new_rows], ignore_index=True)
 
         # Step 3: Save the final data to CSV
-        export_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+        export_path = path or filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
 
         if export_path:
             # Export the final data to CSV
             export_data.to_csv(export_path, index=False)
-            tk.messagebox.showinfo("Export Complete", f"CSV has been exported successfully to {export_path}.")
+            if not path:
+                tk.messagebox.showinfo("Export Complete", f"CSV has been exported successfully to {export_path}.")
         else:
             tk.messagebox.showerror("Error", "Export was cancelled or no file selected.")
 
@@ -343,8 +379,8 @@ class VolumeSegmentationApp:
 
 
     def export_gui_state(self, closing = False):
-        if self.data is None or self.data.empty and not closing:
-            tk.messagebox.showerror("Error", "No data loaded to export.")
+        if (self.data is None or self.data.empty):
+            print("No data loaded when exporting GUI data")
             return
 
         # Create debug directory if it doesn't exist
@@ -541,9 +577,21 @@ class VolumeSegmentationApp:
         if self.zoom_selector:
             self.zoom_selector.set_visible(False)
             self.ax.figure.canvas.draw_idle()
+            self.toggle_zoom()
+            self.toggle_merge_mode()
 
     def on_closing(self):
         self.export_gui_state(closing = True)
+        # Autosave if necessary
+        if len(self.rois_per_z) > 0 and self.input_args.autosave_exit_path and self.input_args.scenarios_path and self.input_args.active_scenario:
+            self.export_roi_data(path = self.input_args.autosave_exit_path)
+            with open(self.input_args.scenarios_path, 'r') as file:
+                scenarios = json.load(file)
+            # Update path to segmentation input file
+            scenarios[self.input_args.active_scenario]["SEG_IN_FILE"] = self.input_args.autosave_exit_path
+            # Export result
+            with open(self.input_args.scenarios_path, 'w') as file:
+                json.dump(scenarios, file, indent=4)
         self.root.quit()
         self.root.destroy()
 
@@ -552,9 +600,9 @@ class VolumeSegmentationApp:
         self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all"))
         self.sidebar_canvas.yview_moveto(self.current_scroll_position[0])
 
-    def load_csv(self):
+    def load_csv(self, path = None):
         # Load CSV file
-        self.csv_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        self.csv_path = path or filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if self.csv_path:
             self.data = pd.read_csv(self.csv_path)
             self.data.columns = self.data.columns
@@ -573,8 +621,8 @@ class VolumeSegmentationApp:
             
             self.update_display()
 
-    def load_tif_file(self):
-        self.tif_path = filedialog.askopenfilename(filetypes=[("TIF Files", "*.tif")])
+    def load_tif_file(self, path = None):
+        self.tif_path = path or filedialog.askopenfilename(filetypes=[("TIF Files", "*.tif")])
         if self.tif_path:
             self.image_stack = tif.imread(self.tif_path)
             self.current_z = 0
@@ -611,7 +659,7 @@ class VolumeSegmentationApp:
                     else:
                         cl_points  = clusters[clusters['ROI_ID'] == cl_id][['x', 'y']].values
                         color_index = hash(cl_id) % 256
-                        color = unassociated_color_map(color_index / 256)
+                        color = 'white'
                         self.ax.plot(cl_points[:, 0], cl_points[:, 1], label=f'CLUSTER {cl_id}', color=color)
 
                     self.cluster_modified[self.current_z][cl_id] = False
@@ -625,9 +673,9 @@ class VolumeSegmentationApp:
             if not self.ax.yaxis_inverted():
                 self.ax.invert_yaxis()
             self.canvas.draw()
-            self.z_label.config(text=f"Z: {self.current_z}/{self.image_stack.shape[0] - 1}")
             self.z_entry.delete(0, tk.END)
             self.z_entry.insert(0, str(self.current_z))
+            self.z_label.config(text=f"Z: {self.current_z}/{self.image_stack.shape[0] - 1}")
 
     def toggle_merge_mode(self):
         self.merge_mode = not self.merge_mode
@@ -967,11 +1015,12 @@ class VolumeSegmentationApp:
 
     def on_slider_release(self, event):
         """Update brightness when the slider is released."""
-        self.brightness_factor = self.brightness_slider.get()
-        self.image_updated = True
-        for cl_id in self.cluster_modified[self.current_z]:
-                    self.cluster_modified[self.current_z][cl_id] = True
-        self.update_display()
+        if self.image_stack is not None and self.data is not None and 0 <= self.current_z < self.image_stack.shape[0]:
+            self.brightness_factor = self.brightness_slider.get()
+            self.image_updated = True
+            for cl_id in self.cluster_modified[self.current_z]:
+                        self.cluster_modified[self.current_z][cl_id] = True
+            self.update_display()
 
 if __name__ == "__main__":
     root = tk.Tk()

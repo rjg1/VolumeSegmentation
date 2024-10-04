@@ -6,16 +6,16 @@ import random
 import os
 
 # Configuration
-RUN_FOLDER = './validation_runs'
-DATA_FOLDER = 'test_1'
+DATA_FOLDER = './validation_runs/test_1'
 CSV_FILENAME = 'real_data_filtered_1_VOLUMES.csv'  # Ground truth CSV file path 
 PLOT_TITLE = f'Plot of Ground Truth data for dataset: {DATA_FOLDER}'
-MAX_POINTS = 25000 # Maximum points to sample
+MAX_POINTS = 10000 # Maximum points to sample
 
 def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
     # Read CSV file into a pandas DataFrame
     df = pd.read_csv(filename)
+    df = df[df['VOLUME_ID'] != -1] # Filter noise points
 
     # Display the first few rows to check data
     # print("Loaded Data Preview:")
@@ -62,7 +62,6 @@ def visualize_points(df, colors, title):
 
     # Plot the points with the assigned colors
     ax.scatter(x, y, z, c=colors, s=1)
-    ax.legend(labels=colors[0])
 
     # Set labels and show plot
     ax.set_xlabel('X')
@@ -80,7 +79,6 @@ def main():
     parser = argparse.ArgumentParser(description="View a single set of volumes.")
     
     # Add arguments for file paths
-    parser.add_argument('--run_folder', default=RUN_FOLDER, help='Directory for validation runs (default: %(default)s)')
     parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
     parser.add_argument('--csv_filename', default=CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--plot_title', default=PLOT_TITLE, help='Title for plot (default: %(default)s)')
@@ -89,11 +87,11 @@ def main():
     args = parser.parse_args()
     
     # Use the parsed arguments or fallback to the defaults if no arguments are provided
-    run_folder = args.run_folder or RUN_FOLDER
     data_folder = args.data_folder or DATA_FOLDER
+    print(f"data folder: {data_folder}")
     csv_filename = args.csv_filename or CSV_FILENAME
     plot_title = args.plot_title or PLOT_TITLE
-    csv_path = os.path.join(run_folder, data_folder, csv_filename)
+    csv_path = os.path.join(data_folder, csv_filename)
     # Load and sample the data
     sampled_df = load_and_sample_data(csv_path)
 

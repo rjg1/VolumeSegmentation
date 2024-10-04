@@ -7,8 +7,18 @@ from matplotlib.widgets import RectangleSelector
 from PIL import Image, ImageTk
 import tifffile as tif
 import numpy as np
+import argparse
 import colorsys
+import json
+import os
 import random
+
+POINT_PRECISION = 2
+EYE_OPEN_IMG = "eye_open.png"
+EYE_CLOSED_IMG = "eye_closed.png"
+UP_BUTTON_IMG = "up_button.png"
+DOWN_BUTTON_IMG = "down_button.png"
+
 
 class VolumeSegmentationApp:
     def __init__(self, root):
@@ -28,7 +38,9 @@ class VolumeSegmentationApp:
         self.image_stack = None
         self.current_volume = None
         self.selected_rois = {}  # Tracks ROIs associated with volumes
+        self.roi_modified = {} # Tracks whether an ROI has been updated
         self.zoom_enabled = False
+        self.image_updated = False
         self.zoom_selector = None
         self.stored_xlim = None  # To store x-axis limits for persistent zoom
         self.stored_ylim = None  # To store y-axis limits for persistent zoom
@@ -39,17 +51,60 @@ class VolumeSegmentationApp:
         self.current_scroll_position = (0, 0)  # Initialize scroll position tracker
         self.volume_elements = {}  # Track volume elements in sidebar
         self.brightness_factor = 1.0  # Initialize brightness factor
+        self.plotted_rois = {} # Dictionary of ROIs in the plot
+        
+        # Load parameters if passed
+        self.parser = argparse.ArgumentParser(description="Set parameters for cell merger.")
+        self.parser.add_argument('--cell_data_path', help='Path to the cell data csv')
+        self.parser.add_argument('--tif_file_path', help='Path to the 3D .tif image file')
+        self.parser.add_argument('--scenarios_path', help = "Path to scenarios json file")
+        self.parser.add_argument('--active_scenario', help = "Name of the currently active scenario")
+        self.parser.add_argument('--autosave_exit_path', help='Path to export and save to on exit')
+        self.parser.add_argument('--up_img_path', help='Path to up button image')
+        self.parser.add_argument('--down_img_path', help='Path to down button image')
+        self.parser.add_argument('--eye_open_img_path', help='Path to eye open image')
+        self.parser.add_argument('--eye_closed_img_path', help='Path to eye closed image')
+        # Parse command-line arguments
+        self.input_args = self.parser.parse_args()
 
+        up_button_path = self.input_args.up_img_path or UP_BUTTON_IMG
+        down_button_path = self.input_args.down_img_path or DOWN_BUTTON_IMG
+        eye_open_path = self.input_args.eye_open_img_path or EYE_OPEN_IMG
+        eye_closed_path = self.input_args.eye_closed_img_path or EYE_CLOSED_IMG
 
         # Icons for visibility toggle
-        self.eye_open_img = ImageTk.PhotoImage(Image.open("eye_open.png").resize((15, 15))) 
-        self.eye_closed_img = ImageTk.PhotoImage(Image.open("eye_closed.png").resize((15, 15))) 
+        self.eye_open_img = ImageTk.PhotoImage(Image.open(eye_open_path).resize((15, 15))) 
+        self.eye_closed_img = ImageTk.PhotoImage(Image.open(eye_closed_path).resize((15, 15))) 
 
         # Icons for z navigation buttons
-        self.up_button_img = ImageTk.PhotoImage(Image.open("up_button.png").resize((20, 20)))  
-        self.down_button_img = ImageTk.PhotoImage(Image.open("down_button.png").resize((20, 20))) 
+        self.up_button_img = ImageTk.PhotoImage(Image.open(up_button_path).resize((20, 20)))  
+        self.down_button_img = ImageTk.PhotoImage(Image.open(down_button_path).resize((20, 20))) 
+        
         # Setup GUI
         self.setup_gui()
+
+        # Load cell data and tif file if specified:
+        if self.input_args.cell_data_path and self.input_args.tif_file_path:
+
+            with open(self.input_args.scenarios_path, 'r') as file:
+                scenarios = json.load(file)
+            if scenarios[self.input_args.active_scenario]["HAS_VALIDATION"]:
+                # Importing past manual segmentation
+                print("Importing past manual volume segmentation")
+                import_path = os.path.join(scenarios[self.input_args.active_scenario]["V_DATA_FOLDER"], self.input_args.cell_data_path)
+                self.import_segmentation(path = import_path)
+            else:
+                # Starting new manual segmentation
+                print("Starting new manual volume segmentation")
+                self.load_csv(path = self.input_args.cell_data_path)
+            self.load_tif_file(path = self.input_args.tif_file_path)
+
+        # Bind hotkeys
+        self.root.bind("q", lambda event: self.prev_z())
+        self.root.bind("w", lambda event: self.next_z())
+        self.root.bind("z", lambda event: self.toggle_zoom())
+        self.root.bind("n", lambda event: self.create_new_volume())
+        self.root.bind("r", lambda event: self.reset_zoom())
 
     def setup_gui(self):
         # Create the menu bar
@@ -57,20 +112,22 @@ class VolumeSegmentationApp:
         self.root.config(menu=menu_bar)
 
         # Create the File menu
-        file_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open CSV", command=self.load_csv)
-        file_menu.add_command(label="Open TIF", command=self.load_tif_file)
+        if not self.input_args.cell_data_path and not self.input_args.tif_file_path:
+            file_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="File", menu=file_menu)
+            file_menu.add_command(label="Open CSV", command=self.load_csv)
+            file_menu.add_command(label="Open TIF", command=self.load_tif_file)
 
-        # Create the Import menu
-        import_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="Import", menu=import_menu)
-        import_menu.add_command(label="Import Segmentation", command=self.import_segmentation)
+        if not self.input_args.autosave_exit_path:
+            # Create the Import menu
+            import_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="Import", menu=import_menu)
+            import_menu.add_command(label="Import Segmentation", command=self.import_segmentation)
 
-        # Create the Export menu
-        export_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="Export", menu=export_menu)
-        export_menu.add_command(label="Export CSV", command=self.export_csv)
+            # Create the Export menu
+            export_menu = tk.Menu(menu_bar, tearoff=0)
+            menu_bar.add_cascade(label="Export", menu=export_menu)
+            export_menu.add_command(label="Export CSV", command=self.export_csv)
 
         # Frame for controls
         control_frame = tk.Frame(self.root)
@@ -93,15 +150,15 @@ class VolumeSegmentationApp:
         self.z_label.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Zoom button with toggle effect
-        self.zoom_button = tk.Button(control_frame, text="Zoom", command=self.toggle_zoom, bg='lightgray')
+        self.zoom_button = tk.Button(control_frame, text="Zoom (z)", command=self.toggle_zoom, bg='lightgray')
         self.zoom_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Reset zoom button
-        self.reset_zoom_button = tk.Button(control_frame, text="Reset Zoom", command=self.reset_zoom)
+        self.reset_zoom_button = tk.Button(control_frame, text="Reset Zoom (r)", command=self.reset_zoom)
         self.reset_zoom_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # New Volume button moved to control frame
-        self.new_volume_button = tk.Button(control_frame, text="New Volume", command=self.create_new_volume)
+        self.new_volume_button = tk.Button(control_frame, text="New Volume (n)", command=self.create_new_volume)
         self.new_volume_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Sidebar for volume management with scrollbar
@@ -147,13 +204,22 @@ class VolumeSegmentationApp:
         self.update_display()  # Redraw the image with the new brightness
 
 
-    def load_csv(self):
+    def load_csv(self, path = None):
         # Load CSV file
-        self.csv_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if not path:
+            self.csv_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        else:
+            self.csv_path = path
         if self.csv_path:
             self.data = pd.read_csv(self.csv_path)
-            self.data.columns = self.data.columns#.str.lower()  # Normalize column names
+            self.data.columns = self.data.columns
             self.current_z = self.data['z'].min()
+
+            for z_level in self.data['z'].unique():
+                self.roi_modified[z_level] = {}
+                roi_ids = self.data[self.data['z'] == z_level]['ROI_ID'].unique()
+                for roi_id in roi_ids:
+                    self.roi_modified[z_level][roi_id] = True
             self.update_display()
 
     def configure_scroll_region(self, event=None):
@@ -166,9 +232,12 @@ class VolumeSegmentationApp:
         self.scroll_manually_adjusted = True
         self.sidebar_canvas.yview(*args)
 
-    def load_tif_file(self):
+    def load_tif_file(self, path = None):
         # Load .tif file
-        self.tif_path = filedialog.askopenfilename(filetypes=[("TIF Files", "*.tif"), ("TIFF Files", "*.tiff")])
+        if not path:
+            self.tif_path = filedialog.askopenfilename(filetypes=[("TIF Files", "*.tif"), ("TIFF Files", "*.tiff")])
+        else:
+            self.tif_path = path
         if self.tif_path:
             # Reset zoom settings
             if self.image_stack is not None and self.image_stack.size > 0:
@@ -178,45 +247,63 @@ class VolumeSegmentationApp:
                 if self.zoom_selector:
                     self.zoom_selector.set_active(False)
 
+            self.image_updated = True
             self.image_stack = tif.imread(self.tif_path)
             self.current_z = 0  # Start at the first z-plane
             self.update_display()
 
 
-    def update_display(self):
+    def update_display(self, z_changed = False):
         if self.image_stack is not None and self.data is not None:
             # Get the current z-plane image
             if 0 <= self.current_z < self.image_stack.shape[0]:
-                img = self.image_stack[self.current_z]
-                # Apply brightness adjustment
-                img = np.clip(img * self.brightness_factor, 0, 255).astype(np.uint8)
-
-                self.ax.clear()
-                self.ax.imshow(img)
+                if self.image_updated or z_changed:
+                    img = self.image_stack[self.current_z]
+                    # Apply brightness adjustment
+                    img = np.clip(img * self.brightness_factor, 0, 255).astype(np.uint8)
+                    self.plotted_rois = {}
+                    self.ax.clear()
+                    self.ax.imshow(img)
+                    self.image_updated = False
 
                 # Overlay ROIs with color coding based on volume association and visibility
                 rois = self.data[self.data['z'] == self.current_z]
                 associated_rois = {roi for volume in self.volumes.values() for roi in volume}
-                associated_color_map = plt.colormaps['Blues']
-                unassociated_color_map = plt.colormaps['Reds']
 
-                # Plot ROIs that have no volume
+                # Plot ROIs without a volume
                 for roi_id in rois['ROI_ID'].unique():
-                    if (roi_id, self.current_z) not in associated_rois:
+                    if (roi_id, self.current_z) not in associated_rois and self.roi_modified[self.current_z][roi_id]:  # Plot only if not already plotted
+                         # Remove existing plot value if it exists
+                        if (roi_id, self.current_z) in self.plotted_rois: 
+                            self.plotted_rois[(roi_id, self.current_z)].remove()  # Remove the plot line
+                            del self.plotted_rois[(roi_id, self.current_z)]  # Delete the reference
                         roi_points = rois[rois['ROI_ID'] == roi_id][['x', 'y']].values
-                        color_index = hash(roi_id) % 256
-                        color = unassociated_color_map(color_index / 256)
-                        self.ax.plot(roi_points[:, 0], roi_points[:, 1], label=f'ROI {roi_id}', color=color)
-
-                # Plot ROIs that have a visible volume
+                        color = 'white'
+                        line, = self.ax.plot(roi_points[:, 0], roi_points[:, 1], label=f'ROI {roi_id}', color=color)
+                        self.plotted_rois[(roi_id, self.current_z)] = line
+                        self.roi_modified[self.current_z][roi_id] = False
+                # Plot ROIs with a volume
                 for volume_id, rois_set in self.volumes.items():
-                    if self.volume_visibility.get(volume_id, True):
-                        for roi_id, z_level in sorted(rois_set, key=lambda x: x[1]):
-                            if z_level == self.current_z:
+                    visible = self.volume_visibility.get(volume_id, True)
+                    for roi_id, z_level in sorted(rois_set, key=lambda x: x[1]):
+                        if z_level == self.current_z:
+                            if self.roi_modified[self.current_z][roi_id] and visible:  # Plot only if modified
+                                # Remove existing plot value if it exists
+                                if (roi_id, self.current_z) in self.plotted_rois: 
+                                    # print(f"Removing previous ref to: {roi_id}")
+                                    self.plotted_rois[(roi_id, self.current_z)].remove()  # Remove the plot line
+                                    del self.plotted_rois[(roi_id, self.current_z)]  # Delete the reference
+                                # print(f"Drawing roi: {roi_id}")
                                 roi_points = rois[rois['ROI_ID'] == roi_id][['x', 'y']].values
                                 vol_colour = self.volume_colours.get(volume_id, 'lightgray')
-                                self.ax.plot(roi_points[:, 0], roi_points[:, 1], label=f'ROI {roi_id}', color=vol_colour)
-
+                                # Store new value
+                                line, = self.ax.plot(roi_points[:, 0], roi_points[:, 1], label=f'ROI {roi_id}', color=vol_colour)
+                                self.plotted_rois[(roi_id, self.current_z)] = line 
+                                self.roi_modified[self.current_z][roi_id] = False # Don't replot until next update
+                            elif not visible and (roi_id, self.current_z) in self.plotted_rois:
+                                # print(f"Turning off roi: {roi_id}")
+                                self.plotted_rois[(roi_id, self.current_z)].remove()  # Remove the plot line
+                                del self.plotted_rois[(roi_id, self.current_z)]  # Delete the reference
                 # Reapply the stored zoom limits if available
                 if self.stored_xlim and self.stored_ylim:
                     self.ax.set_xlim(self.stored_xlim)
@@ -234,13 +321,25 @@ class VolumeSegmentationApp:
 
     def prev_z(self):
         if self.image_stack is not None:
+            old_current_z = self.current_z
             self.current_z = max(0, self.current_z - 1)
-            self.update_display()
+            if self.current_z != old_current_z:
+                # Re-draw rois when this plane is re-visited
+                for roi_id in self.roi_modified[old_current_z]:
+                    self.roi_modified[old_current_z][roi_id] = True
+
+                self.update_display(z_changed = True)
 
     def next_z(self):
         if self.image_stack is not None:
+            old_current_z = self.current_z
             self.current_z = min(self.image_stack.shape[0] - 1, self.current_z + 1)
-            self.update_display()
+            if self.current_z != old_current_z:
+                # Re-draw rois when this plane is re-visited
+                for roi_id in self.roi_modified[old_current_z]:
+                    self.roi_modified[old_current_z][roi_id] = True
+
+                self.update_display(z_changed = True)
 
     def on_roi_select(self, event, volume_id):
         listbox = event.widget
@@ -251,23 +350,41 @@ class VolumeSegmentationApp:
         selected_roi = listbox.get(selection[0])
         roi_id, z_level = map(int, selected_roi.replace("ROI ", "").split(", Z: "))
 
+        old_z = self.current_z
         self.current_z = z_level
-
         roi_points = self.data[(self.data['ROI_ID'] == roi_id) & (self.data['z'] == z_level)][['x', 'y']].values
         if roi_points.size > 0:
-            x_min, x_max = roi_points[:, 0].min(), roi_points[:, 0].max()
-            y_min, y_max = roi_points[:, 1].min(), roi_points[:, 1].max()
+                x_min, x_max = roi_points[:, 0].min(), roi_points[:, 0].max()
+                y_min, y_max = roi_points[:, 1].min(), roi_points[:, 1].max()
 
-            self.stored_xlim = (x_min - 100, x_max + 100)
-            self.stored_ylim = (y_max + 100, y_min - 100)
+                self.stored_xlim = (x_min - 100, x_max + 100)
+                self.stored_ylim = (y_max + 100, y_min - 100)
 
-            self.ax.set_xlim(self.stored_xlim)
-            self.ax.set_ylim(self.stored_ylim)
-            self.canvas.draw_idle()
-        
-        self.update_display()
+                self.ax.set_xlim(self.stored_xlim)
+                self.ax.set_ylim(self.stored_ylim)
+                self.canvas.draw_idle()
+        if old_z != self.current_z:
+            for roi_id in self.roi_modified[old_z]:
+                    self.roi_modified[old_z][roi_id] = True
+            self.update_display(z_changed=True)
+        else:
+            self.update_display()
+            
 
     def on_closing(self):
+        # Volumes exist, perform export
+        if len(self.volumes) > 0 and self.input_args.autosave_exit_path:
+            self.export_csv(export_path=self.input_args.autosave_exit_path)
+            # Get scenarios dict
+            with open(self.input_args.scenarios_path, 'r') as file:
+                scenarios = json.load(file)
+            # Update path to validation file
+            scenarios[self.input_args.active_scenario]["V_GT_CSV"] = self.input_args.autosave_exit_path
+            scenarios[self.input_args.active_scenario]["HAS_VALIDATION"] = True
+            # Export result
+            with open(self.input_args.scenarios_path, 'w') as file:
+                json.dump(scenarios, file, indent=4)
+
         self.root.quit()
         self.root.destroy()
 
@@ -276,8 +393,11 @@ class VolumeSegmentationApp:
             try:
                 z_value = int(self.z_entry.get())
                 if 0 <= z_value < self.image_stack.shape[0]:
+                    # Re-draw rois when this plane is re-visited
+                    for roi_id in self.roi_modified[self.current_z]:
+                        self.roi_modified[self.current_z][roi_id] = True
                     self.current_z = z_value
-                    self.update_display()
+                    self.update_display(z_changed = True)
                 else:
                     tk.messagebox.showerror("Invalid Z-Plane", "Z-plane out of range.")
             except ValueError:
@@ -327,6 +447,7 @@ class VolumeSegmentationApp:
         if self.zoom_selector:
             self.zoom_selector.set_visible(False)
             self.ax.figure.canvas.draw_idle()
+            self.toggle_zoom()
         
 
     def reset_zoom(self):
@@ -487,6 +608,8 @@ class VolumeSegmentationApp:
 
     def toggle_visibility(self, volume_id):
         self.volume_visibility[volume_id] = not self.volume_visibility[volume_id]
+        for roi_id in self.roi_modified[self.current_z]:
+            self.roi_modified[self.current_z][roi_id] = True # Redraw when visible
         self.update_volume_sidebar(preserve_scroll=True)
         self.update_display()
 
@@ -516,7 +639,7 @@ class VolumeSegmentationApp:
                 roi_points = rois[rois['ROI_ID'] == roi_id][['x', 'y']].values
                 distances = np.sqrt((roi_points[:, 0] - x_click) ** 2 + (roi_points[:, 1] - y_click) ** 2)
                 existing_rois = self.volumes.get(self.current_volume, set())
-                if np.any(distances < 2):  # Tolerance for point selection
+                if np.any(distances < POINT_PRECISION):  # Tolerance for point selection
                     roi = (roi_id, self.current_z)
                     associated_volume = self.roi_to_volume.get(roi)
                     if associated_volume == None and self.current_volume == None: ## TODO test
@@ -526,6 +649,7 @@ class VolumeSegmentationApp:
                         self.volumes[associated_volume].remove(roi)
                         del self.roi_to_volume[roi]
                         print(f"ROI {roi_id} disassociated from {associated_volume}")
+                        self.roi_modified[self.current_z][roi_id] = True
                         # tk.messagebox.showinfo("Info", f"ROI {roi_id} disassociated from {associated_volume}.")
                     elif roi in existing_rois:
                         print(f"ROI is already in {self.current_volume}")
@@ -539,6 +663,7 @@ class VolumeSegmentationApp:
                         # Associate the ROI with the current volume
                         self.volumes[self.current_volume].add(roi)
                         self.roi_to_volume[roi] = self.current_volume
+                        self.roi_modified[self.current_z][roi_id] = True
                         # tk.messagebox.showinfo("Info", f"ROI {roi_id} associated with {self.current_volume}.")
 
                     # Update display and sidebar
@@ -546,15 +671,14 @@ class VolumeSegmentationApp:
                     self.update_volume_sidebar()
                     break
     
-    def import_segmentation(self):
+    def import_segmentation(self, path = None):
         """Import a segmentation CSV file and update the volume dictionary."""
-        segmentation_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        segmentation_path = path or filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if segmentation_path:
             # Read the CSV file containing segmentation data
             segmentation_data = pd.read_csv(segmentation_path)
-
             # Check if the CSV has the required columns
-            required_columns = {'ROI_ID', 'z', 'x', 'y', 'VOLUME_ID'}
+            required_columns = {'x', 'y', 'z', 'ROI_ID', 'VOLUME_ID'}
             if not required_columns.issubset(segmentation_data.columns):
                 tk.messagebox.showerror("Error", "The segmentation file is missing required columns.")
                 return
@@ -566,6 +690,9 @@ class VolumeSegmentationApp:
 
             # Reset data structures to avoid conflicts with previous data
             self.volumes = {}
+            self.plotted_rois = {}
+            self.image_updated = True
+            self.roi_modified = {}
             self.roi_to_volume = {}
             self.volume_visibility = {}
             self.volume_colours = {}
@@ -596,6 +723,13 @@ class VolumeSegmentationApp:
             self.data = segmentation_data.drop(columns=['VOLUME_ID'])
             self.current_z = self.data['z'].min()  # Set current Z to the lowest value in the data
 
+            # Reset roi modified dict
+            for z_level in self.data['z'].unique():
+                self.roi_modified[z_level] = {}
+                roi_ids = self.data[self.data['z'] == z_level]['ROI_ID'].unique()
+                for roi_id in roi_ids:
+                    self.roi_modified[z_level][roi_id] = True
+
             # Reset zoom settings
             if self.image_stack is not None and self.image_stack.size > 0:
                 self.reset_zoom()
@@ -608,14 +742,15 @@ class VolumeSegmentationApp:
             self.current_volume = None
             self.update_volume_sidebar()
             self.update_display()
-            tk.messagebox.showinfo("Import Complete", "Segmentation data imported successfully.")
+            if not path:
+                tk.messagebox.showinfo("Import Complete", "Segmentation data imported successfully.")
         else:
             tk.messagebox.showerror("Error", "No file selected.")
 
 
-    def export_csv(self):
+    def export_csv(self, export_path):
         # Export the modified CSV with numerical VOLUME_IDs
-        if self.csv_path:
+        if self.data is not None:
             # Create a mapping of volume names to numerical IDs
             volume_name_to_id = {volume_name: idx + 1 for idx, volume_name in enumerate(self.volumes.keys())}
 
@@ -624,9 +759,9 @@ class VolumeSegmentationApp:
             export_data['VOLUME_ID'] = export_data.apply(
                 lambda row: volume_name_to_id.get(self.roi_to_volume.get((row['ROI_ID'], row['z']), ''), -1), axis=1
             )
-
-            # Prompt the user to select the save location for the CSV
-            export_path = filedialog.asksaveasfilename(defaultextension=".csv",
+            if not export_path:
+                # Prompt the user to select the save location for the CSV
+                export_path = filedialog.asksaveasfilename(defaultextension=".csv",
                                                     filetypes=[("CSV Files", "*.csv")])
             if export_path:
                 export_data.to_csv(export_path, index=False)

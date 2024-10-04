@@ -5,8 +5,7 @@ from math import isclose
 import os
 import argparse
 
-RUN_FOLDER = './validation_runs'
-DATA_FOLDER = 'drg_subset_1_r'
+DATA_FOLDER = './validation_runs/drg_subset_1_r'
 GT_CSV_FILENAME = 'real_data_filtered_v0_VOLUMES.csv'  # Ground truth CSV file path
 ALGO_CSV_FILENAME = 'real_data_filtered_algo_VOLUMES.csv'  # Algorithmic CSV file path
 MAPPING_FILENAME = 'mapping.csv'
@@ -16,6 +15,8 @@ def load_data(ground_truth_path, algorithmic_path):
     Load ground truth and algorithmic segmentation data from CSV files.
     """
     ground_truth_df = pd.read_csv(ground_truth_path)
+    # Filter noise values from ground truth if any
+    ground_truth_df = ground_truth_df[ground_truth_df['VOLUME_ID'] != -1]
     algorithmic_df = pd.read_csv(algorithmic_path)
     return ground_truth_df, algorithmic_df
 
@@ -176,7 +177,6 @@ def main():
     parser = argparse.ArgumentParser(description="Run the overlap calculation and accuracy analysis.")
     
     # Add arguments for file paths
-    parser.add_argument('--run_folder', default=RUN_FOLDER, help='Directory for validation runs (default: %(default)s)')
     parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
     parser.add_argument('--gt_csv', default=GT_CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--algo_csv', default=ALGO_CSV_FILENAME, help='Algorithmic CSV file (default: %(default)s)')
@@ -186,16 +186,15 @@ def main():
     args = parser.parse_args()
     
     # Use the parsed arguments or fallback to the defaults if no arguments are provided
-    run_folder = args.run_folder or RUN_FOLDER
     data_folder = args.data_folder or DATA_FOLDER
     gt_csv_filename = args.gt_csv or GT_CSV_FILENAME
     algo_csv_filename = args.algo_csv or ALGO_CSV_FILENAME
     mapping_filename = args.mapping_csv or MAPPING_FILENAME
 
     # Construct file paths
-    gt_csv_path = os.path.join(run_folder, data_folder, gt_csv_filename)
-    algo_csv_path = os.path.join(run_folder, data_folder, algo_csv_filename)
-    mapping_csv_path = os.path.join(run_folder, data_folder, mapping_filename)
+    gt_csv_path = os.path.join(data_folder, gt_csv_filename)
+    algo_csv_path = os.path.join(data_folder, algo_csv_filename)
+    mapping_csv_path = os.path.join(data_folder, mapping_filename)
 
     ground_truth_df, algorithmic_df = load_data(gt_csv_path, algo_csv_path)
     overlap_matrix, gt_volume_ids, alg_volume_ids, ground_truth_volumes, algorithmic_volumes = create_overlap_matrix(ground_truth_df, algorithmic_df)

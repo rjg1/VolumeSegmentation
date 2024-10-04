@@ -13,8 +13,7 @@ SEG_XZ_IO_FILE = 'xz_cache/real_data_filtered_v0_ROIS_XZ.csv' # File to import/g
 RESTRICTED_MODE = True # Whether to use DRG segmentation technique
 # VALIDATION / VISUALISATION DEFAULT SCRIPT PARAMETERS
 VALIDATION_DIR = '../VALIDATION/' # Relative path to validation folder
-V_SUBFOLDER = 'validation_runs' # Subfolder containing all run data in /VALIDATION_DIR/
-V_DATA_FOLDER = 'drg_subset_1_r' # Folder holding the data in /VALIDATION_DIR/V_SUBFOLDER/
+V_DATA_FOLDER = 'validation_runs/drg_subset_1_r' # Folder holding the data in /VALIDATION_DIR/V_SUBFOLDER/
 V_GT_CSV = 'real_data_filtered_v0_VOLUMES.csv' # Filename of ground truth segmentation in /VALIDATION_DIR/V_SUBFOLDER/V_DATA_FOLDER
 V_ALGO_CSV = 'real_data_filtered_algo_VOLUMES.csv' # Filename of algorithmic segmentation result in /VALIDATION_DIR/V_SUBFOLDER/V_DATA_FOLDER
 V_MAPPING_CSV = 'mapping.csv' # Output mapping file to place in /VALIDATION_DIR/V_SUBFOLDER/V_DATA_FOLDER
@@ -33,7 +32,7 @@ def main():
     # Load parameter set from json file
     scenario_filepath = args.scenarios_file or SCENARIO_FILEPATH
     active_scenario = args.scenario_name or ACTIVE_SCENARIO
-    parameters = load_parameters_from_json(scenario_filepath, active_scenario) or {}
+    all_scenarios, parameters = load_parameters_from_json(scenario_filepath, active_scenario) or {}
     # SCRIPT OPERATION METADATA
     has_validation = parameters.get("HAS_VALIDATION", HAS_VALIDATION)
     has_algorithmic = parameters.get("HAS_ALGORITHMIC", HAS_ALGORITHMIC)
@@ -42,18 +41,21 @@ def main():
     # SEGMENTATION SCRIPT PARAMETERS
     segmentation_dir = parameters.get("SEGMENTATION_DIR", SEGMENTATION_DIR)
     seg_script_path = os.path.join(segmentation_dir, 'volume_segmentation.py')
-    seg_in_file = os.path.join(segmentation_dir, parameters.get("SEG_IN_FILE", SEG_IN_FILE))
-    seg_xz_cache_file = os.path.join(segmentation_dir, parameters.get("SEG_XZ_IO_FILE", SEG_XZ_IO_FILE))
+    seg_in_file = parameters.get("SEG_IN_FILE", SEG_IN_FILE)
+    seg_xz_cache_file = parameters.get("SEG_XZ_IO_FILE", SEG_XZ_IO_FILE)
     restricted_mode = parameters.get("RESTRICTED_MODE", RESTRICTED_MODE)
     # VALIDATION / VISUALISATION SCRIPT PARAMETERS
     validation_dir = parameters.get("VALIDATION_DIR", VALIDATION_DIR)
-    v_subfolder = parameters.get("V_SUBFOLDER", V_SUBFOLDER)
     v_data_folder = parameters.get("V_DATA_FOLDER", V_DATA_FOLDER)
     v_gt_csv = parameters.get("V_GT_CSV", V_GT_CSV)
     v_algo_csv = parameters.get("V_ALGO_CSV", V_ALGO_CSV)
     v_mapping_csv = parameters.get("V_MAPPING_CSV", V_MAPPING_CSV)
     
-    seg_out_file = os.path.join(validation_dir, v_subfolder, v_data_folder, v_algo_csv)
+    # Determine output file for segmentation
+    if has_algorithmic: # Already has an algorithmic path - use this
+        seg_out_file = os.path.join(v_data_folder, v_algo_csv)
+    else: # Create algorithmic path for demo file
+        seg_out_file = os.path.join("./demo_data/", active_scenario, active_scenario + "_algo_VOLUMES.csv")
 
     seg_args = [
         'python', seg_script_path,
@@ -63,7 +65,6 @@ def main():
         '--restricted_mode', str(restricted_mode)
     ]
 
-    v_run_folder = os.path.join(validation_dir, v_subfolder)
     v_script_path = os.path.join(validation_dir, 'v5.py')
     v_vis_script_path = os.path.join(validation_dir, 'plot_comparison.py')
     v_single_script_path = os.path.join(validation_dir, 'plot_output.py')
@@ -71,7 +72,6 @@ def main():
     # Argument list for validation script
     v_args = [
         'python', v_script_path, 
-        '--run_folder', v_run_folder,
         '--data_folder', v_data_folder,
         '--gt_csv', v_gt_csv,
         '--algo_csv', v_algo_csv,
@@ -81,7 +81,6 @@ def main():
     # Argument list for comparison visualisation script
     v_vis_args = [
         'python', v_vis_script_path,  
-        '--run_folder', v_run_folder,
         '--data_folder', v_data_folder,
         '--gt_csv', v_gt_csv,
         '--algo_csv', v_algo_csv,
@@ -93,6 +92,12 @@ def main():
         if run_segmentation:
             print(f"Segmentation script arguments: {seg_args}")
             subprocess.run(seg_args, check=True)
+            # Update json to point to new algo output csv
+            all_scenarios[active_scenario]["HAS_ALGORITHMIC"] = True
+            all_scenarios[active_scenario]["V_ALGO_CSV"] = seg_out_file
+            # Export result
+            with open(scenario_filepath, 'w') as file:
+                json.dump(all_scenarios, file, indent=4)
         if has_validation and has_algorithmic and plot_type == "both":
             # Run validation script
             subprocess.run(v_args, check=True)
@@ -102,7 +107,6 @@ def main():
             # Argument list for single visualisation script on gt data
             v_single_args = [
                 'python', v_single_script_path,  
-                '--run_folder', v_run_folder,
                 '--data_folder', v_data_folder,
                 '--csv_filename', v_gt_csv,
                 '--plot_title', f'Plot of Ground Truth Data for Dataset: {v_data_folder}'
@@ -112,7 +116,6 @@ def main():
             # Argument list for single visualisation script on algo data
             v_single_args = [
                 'python', v_single_script_path,  
-                '--run_folder', v_run_folder,
                 '--data_folder', v_data_folder,
                 '--csv_filename', v_algo_csv,
                 '--plot_title', f'Plot of Algorithmic Data for Dataset: {v_data_folder}'
@@ -136,7 +139,7 @@ def load_parameters_from_json(json_path, scenario):
         print(f"Could not find {scenario} in {all_scenarios.keys()}")
         return None
     
-    return all_scenarios[scenario]
+    return all_scenarios, all_scenarios[scenario]
 
 if __name__ == "__main__":
     main()
