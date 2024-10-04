@@ -13,6 +13,7 @@ from region import BoundaryRegion
 from volume import Volume
 import os
 import pandas as pd
+import argparse
 from xz_projection import generate_xz_single_y
 from xz_segmentation import cluster_xz_rois_tuned
 from volume_seg_ffp import segment_volumes_drg
@@ -28,11 +29,26 @@ ROI_PROJECTION_N_POINTS = 300
 RESTRICTED_MODE = True
 
 def main():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Run a volume segmentation on a dataset")
+    
+    # Add arguments for file paths
+    parser.add_argument('--in_file', default=IN_FILE, help='Input filepath to csv used to run segmentation on (default: %(default)s)')
+    parser.add_argument('--out_file', default=OUT_FILE, help='Output filepath where the results csv will be placed (default: %(default)s)')
+    parser.add_argument('--xz_io_path', default=XZ_IO_PATH, help='Directory to look in for/generate an XZ plane cache (default: %(default)s)')
+
+    # Parse arguments
+    args = parser.parse_args()
+    # Use the parsed arguments or fallback to the defaults if no arguments are provided
+    in_file = args.in_file or IN_FILE
+    out_file = args.out_file or OUT_FILE
+    xz_io_path = args.xz_io_path or XZ_IO_PATH
+
     # Get X, Y, Z, ROI_ID points
-    points = import_csv()
+    points = import_csv(in_file=in_file)
     # Generate XZ ROIs
     # DEBUG: Cache XZ ROIS
-    if not os.path.exists(XZ_IO_PATH):
+    if not os.path.exists(xz_io_path):
         print("Generating XZ Planes...")
         xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024)
         out_xz_points = []
@@ -40,11 +56,11 @@ def main():
             out_xz_points.append([x, y, z])
         xz_df = pd.DataFrame(out_xz_points, columns=['x', 'y', 'z'])
         
-        xz_df.to_csv(XZ_IO_PATH, index=False)
+        xz_df.to_csv(xz_io_path, index=False)
         print("Generated and Exported XZ Planes. Performing XZ Cluster Segmentation.")
     else:
-        print(f"Importing XZ Planes from: {XZ_IO_PATH}")
-        xz_roi_points = import_xyz_points(XZ_IO_PATH)
+        print(f"Importing XZ Planes from: {xz_io_path}")
+        xz_roi_points = import_xyz_points(xz_io_path)
         print(f"Imported XZ Planes. Performing XZ Cluster Segmentation.")
 
     # Cluster XZ ROI points
@@ -66,7 +82,7 @@ def main():
         print(f"Num xy_rois: {len(xy_rois)}")
 
     # Export segmentation to csv
-    export_segmentation(volumes, filename=OUT_FILE)
+    export_segmentation(volumes, filename=out_file)
 
 
 def import_xyz_points(csv_path):
@@ -315,8 +331,8 @@ def export_segmentation(volumes_dict, filename="algorithmic_segmentation.csv"):
     df.to_csv(filename, index=False)
 
 # Function to import points from a source file
-def import_csv():
-    with open(IN_FILE, 'r') as csvfile:
+def import_csv(in_file =  IN_FILE):
+    with open(in_file, 'r') as csvfile:
         reader = csv.reader(csvfile)
         next(reader)  # Skip header
         points = [(float(row[0]), float(row[1]), float(row[2]), int(row[3])) for row in reader]

@@ -1,21 +1,15 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+import argparse
 import random
 import os
 
 # Configuration
-# CSV_FILENAME = "./validation_runs/simple_points/algo_seg.csv"   
-# CSV_FILENAME = "./validation_runs/complex_points/xyz_complex_points_algo_VOLUMES.csv"  
-# CSV_FILENAME = "./validation_runs/complex_points/xyz_complex_points_VOLUMES.csv"  
-# CSV_FILENAME = './validation_runs/generated_mock_cell/roi_validation_VOLUMES.csv'
-# CSV_FILENAME = './validation_runs/generated_mock_cell/roi_validation_algo_VOLUMES.csv'
 RUN_FOLDER = './validation_runs'
 DATA_FOLDER = 'drg_subset_2'
-CSV_FILENAME = 'real_data_filtered_VOLUMES.csv'  # Ground truth CSV file path
-# CSV_FILENAME = "./validation_runs/simple_points/xyz_points_volumes.csv"   
-SUBSET_RATIO = 1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
+CSV_FILENAME = 'real_data_filtered_VOLUMES.csv'  # Ground truth CSV file path 
+SUBSET_RATIO = 0.1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
 
 def load_and_sample_data(filename, subset_ratio):
     """Load the CSV data and sample a subset of points for visualization."""
@@ -81,7 +75,22 @@ def visualize_points(df, colors):
 
 def main():
     random.seed(13)
-    csv_path = os.path.join(RUN_FOLDER, DATA_FOLDER, CSV_FILENAME)
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="View a single set of volumes.")
+    
+    # Add arguments for file paths
+    parser.add_argument('--run_folder', default=RUN_FOLDER, help='Directory for validation runs (default: %(default)s)')
+    parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
+    parser.add_argument('--csv_filename', default=CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Use the parsed arguments or fallback to the defaults if no arguments are provided
+    run_folder = args.run_folder or RUN_FOLDER
+    data_folder = args.data_folder or DATA_FOLDER
+    csv_filename = args.csv_filename or CSV_FILENAME
+    csv_path = os.path.join(run_folder, data_folder, csv_filename)
     # Load and sample the data
     sampled_df = load_and_sample_data(csv_path, SUBSET_RATIO)
 

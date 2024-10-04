@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import random
+import argparse
 import os
 
 # Configuration
@@ -11,7 +11,7 @@ DATA_FOLDER = 'drg_subset_1_r'
 GT_CSV_FILENAME = 'real_data_filtered_v0_VOLUMES.csv'  # Ground truth CSV file path
 ALGO_CSV_FILENAME = 'real_data_filtered_algo_VOLUMES.csv'  # Algorithmic CSV file path
 MAPPING_FILENAME = 'mapping.csv'
-SUBSET_RATIO = 1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
+SUBSET_RATIO = 0.1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
 DRAW_LINES = False
 
 def load_and_sample_data(filename, subset_ratio):
@@ -137,10 +137,32 @@ def load_volume_mapping(mapping_filename):
 
 
 def main():
-    # File paths for CSVs
-    gt_csv_path = os.path.join(RUN_FOLDER, DATA_FOLDER, GT_CSV_FILENAME)
-    algo_csv_path = os.path.join(RUN_FOLDER, DATA_FOLDER, ALGO_CSV_FILENAME)
-    mapping_csv_path = os.path.join(RUN_FOLDER, DATA_FOLDER, MAPPING_FILENAME)
+    random.seed(5)
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Run the overlap calculation and accuracy analysis.")
+    
+    # Add arguments for file paths
+    parser.add_argument('--run_folder', default=RUN_FOLDER, help='Directory for validation runs (default: %(default)s)')
+    parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
+    parser.add_argument('--gt_csv', default=GT_CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
+    parser.add_argument('--algo_csv', default=ALGO_CSV_FILENAME, help='Algorithmic CSV file (default: %(default)s)')
+    parser.add_argument('--mapping_csv', default=MAPPING_FILENAME, help='Output mapping CSV file (default: %(default)s)')
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Use the parsed arguments or fallback to the defaults if no arguments are provided
+    run_folder = args.run_folder or RUN_FOLDER
+    data_folder = args.data_folder or DATA_FOLDER
+    gt_csv_filename = args.gt_csv or GT_CSV_FILENAME
+    algo_csv_filename = args.algo_csv or ALGO_CSV_FILENAME
+    mapping_filename = args.mapping_csv or MAPPING_FILENAME
+
+    # Construct file paths
+    gt_csv_path = os.path.join(run_folder, data_folder, gt_csv_filename)
+    algo_csv_path = os.path.join(run_folder, data_folder, algo_csv_filename)
+    mapping_csv_path = os.path.join(run_folder, data_folder, mapping_filename)
+
 
     # Load and sample the ground truth and algorithmic data
     gt_sampled_df = load_and_sample_data(gt_csv_path, SUBSET_RATIO)
