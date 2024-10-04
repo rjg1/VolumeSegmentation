@@ -1,0 +1,50 @@
+{
+    "drg_subset_1_11" : {
+        "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
+        "SEG_IN_FILE": "run_data/real_data_filtered_v0_ROIS.csv",
+        "SEG_XZ_IO_FILE": "xz_cache/real_data_filtered_v0_ROIS_XZ.csv",
+        "RESTRICTED_MODE": true,
+        "RUN_SEGMENTATION": true,
+        "HAS_VALIDATION" : true,
+        "HAS_ALGORITHMIC" : true,
+        "PLOT_TYPE" : "both",
+        "VALIDATION_DIR": "../VALIDATION/",
+        "V_SUBFOLDER": "validation_runs",
+        "V_DATA_FOLDER": "drg_subset_1_r",
+        "V_GT_CSV": "real_data_filtered_v0_VOLUMES.csv",
+        "V_ALGO_CSV": "real_data_filtered_algo_VOLUMES.csv",
+        "V_MAPPING_CSV": "mapping.csv"
+    },
+    "drg_subset_1_3" : {
+        "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
+        "SEG_IN_FILE": "run_data/real_data_filtered_ROIS.csv",
+        "SEG_XZ_IO_FILE": "xz_cache/real_data_filtered_ROIS_XZ.csv",
+        "RESTRICTED_MODE": true,
+        "RUN_SEGMENTATION": true,
+        "HAS_VALIDATION" : true,
+        "HAS_ALGORITHMIC" : true,
+        "PLOT_TYPE" : "both",
+        "VALIDATION_DIR": "../VALIDATION/",
+        "V_SUBFOLDER": "validation_runs",
+        "V_DATA_FOLDER": "drg_subset_2_demo",
+        "V_GT_CSV": "real_data_filtered_VOLUMES.csv",
+        "V_ALGO_CSV": "real_data_filtered_algo_VOLUMES.csv",
+        "V_MAPPING_CSV": "mapping.csv"
+    },
+    "drg_subset_1_1" : {
+        "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
+        "SEG_IN_FILE": "run_data/real_data_filtered_v2_ROIS.csv",
+        "SEG_XZ_IO_FILE": "xz_cache/real_data_filtered_v2_ROIS_XZ.csv",
+        "RESTRICTED_MODE": true,
+        "RUN_SEGMENTATION": true,
+        "HAS_VALIDATION" : true,
+        "HAS_ALGORITHMIC" : true,
+        "PLOT_TYPE" : "both",
+        "VALIDATION_DIR": "../VALIDATION/",
+        "V_SUBFOLDER": "validation_runs",
+        "V_DATA_FOLDER": "drg_subset_3_demo",
+        "V_GT_CSV": "real_data_filtered_v2_VOLUMES.csv",
+        "V_ALGO_CSV": "real_data_filtered_algo_VOLUMES.csv",
+        "V_MAPPING_CSV": "mapping.csv"
+    }
+}

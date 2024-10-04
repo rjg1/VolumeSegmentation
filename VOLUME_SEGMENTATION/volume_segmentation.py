@@ -20,9 +20,11 @@ from volume_seg_ffp import segment_volumes_drg
 
 # GLOBAL VARIABLES
 # Name of input file. Structured csv with |x|y|z|roi ID|. Note ID is per z layer
-OUT_FILE = './results/real_data_filtered_algo_VOLUMES.csv'
-IN_FILE = './run_data/real_data_filtered_v0_ROIS.csv'
-XZ_IO_PATH = "./xz_cache/real_data_filtered_v0_ROIS_XZ.csv"
+# OUT_FILE = './results/real_data_filtered_algo_VOLUMES.csv'
+# XZ_IO_PATH = "./xz_cache/real_data_filtered_v0_ROIS_XZ.csv"
+OUT_FILE = './results/real_data_filtered_1_VOLUMES.csv'
+IN_FILE = './run_data/real_data_filtered_ROIS.csv'
+XZ_IO_PATH = None
 # Number of points to project around an ROI boundary when deciding intersection (Higher -> more computation)
 ROI_PROJECTION_N_POINTS = 300
 # Whether to use fit-for-purpose DRG segmentation or generalised segmentation
@@ -36,6 +38,7 @@ def main():
     parser.add_argument('--in_file', default=IN_FILE, help='Input filepath to csv used to run segmentation on (default: %(default)s)')
     parser.add_argument('--out_file', default=OUT_FILE, help='Output filepath where the results csv will be placed (default: %(default)s)')
     parser.add_argument('--xz_io_path', default=XZ_IO_PATH, help='Directory to look in for/generate an XZ plane cache (default: %(default)s)')
+    parser.add_argument('--restricted_mode', default=RESTRICTED_MODE, help='Use DRG segmentation technique (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -43,25 +46,34 @@ def main():
     in_file = args.in_file or IN_FILE
     out_file = args.out_file or OUT_FILE
     xz_io_path = args.xz_io_path or XZ_IO_PATH
+    # Allow no xz caching
+    if xz_io_path.lower() == "none":
+        xz_io_path = None
+    # Avoid short circuit with boolean restricted mode
+    restricted_mode = str_to_bool(args.restricted_mode) if args.restricted_mode is not None else RESTRICTED_MODE
 
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
     # Generate XZ ROIs
     # DEBUG: Cache XZ ROIS
-    if not os.path.exists(xz_io_path):
-        print("Generating XZ Planes...")
-        xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024)
-        out_xz_points = []
-        for x,y,z in xz_roi_points:
-            out_xz_points.append([x, y, z])
-        xz_df = pd.DataFrame(out_xz_points, columns=['x', 'y', 'z'])
-        
-        xz_df.to_csv(xz_io_path, index=False)
-        print("Generated and Exported XZ Planes. Performing XZ Cluster Segmentation.")
-    else:
+    if xz_io_path is not None and os.path.exists(xz_io_path):
         print(f"Importing XZ Planes from: {xz_io_path}")
         xz_roi_points = import_xyz_points(xz_io_path)
         print(f"Imported XZ Planes. Performing XZ Cluster Segmentation.")
+    else:
+        print("Generating XZ Planes...")
+        xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024)
+        if xz_io_path is not None:
+            # Export points
+            out_xz_points = []
+            for x,y,z in xz_roi_points:
+                out_xz_points.append([x, y, z])
+            xz_df = pd.DataFrame(out_xz_points, columns=['x', 'y', 'z'])
+            
+            xz_df.to_csv(xz_io_path, index=False)
+            print("Generated and Exported XZ Planes. Performing XZ Cluster Segmentation.")
+        else:
+            print("Generated XZ Planes. Performing XZ Cluster Segmentation.")
 
     # Cluster XZ ROI points
     clustered_hulls = cluster_xz_rois_tuned(xz_roi_points)
@@ -69,7 +81,7 @@ def main():
     # visualize_random_clusters(clustered_hulls, num_planes=10) 
     print("Cluster segmentation complete. Performing Volume Segmentation...")
     # Perform volume segmentation using XY ROIs and XZ Regions
-    if RESTRICTED_MODE:
+    if restricted_mode:
         volumes = segment_volumes_drg(clustered_hulls, points)
     else:
         volumes = segment_volumes(clustered_hulls, points)
@@ -84,6 +96,10 @@ def main():
     # Export segmentation to csv
     export_segmentation(volumes, filename=out_file)
 
+
+def str_to_bool(value):
+    """Convert a string to a boolean."""
+    return value.lower() in ('true', '1', 'yes', 'y')
 
 def import_xyz_points(csv_path):
     """
@@ -314,7 +330,7 @@ def get_hull_boundary_points(hull):
 # Exports a segmentation into a csv
 def export_segmentation(volumes_dict, filename="algorithmic_segmentation.csv"):
     out_data = []
-    print(f"Test volume dict: {volumes_dict}")
+    print(f"Volume dict: {volumes_dict}")
     for vol_id, volume in volumes_dict.items(): # Iterate through all volumes
         xy_rois = volume.get_xy_rois()  # Get the dict of {ROI_ID : <BoundaryRegion>}
         for roi_id, xy_roi in xy_rois.items():   # For each ROI

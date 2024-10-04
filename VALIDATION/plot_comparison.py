@@ -11,25 +11,26 @@ DATA_FOLDER = 'drg_subset_1_r'
 GT_CSV_FILENAME = 'real_data_filtered_v0_VOLUMES.csv'  # Ground truth CSV file path
 ALGO_CSV_FILENAME = 'real_data_filtered_algo_VOLUMES.csv'  # Algorithmic CSV file path
 MAPPING_FILENAME = 'mapping.csv'
-SUBSET_RATIO = 0.1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
+MAX_POINTS = 25000 # Maximum points to sample
 DRAW_LINES = False
 
-def load_and_sample_data(filename, subset_ratio):
+def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
     df = pd.read_csv(filename)
 
     # Display the first few rows to check data
-    print(f"Loaded {filename} Preview:")
-    print(df.head())
-
+    # print(f"Loaded {filename} Preview:")
+    # print(df.head())
+    subset_ratio = min(1, MAX_POINTS/len(df))
     if 'VOLUME_ID' not in df.columns:
         raise ValueError("CSV does not contain VOLUME_ID column. Ensure export was done with volumes enabled.")
+
 
     # Sample a subset of the data for visualization
     sampled_data = df.groupby('VOLUME_ID').apply(lambda x: x.sample(frac=subset_ratio, random_state=42))
     sampled_data.reset_index(drop=True, inplace=True)
 
-    print(f"Sampled {len(sampled_data)} points out of {len(df)} total points from {filename}.")
+    # print(f"Sampled {len(sampled_data)} points out of {len(df)} total points from {filename}.")
     return sampled_data
 
 def assign_colors_by_volume_id(gt_df, algo_df, volume_mapping):
@@ -163,10 +164,9 @@ def main():
     algo_csv_path = os.path.join(run_folder, data_folder, algo_csv_filename)
     mapping_csv_path = os.path.join(run_folder, data_folder, mapping_filename)
 
-
     # Load and sample the ground truth and algorithmic data
-    gt_sampled_df = load_and_sample_data(gt_csv_path, SUBSET_RATIO)
-    algo_sampled_df = load_and_sample_data(algo_csv_path, SUBSET_RATIO)
+    gt_sampled_df = load_and_sample_data(gt_csv_path)
+    algo_sampled_df = load_and_sample_data(algo_csv_path)
 
     # Load the volume mapping from CSV
     volume_mapping = load_volume_mapping(mapping_csv_path)

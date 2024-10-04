@@ -7,19 +7,20 @@ import os
 
 # Configuration
 RUN_FOLDER = './validation_runs'
-DATA_FOLDER = 'drg_subset_2'
-CSV_FILENAME = 'real_data_filtered_VOLUMES.csv'  # Ground truth CSV file path 
-SUBSET_RATIO = 0.1  # Fraction of points to sample for visualization (e.g., 0.01 = 1%)
+DATA_FOLDER = 'test_1'
+CSV_FILENAME = 'real_data_filtered_1_VOLUMES.csv'  # Ground truth CSV file path 
+PLOT_TITLE = f'Plot of Ground Truth data for dataset: {DATA_FOLDER}'
+MAX_POINTS = 25000 # Maximum points to sample
 
-def load_and_sample_data(filename, subset_ratio):
+def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
     # Read CSV file into a pandas DataFrame
     df = pd.read_csv(filename)
 
     # Display the first few rows to check data
-    print("Loaded Data Preview:")
-    print(df.head())
-
+    # print("Loaded Data Preview:")
+    # print(df.head())
+    subset_ratio = min(1, MAX_POINTS/len(df))
     # Check if volume IDs are present
     if 'VOLUME_ID' not in df.columns:
         raise ValueError("CSV does not contain VOLUME_ID column. Ensure export was done with volumes enabled.")
@@ -48,7 +49,7 @@ def assign_colors_by_volume_id(df):
 
     return colors_array
 
-def visualize_points(df, colors):
+def visualize_points(df, colors, title):
     """Visualize the sampled points in 3D space with colors assigned by volume ID."""
     # Create a Matplotlib 3D plot
     fig = plt.figure(figsize=(10, 8))
@@ -70,7 +71,7 @@ def visualize_points(df, colors):
     ax.set_xlim3d(0,1024)
     ax.set_ylim3d(0,1024)
     ax.set_zlim3d(0,1024)
-    ax.set_title('3D Scatter Plot of Ellipsoid Points by Volume ID')
+    ax.set_title(title)
     plt.show()
 
 def main():
@@ -82,6 +83,7 @@ def main():
     parser.add_argument('--run_folder', default=RUN_FOLDER, help='Directory for validation runs (default: %(default)s)')
     parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
     parser.add_argument('--csv_filename', default=CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
+    parser.add_argument('--plot_title', default=PLOT_TITLE, help='Title for plot (default: %(default)s)')
     
     # Parse arguments
     args = parser.parse_args()
@@ -90,15 +92,16 @@ def main():
     run_folder = args.run_folder or RUN_FOLDER
     data_folder = args.data_folder or DATA_FOLDER
     csv_filename = args.csv_filename or CSV_FILENAME
+    plot_title = args.plot_title or PLOT_TITLE
     csv_path = os.path.join(run_folder, data_folder, csv_filename)
     # Load and sample the data
-    sampled_df = load_and_sample_data(csv_path, SUBSET_RATIO)
+    sampled_df = load_and_sample_data(csv_path)
 
     # Assign colors based on volume IDs
     colors = assign_colors_by_volume_id(sampled_df)
 
     # Visualize the points with assigned colors
-    visualize_points(sampled_df, colors)
+    visualize_points(sampled_df, colors, plot_title)
 
 if __name__ == "__main__":
     main()
