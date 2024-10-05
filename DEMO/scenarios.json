@@ -28,7 +28,7 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 50
+            "area_delta_perc": 150
         }
     },
     "drg_subset_1_3": {
@@ -60,7 +60,7 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 50
+            "area_delta_perc": 150
         }
     },
     "drg_subset_1_1": {
@@ -92,7 +92,7 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 50
+            "area_delta_perc": 150
         }
     },
     "b": {
@@ -124,7 +124,7 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 50
+            "area_delta_perc": 150
         }
     },
     "a": {
@@ -156,7 +156,7 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 50
+            "area_delta_perc": 150
         }
     },
     "c": {

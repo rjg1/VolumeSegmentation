@@ -43,7 +43,7 @@ NUM_PROJECTION_POINTS = 300
 FLAT_CENTROID_DIST = 10
 PERC_CENTROID_DIST = 68
 MATCH_Z_THRESHOLD = 2
-AREA_DELTA_PERC = 50
+AREA_DELTA_PERC = 150
 
 class DemoGUIApp:
     def __init__(self, root):
@@ -393,7 +393,7 @@ class DemoGUIApp:
         # Update entry variables if applicable
         entries = [self.flat_centroid_entry, self. perc_centroid_entry, self.match_z_entry,
                    self.restrict_area_entry, self.num_points_entry]
-        ranges = [(0,100), (0,1000), (0, 150), (0,1000), (100,500)]
+        ranges = [(0,100), (0,1000), (0, 150), (100,1000), (100,500)]
         keys = ["flat_centroid_dist", "perc_centroid_dist", "match_z_threshold", 
                 "area_delta_perc", "num_projection_points"]
         for idx, entry in enumerate(entries): # Process each entry and attempt to parse the variable
