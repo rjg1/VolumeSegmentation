@@ -507,8 +507,9 @@ class VolumeSegmentationApp:
                     self.current_z = z_value
                     if self.current_z != old_current_z:
                         # Re-draw clusters when this plane is re-visited
-                        for cl_id in self.cluster_modified[old_current_z]:
-                            self.cluster_modified[old_current_z][cl_id] = True
+                        if self.cluster_modified.get(old_current_z, None):
+                            for cl_id in self.cluster_modified[old_current_z]:
+                                self.cluster_modified[old_current_z][cl_id] = True
                         
                         # Update current ROI based on the new z-plane
                         self.current_roi = len(self.rois_per_z.get(self.current_z, {})) + 1
@@ -721,8 +722,9 @@ class VolumeSegmentationApp:
             if self.current_z != old_current_z:
 
                 # Re-draw clusters when this plane is re-visited
-                for cl_id in self.cluster_modified[old_current_z]:
-                    self.cluster_modified[old_current_z][cl_id] = True
+                if self.cluster_modified.get(old_current_z, None):
+                    for cl_id in self.cluster_modified[old_current_z]:
+                        self.cluster_modified[old_current_z][cl_id] = True
                 
                 # Update current ROI based on the new z-plane
                 self.current_roi = len(self.rois_per_z.get(self.current_z, {})) + 1
@@ -739,8 +741,9 @@ class VolumeSegmentationApp:
             if self.current_z != old_current_z:
                 
                 # Re-draw clusters when this plane is re-visited
-                for cl_id in self.cluster_modified[old_current_z]:
-                    self.cluster_modified[old_current_z][cl_id] = True
+                if self.cluster_modified.get(old_current_z, None):
+                    for cl_id in self.cluster_modified[old_current_z]:
+                        self.cluster_modified[old_current_z][cl_id] = True
 
                 # Update current ROI based on the new z-plane
                 self.current_roi = len(self.rois_per_z.get(self.current_z, {})) + 1
@@ -1018,8 +1021,9 @@ class VolumeSegmentationApp:
         if self.image_stack is not None and self.data is not None and 0 <= self.current_z < self.image_stack.shape[0]:
             self.brightness_factor = self.brightness_slider.get()
             self.image_updated = True
-            for cl_id in self.cluster_modified[self.current_z]:
-                        self.cluster_modified[self.current_z][cl_id] = True
+            if self.cluster_modified.get(self.current_z, None):
+                for cl_id in self.cluster_modified[self.current_z]:
+                            self.cluster_modified[self.current_z][cl_id] = True
             self.update_display()
 
 if __name__ == "__main__":

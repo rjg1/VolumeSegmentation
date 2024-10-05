@@ -22,12 +22,12 @@ HAS_VALIDATION = True # Has a validation volume dataset that may be plotted
 HAS_ALGORITHMIC = True # Has an algorithmically generated volume dataset
 RUN_SEGMENTATION = True # Run a segmentation on the XY rois
 PLOT_TYPE = 'both' # Plot validation vs algorithmic dataset. Other options = {'gt','algo'}
+TEMP_REDUCTION = False # Don't operate on the data unless specified
 
 def main():
     parser = argparse.ArgumentParser(description="Run a scenario or set parameters for segmentation and validation.")
     parser.add_argument('--scenarios_file', help='Path to the scenarios JSON file')
     parser.add_argument('--scenario_name', help='Name of the scenario to load')
-    # Parse command-line arguments
     args = parser.parse_args()
     # Load parameter set from json file
     scenario_filepath = args.scenarios_file or SCENARIO_FILEPATH
@@ -38,25 +38,27 @@ def main():
     has_algorithmic = parameters.get("HAS_ALGORITHMIC", HAS_ALGORITHMIC)
     run_segmentation = parameters.get("RUN_SEGMENTATION", RUN_SEGMENTATION)
     plot_type = parameters.get("PLOT_TYPE", PLOT_TYPE)
-    # SEGMENTATION SCRIPT PARAMETERS
+    temp_reduction = parameters.get("SEGMENT_VALIDATED_ONLY") or TEMP_REDUCTION
+    # SEGMENTATION SCRIPT PARAMETERS 
     segmentation_dir = parameters.get("SEGMENTATION_DIR", SEGMENTATION_DIR)
     seg_script_path = os.path.join(segmentation_dir, 'volume_segmentation.py')
-    seg_in_file = parameters.get("SEG_IN_FILE", SEG_IN_FILE)
+    seg_in_file = parameters.get("SEG_IN_FILE", SEG_IN_FILE) if not temp_reduction else parameters.get("TEMP_REDUCED_FILE") # Use temporary dataset
     seg_xz_cache_file = parameters.get("SEG_XZ_IO_FILE", SEG_XZ_IO_FILE)
     restricted_mode = parameters.get("RESTRICTED_MODE", RESTRICTED_MODE)
     # VALIDATION / VISUALISATION SCRIPT PARAMETERS
     validation_dir = parameters.get("VALIDATION_DIR", VALIDATION_DIR)
     v_data_folder = parameters.get("V_DATA_FOLDER", V_DATA_FOLDER)
-    v_gt_csv = parameters.get("V_GT_CSV", V_GT_CSV)
+    v_gt_csv = parameters.get("V_GT_CSV", V_GT_CSV) if not temp_reduction else parameters.get("V_TEMP_REDUCED_FILE") # Use temporary dataset
     v_algo_csv = parameters.get("V_ALGO_CSV", V_ALGO_CSV)
     v_mapping_csv = parameters.get("V_MAPPING_CSV", V_MAPPING_CSV)
     
     # Determine output file for segmentation
     if has_algorithmic: # Already has an algorithmic path - use this
-        seg_out_file = os.path.join(v_data_folder, v_algo_csv)
+        seg_out_filename = v_algo_csv
     else: # Create algorithmic path for demo file
-        seg_out_file = os.path.join("./demo_data/", active_scenario, active_scenario + "_algo_VOLUMES.csv")
+        seg_out_filename = active_scenario + "_algo_VOLUMES.csv"
 
+    seg_out_file = os.path.join(v_data_folder, seg_out_filename)
     seg_args = [
         'python', seg_script_path,
         '--in_file', seg_in_file,
@@ -90,11 +92,26 @@ def main():
     try:
         # Run segmentation if desired for scenario
         if run_segmentation:
-            print(f"Segmentation script arguments: {seg_args}")
+            if temp_reduction:
+                v_out = os.path.join(v_data_folder, v_gt_csv)
+                # Generate temporary dataset if required
+                process_args = [
+                    'python', '../CELLPOSE_SCRIPTS/process_noise.py',  
+                    '--perform_grouping', "True",
+                    '--perform_reduction', "True",
+                    '--temp_reduction', "True",
+                    '--scenarios_path', scenario_filepath,
+                    '--active_scenario', active_scenario,
+                    '--roi_out_path', seg_in_file, # Write to temp roi file
+                    '--vol_out_path', v_out # Write to temp validation file
+                ]
+                subprocess.run(process_args, check=True)
+                # Wait for processing to be complete
             subprocess.run(seg_args, check=True)
             # Update json to point to new algo output csv
+            has_algorithmic = True
             all_scenarios[active_scenario]["HAS_ALGORITHMIC"] = True
-            all_scenarios[active_scenario]["V_ALGO_CSV"] = seg_out_file
+            all_scenarios[active_scenario]["V_ALGO_CSV"] = seg_out_filename
             # Export result
             with open(scenario_filepath, 'w') as file:
                 json.dump(all_scenarios, file, indent=4)

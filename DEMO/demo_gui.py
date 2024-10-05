@@ -5,6 +5,11 @@ import os
 import subprocess
 import queue
 import threading
+import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+import tifffile
 
 # Relative path to scenarios json
 SCENARIOS_PATH = "./scenarios.json"
@@ -22,6 +27,10 @@ FORCE_REQUIRE_REDUCED_DATA = True
 SAVE_SCENARIOS_ON_CLOSE = False
 # Data paths to default data used
 DEFAULT_DATA_PATHS = [RAW_DATA_PATH, MERGED_DATA_PATH]
+# Maximum number of points to sample for raw data viewer
+MAX_SAMPLE_POINTS = 15000
+# Whether to draw some z-slices of the original .tif file on the raw data
+SHOW_Z_SLICES = False
 
 
 class DemoGUIApp:
@@ -53,7 +62,7 @@ class DemoGUIApp:
 
         # Checkbox for requiring data to be reduced inside the frame
         self.reduce_var = tk.IntVar(value=1)
-        self.reduce_checkbox = tk.Checkbutton(self.entry_checkbox_frame, text="Require Data Reduction", variable=self.reduce_var)
+        self.reduce_checkbox = tk.Checkbutton(self.entry_checkbox_frame, text="Segmentation of validated ROIs only", variable=self.reduce_var)
         self.reduce_checkbox.pack(side="left", padx=1, pady=1)
         if FORCE_REQUIRE_REDUCED_DATA:
             self.reduce_checkbox.config(state='disabled')
@@ -82,11 +91,11 @@ class DemoGUIApp:
         
         # Label for active scenario
         self.active_scenario_label = tk.Label(self.root, text="No Active Scenario", font=("Arial", 12, "bold"))
-        self.active_scenario_label.grid(row=5, column=0, padx=10, pady=10, sticky="w")
+        self.active_scenario_label.grid(row=5, column=0, padx=10, pady=5, sticky="w")
 
         # Outer frame (contains the inner left/right frames)
         self.outer_frame = ttk.Frame(self.root, width=600, height=300, relief=tk.SUNKEN)
-        self.outer_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=20, sticky="nsew")
+        self.outer_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
 
         # Inner left frame (contains keys/values, split into two subframes)
         self.inner_left_frame = tk.Frame(self.outer_frame, width=400)  # Fixed width
@@ -132,11 +141,9 @@ class DemoGUIApp:
         self.volume_segmenter_button.grid(row=3, column=0, padx=5, pady=2, sticky="ew")  
 
         # Checkbox for requiring data to be reduced inside the frame
-        self.reduce_var2 = tk.IntVar(value=1)
-        self.reduce_checkbox2 = tk.Checkbutton(self.upper_right_frame, text="Reduce data on exit", variable=self.reduce_var2)
-        self.reduce_checkbox2.grid(row=4, column=0, padx=5, pady=0, sticky="ew")
-        if FORCE_REQUIRE_REDUCED_DATA:
-            self.reduce_checkbox2.config(state='disabled')
+        self.merge_var = tk.IntVar(value=1)
+        self.merge_checkbox = tk.Checkbutton(self.upper_right_frame, text="Merge ROIs on exit", variable=self.merge_var)
+        self.merge_checkbox.grid(row=4, column=0, padx=5, pady=0, sticky="ew")
 
         # Filter/reduce data button
         self.reduce_data_button = tk.Button(self.upper_right_frame, text="Reduce Data", width=15, command=self.reduce_data)
@@ -153,22 +160,36 @@ class DemoGUIApp:
         self.seg_var = tk.IntVar()
         self.gt_var = tk.IntVar()
         self.algo_var = tk.IntVar()
+        self.remake_xz = tk.IntVar()
+        self.run_reduced_var = tk.IntVar()
+
+        seg_label = tk.Label(self.lower_right_frame, text="Segmentation Options", font=("Arial", 10, "bold"))
+        seg_label.grid(row=1, column=0, padx=10, pady=5)
+
+        self.run_reduce_checkbox = tk.Checkbutton(self.lower_right_frame, text="Only Segment Validated ROIs", variable=self.run_reduced_var, command=self.update_scenario_from_checkboxes)
+        self.run_reduce_checkbox.grid(row=2, column=0, sticky="w", padx=5, pady=2)
 
         self.ffp_checkbox = tk.Checkbutton(self.lower_right_frame, text="Use Fit-For-Purpose Algorithm", variable=self.ffp_var, command=self.update_scenario_from_checkboxes)
-        self.ffp_checkbox.grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.ffp_checkbox.grid(row=3, column=0, sticky="w", padx=5, pady=2)
+
+        self.xz_checkbox = tk.Checkbutton(self.lower_right_frame, text="Regenerate XZ Planes", variable=self.remake_xz, command=self.update_scenario_from_checkboxes)
+        self.xz_checkbox.grid(row=4, column=0, sticky="w", padx=5, pady=2)
 
         self.seg_checkbox = tk.Checkbutton(self.lower_right_frame, text="Run Volume Segmentation", variable=self.seg_var, command=self.update_scenario_from_checkboxes)
-        self.seg_checkbox.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        self.seg_checkbox.grid(row=5, column=0, sticky="w", padx=5, pady=2)
+
+        plot_label = tk.Label(self.lower_right_frame, text="Plot Options", font=("Arial", 10, "bold"))
+        plot_label.grid(row=6, column=0, padx=10, pady=5)
 
         self.gt_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Ground Truth Volumes", variable=self.gt_var, command=self.update_scenario_from_checkboxes)
-        self.gt_checkbox.grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        self.gt_checkbox.grid(row=7, column=0, sticky="w", padx=5, pady=2)
 
         self.algo_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Algorithmic Volumes", variable=self.algo_var, command=self.update_scenario_from_checkboxes)
-        self.algo_checkbox.grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        self.algo_checkbox.grid(row=8, column=0, sticky="w", padx=5, pady=2)
 
         # Execute button with fixed width
-        execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        execute_button.grid(row=5, column=0, padx=5, pady=2, sticky="ew")
+        self.execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
+        self.execute_button.grid(row=9, column=0, padx=5, pady=2, sticky="ew")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()
@@ -192,20 +213,24 @@ class DemoGUIApp:
             self.scenarios[scenario_name] = {
                 "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
                 "SEG_IN_FILE": data_file,
+                "TEMP_REDUCED_FILE": os.path.join(scenario_folder, scenario_name + "_ROIS_REDUCED.csv"),
                 "SEG_XZ_IO_FILE": xz_io_file,
                 "RESTRICTED_MODE": True, # Flag on which volumetric seg algorithm to use
                 "RUN_SEGMENTATION": True, # Flag to run a segmentation
                 "HAS_VALIDATION": False, # Set after volume seg tool is run with some output
                 "HAS_ALGORITHMIC": False, # Set after an algorithmic seg is run
                 "HAS_REDUCED_DATASET": False, # Set when dataset reduction occurs
+                "SEGMENT_VALIDATED_ONLY": bool(self.reduce_var.get()),
                 "REQUIRES_REDUCED_DATASET": bool(self.reduce_var.get()),
                 "PLOT_TYPE": "None",
                 "VALIDATION_DIR": "../VALIDATION",
                 "V_DATA_FOLDER": scenario_folder,
+                "V_TEMP_REDUCED_FILE": scenario_name + "_VOLUMES_REDUCED.csv",
                 "V_GT_CSV": "", # Generated by running volume seg tool
                 "V_ALGO_CSV": "", # Generated by running algorithmic seg tool
                 "V_MAPPING_CSV": "mapping.csv"
             }
+            self.update_dropdown()
 
     def cell_merger_tool(self):
         print("Opening Cell Merger Tool...")
@@ -236,10 +261,12 @@ class DemoGUIApp:
         # Save current scenarios
         self.save_scenarios_to_json(filepath=SCENARIOS_PATH)
         if self.scenarios[self.active_scenario]['HAS_VALIDATION']:
-            cell_data_path = self.scenarios[self.active_scenario]['V_GT_CSV']
+            autosave_name = self.scenarios[self.active_scenario]['V_GT_CSV']
+            cell_data_path = os.path.join(self.scenarios[self.active_scenario]['V_DATA_FOLDER'], autosave_name)
         else:
             cell_data_path = self.scenarios[self.active_scenario]['SEG_IN_FILE']
-        exit_path = self.active_scenario + "_VOLUMES.csv"
+            autosave_name = self.active_scenario + "_VOLUMES.csv"
+        exit_path = os.path.join(self.scenarios[self.active_scenario]['V_DATA_FOLDER'], autosave_name)
         # Run volume segmentation tool
         exec_args = ['python', VOLUME_SEGMENTER_PATH,
                      '--cell_data_path', cell_data_path,
@@ -247,16 +274,104 @@ class DemoGUIApp:
                      '--scenarios_path', SCENARIOS_PATH,
                      '--active_scenario', self.active_scenario,
                      '--autosave_exit_path', exit_path,
+                     '--autosave_name', autosave_name,
                      '--up_img_path', "../GUI/up_button.png",
                      '--down_img_path', "../GUI/down_button.png",
                      '--eye_open_img_path', "../GUI/eye_open.png",
                      '--eye_closed_img_path', "../GUI/eye_closed.png"
                      ] 
+        if cell_data_path in DEFAULT_DATA_PATHS:
+            print("Adding bonus arg to export data to new folder")
+            roi_exit_path = os.path.join("./demo_data/", self.active_scenario, self.active_scenario + "_ROIS.csv")
+            exec_args.extend(['--roi_exit_path', roi_exit_path])
         threading.Thread(target=self.run_subprocess, args=(exec_args, "volume_segmenter_tool")).start()
         self.check_queue()
 
-    def generate_data_plot(self):
+    def generate_data_plot(self, slices=SHOW_Z_SLICES):
+        if not self.active_scenario:
+            return
         print("Generating Data Plot")
+        data = pd.read_csv(self.scenarios[self.active_scenario]["SEG_IN_FILE"])
+        
+        # Ensure the file has the required columns
+        required_columns = {'x', 'y', 'z', 'ROI_ID'}
+        if not required_columns.issubset(data.columns):
+            raise ValueError(f"CSV must contain the following columns: {required_columns}")
+        
+        z_slices = []
+        if slices:
+            min_z = int(data['z'].min())
+            max_z = int(data['z'].max())
+            midpoint_z = int((min_z + max_z) // 2) 
+            
+            # Create the list of z-slices
+            z_slices = [min_z, midpoint_z, max_z]
+            
+            # Remove duplicates, if any
+            z_slices = list(sorted(set(z_slices)))
+
+
+        # Check the total number of points
+        total_points = len(data)
+        if total_points > MAX_SAMPLE_POINTS:
+            # Subsample points
+            sample_frac = MAX_SAMPLE_POINTS / total_points
+            data = data.sample(frac=sample_frac, random_state=42)
+        
+        # Create a new column for color grouping (combining z and ROI_ID)
+        data['color_group'] = data.apply(lambda row: (row['z'], row['ROI_ID']), axis=1)
+        
+        # Generate unique colors for each (z, ROI_ID) pair
+        unique_groups = data['color_group'].unique()
+        colors = plt.cm.jet(np.linspace(0, 1, len(unique_groups)))  # Color map with distinct colors
+        
+        # Map each (z, ROI_ID) combination to a color
+        color_map = {group: color for group, color in zip(unique_groups, colors)}
+        data['color'] = data['color_group'].map(color_map)
+        
+        # Read the 3D TIFF file
+        image_3d = tifffile.imread("../GUI/tif_data/file_00001.tif")
+
+        # Create the 3D plot
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Ensure each z_slice is valid
+        for z_slice in z_slices:
+            if z_slice < 0 or z_slice >= image_3d.shape[0]:
+                raise ValueError(f"Invalid z_slice. Must be between 0 and {image_3d.shape[0]-1}")
+            
+            # Extract the 2D image at the specified z slice
+            image_slice = image_3d[z_slice, :, :]
+            
+            # Reduce the resolution if needed for performance
+            downscale_factor = 20 
+            image_slice_downscaled = image_slice[::downscale_factor, ::downscale_factor]
+            
+            # Create a grid for the image slice
+            xlim, ylim = image_slice.shape[1], image_slice.shape[0]
+            X_downscaled, Y_downscaled = np.meshgrid(
+                np.linspace(0, xlim, image_slice_downscaled.shape[1]),
+                np.linspace(0, ylim, image_slice_downscaled.shape[0])
+            )
+            Z_downscaled = np.full_like(X_downscaled, z_slice)  # Place the image at z_slice
+        
+            # Normalize image data for plotting
+            image_slice_normalized = image_slice_downscaled / image_slice_downscaled.max() if image_slice_downscaled.max() != 0 else image_slice_downscaled
+            
+            # Use plot_surface to display the image slice at the correct scale
+            ax.plot_surface(X_downscaled, Y_downscaled, Z_downscaled, rstride=1, cstride=1, facecolors=plt.cm.gray(image_slice_normalized), shade=False)
+        
+        # Plot each point in 3D
+        ax.scatter(data['x'], data['y'], data['z'], c=data['color'], s=5)
+        
+        # Add labels and title
+        ax.set_xlabel('X axis')
+        ax.set_ylabel('Y axis')
+        ax.set_zlabel('Z axis')
+        ax.set_title(f"Raw ROI Input Data for Segmentation")
+        
+        plt.show()
 
     # Run set of commands on a scenario
     def execute_commands(self):
@@ -267,6 +382,10 @@ class DemoGUIApp:
             '--scenarios_file', SCENARIOS_PATH,
             '--scenario_name', self.active_scenario,
         ]
+        # Remove the XZ cache if desired
+        if self.remake_xz.get() and os.path.exists(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"]):
+            print("Removed XZ Cache")
+            os.remove(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"])
         # Start the subprocess in a new thread to keep the GUI responsive
         threading.Thread(target=self.run_subprocess, args=[exec_args, "execute_commands"]).start()
         self.check_queue()
@@ -288,29 +407,49 @@ class DemoGUIApp:
             tool_name, status = self.result_queue.get_nowait()  # Non-blocking get
             if status == "success":
                 print(f"{tool_name} finished successfully!")
-                if tool_name in ("cell_merger_tool", "volume_segmenter_tool", "execute_commands"):
+                if tool_name in ("process_noise", "cell_merger_tool", "volume_segmenter_tool", "execute_commands"):
                     # Reload scenario dict
                     self.scenarios = self.load_scenarios_from_json(filepath=SCENARIOS_PATH)
-
                     if tool_name == "volume_segmenter_tool":
-                        # Check to see if reduction is required and perform it if necessary
-                        auto_reduce = self.reduce_var2.get()
-                        requires_reduction = self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"]
-                        is_reduced = self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]
-                        if auto_reduce and requires_reduction and not is_reduced:
-                            self.reduce_data()
-                    # Update info labels
-                    self.update_info_labels()
+                        # Check to see if merging is desired
+                        auto_merge = self.merge_var.get()
+                        if auto_merge:
+                            # Modify the validation file directly to merge rois in same volume and z
+                            v_out_file = os.path.join(self.scenarios[self.active_scenario]["V_DATA_FOLDER"],self.scenarios[self.active_scenario]["V_GT_CSV"])
+                            # Modify segmentation file directly as well
+                            s_out_file = self.scenarios[self.active_scenario]["SEG_IN_FILE"]
+                            self.process_data(merge = True, reduce = False, v_out = v_out_file, s_out = s_out_file, temp=False)
+                    # Update info checkboxes, which will update info labels
+                    self.update_scenario_from_checkboxes()
             else:
                 print(f"Error occurred in {tool_name}: {status}")
         except queue.Empty:
             # If no result yet, check again after 100ms
             self.root.after(100, self.check_queue)
 
+    def process_data(self, merge = False, reduce = False, v_out = None, s_out = None, temp = False):
+        if merge or reduce:
+            print(f"Performing reduction on datasets for {self.active_scenario}")
+            self.save_scenarios_to_json(filepath=SCENARIOS_PATH)
+            process_args = [
+                'python', '../CELLPOSE_SCRIPTS/process_noise.py',  
+                '--perform_grouping', str(merge),
+                '--perform_reduction', str(reduce),
+                '--temp_reduction', str(temp),
+                '--scenarios_path', SCENARIOS_PATH,
+                '--active_scenario', self.active_scenario,
+                '--roi_out_path', s_out,
+                '--vol_out_path', v_out
+            ]
+            # Start the subprocess in a new thread to keep the GUI responsive
+            threading.Thread(target=self.run_subprocess, args=[process_args, "process_noise"]).start()
+            self.check_queue()
+            
     def reduce_data(self):
-        print(f"Performing reduction on datasets for {self.active_scenario}")
-        self.update_info_labels()
-        pass
+        v_out = os.path.join(self.scenarios[self.active_scenario]["V_DATA_FOLDER"],self.scenarios[self.active_scenario]["V_GT_CSV"])
+        s_out = self.scenarios[self.active_scenario]["SEG_IN_FILE"]
+        # Process the data by merging it, reducing it (dropping noise), and operating on real datasets
+        self.process_data(merge=True, reduce=True, v_out=v_out, s_out=s_out, temp=False)
 
     def update_reduction_button(self):
         if self.active_scenario:
@@ -320,17 +459,25 @@ class DemoGUIApp:
             else:
                 requires_reduction = self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"]
                 if requires_reduction:
-                    self.reduce_data_button.config(state="normal", bg='lightgreen')
+                    self.reduce_data_button.config(state="normal", bg='orange')
                 else:
-                    self.reduce_data_button.config(state="normal", bg='lightgray')
+                    self.reduce_data_button.config(state="normal", bg='orange')
+            # Execute button logic
+            if self.seg_var.get() or self.algo_var.get() or self.gt_var.get():
+                self.execute_button.config(state = "normal", bg = "lightgreen")
+            else:
+                self.execute_button.config(state = "disabled", bg = "darkgray")
 
 
     def update_scenario_from_checkboxes(self):
         """Updates the scenario dictionary based on the checkbox states."""
         if self.active_scenario:
+            # Check to ensure the rules are being followed and make changes if required 
+            self.update_checkbox_enable_state()
             # Update the scenario dictionary with checkbox values
             self.scenarios[self.active_scenario]["RESTRICTED_MODE"] = bool(self.ffp_var.get())
             self.scenarios[self.active_scenario]["RUN_SEGMENTATION"] = bool(self.seg_var.get())
+            self.scenarios[self.active_scenario]["SEGMENT_VALIDATED_ONLY"] = bool(self.run_reduced_var.get())
             if self.algo_var.get() and self.gt_var.get():
                 self.scenarios[self.active_scenario]["PLOT_TYPE"] = "both"
             elif self.algo_var.get(): 
@@ -378,19 +525,6 @@ class DemoGUIApp:
                 value_label.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
         
             # Update checkbox labels
-            if self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"] and not self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]:
-                # Requires a reduction
-                self.reduce_var2.set(1)
-                if FORCE_REQUIRE_REDUCED_DATA:
-                    self.reduce_checkbox2.config(state="disabled") # Must reduce
-            else:
-                self.reduce_var2.set(0)
-                # Optionally may reduce
-                if self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]:
-                    self.reduce_checkbox2.config(state="disabled")
-                else:
-                    self.reduce_checkbox2.config(state="normal")
-
             if self.scenarios[self.active_scenario]["PLOT_TYPE"].lower() == "both": # Plot both
                 self.gt_var.set(1)
                 self.algo_var.set(1)
@@ -405,7 +539,8 @@ class DemoGUIApp:
                 self.algo_var.set(0)
             self.ffp_var.set(1 if scenario_data.get("RESTRICTED_MODE", None) else 0)
             self.seg_var.set(1 if scenario_data.get("RUN_SEGMENTATION", None) else 0)
-            self.update_info_labels()
+            self.run_reduced_var.set(1 if scenario_data.get("SEGMENT_VALIDATED_ONLY", None) else 0)
+            self.update_scenario_from_checkboxes()
         else:
             print(f"Unable to load scenario: {scenario_name}")
 
@@ -418,19 +553,36 @@ class DemoGUIApp:
             self.gt_checkbox.config(state="disabled")
             self.gt_var.set(0)
 
-        # If no data reduction has happened, a volume segmentation cannot be run in most cases
+        if not os.path.exists(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"]):
+            self.remake_xz.set(1)
+            self.xz_checkbox.config(state="disabled")
+        else:
+            self.xz_checkbox.config(state="normal")
+
+        # If no data reduction has happened, a volume segmentation cannot be run on main dataset - generates temporary one
         if scenario_data.get("REQUIRES_REDUCED_DATASET", False) and not scenario_data.get("HAS_REDUCED_DATASET", False):
+            self.run_reduced_var.set(1)
+            self.run_reduce_checkbox.config(state="disabled")
+        elif scenario_data.get("REQUIRES_REDUCED_DATASET", False) and scenario_data.get("HAS_REDUCED_DATASET", False):
+            self.run_reduced_var.set(0)
+            self.run_reduce_checkbox.config(state="disabled")
+        else:
+            self.run_reduce_checkbox.config(state="normal")
+
+        # Disable segmentation if no validation, a requirement for reduction, and no reduction present
+        if not scenario_data.get("HAS_VALIDATION", False) and scenario_data.get("REQUIRES_REDUCED_DATASET", False) and not scenario_data.get("HAS_REDUCED_DATASET", False):
             self.seg_var.set(0)
             self.seg_checkbox.config(state="disabled")
         else:
             self.seg_checkbox.config(state="normal")
-            self.seg_var.set(1 if scenario_data.get("RUN_SEGMENTATION", None) else 0)
+
 
         if scenario_data.get("HAS_ALGORITHMIC", False) or self.seg_var.get():
             self.algo_checkbox.config(state="normal")
         else:
             self.algo_checkbox.config(state="disabled")
             self.algo_var.set(0)
+        
         
 
     def update_info_labels(self):
@@ -449,7 +601,6 @@ class DemoGUIApp:
                 value_label.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
             # Update other fields
             self.update_reduction_button()
-            self.update_checkbox_enable_state()
         else:
             print("No active scenario to display.")
         
@@ -480,7 +631,7 @@ class DemoGUIApp:
             print(f"Error: File '{filepath}' not found.")
             return {}
         
-    def update_dropdown(self, event):
+    def update_dropdown(self, event=None):
         """Optionally filter the dropdown values based on user input."""
         typed_value = self.scenario_combobox.get()
         if typed_value == '':

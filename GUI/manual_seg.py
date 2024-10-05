@@ -42,6 +42,7 @@ class VolumeSegmentationApp:
         self.zoom_enabled = False
         self.image_updated = False
         self.zoom_selector = None
+        self.volumes_changed = False
         self.stored_xlim = None  # To store x-axis limits for persistent zoom
         self.stored_ylim = None  # To store y-axis limits for persistent zoom
         self.volume_visibility = {}  # To track visibility of each volume
@@ -59,7 +60,9 @@ class VolumeSegmentationApp:
         self.parser.add_argument('--tif_file_path', help='Path to the 3D .tif image file')
         self.parser.add_argument('--scenarios_path', help = "Path to scenarios json file")
         self.parser.add_argument('--active_scenario', help = "Name of the currently active scenario")
-        self.parser.add_argument('--autosave_exit_path', help='Path to export and save to on exit')
+        self.parser.add_argument('--autosave_exit_path', help='Path to export Validation csv to on exit')
+        self.parser.add_argument('--autosave_name', help='Name of output csv')
+        self.parser.add_argument('--roi_exit_path', help='Path to export ROI csv to on exit')
         self.parser.add_argument('--up_img_path', help='Path to up button image')
         self.parser.add_argument('--down_img_path', help='Path to down button image')
         self.parser.add_argument('--eye_open_img_path', help='Path to eye open image')
@@ -90,9 +93,7 @@ class VolumeSegmentationApp:
                 scenarios = json.load(file)
             if scenarios[self.input_args.active_scenario]["HAS_VALIDATION"]:
                 # Importing past manual segmentation
-                print("Importing past manual volume segmentation")
-                import_path = os.path.join(scenarios[self.input_args.active_scenario]["V_DATA_FOLDER"], self.input_args.cell_data_path)
-                self.import_segmentation(path = import_path)
+                self.import_segmentation(path = self.input_args.cell_data_path)
             else:
                 # Starting new manual segmentation
                 print("Starting new manual volume segmentation")
@@ -201,6 +202,11 @@ class VolumeSegmentationApp:
     def on_slider_release(self, event):
         # Update brightness only when the slider is released
         self.brightness_factor = float(self.brightness_slider.get())
+        self.image_updated = True
+        if self.roi_modified.get(self.current_z, None):
+            for roi_id in self.roi_modified[self.current_z]:
+                self.roi_modified[self.current_z][roi_id] = True
+
         self.update_display()  # Redraw the image with the new brightness
 
 
@@ -212,7 +218,6 @@ class VolumeSegmentationApp:
             self.csv_path = path
         if self.csv_path:
             self.data = pd.read_csv(self.csv_path)
-            self.data.columns = self.data.columns
             self.current_z = self.data['z'].min()
 
             for z_level in self.data['z'].unique():
@@ -325,8 +330,9 @@ class VolumeSegmentationApp:
             self.current_z = max(0, self.current_z - 1)
             if self.current_z != old_current_z:
                 # Re-draw rois when this plane is re-visited
-                for roi_id in self.roi_modified[old_current_z]:
-                    self.roi_modified[old_current_z][roi_id] = True
+                if self.roi_modified.get(old_current_z, None):
+                    for roi_id in self.roi_modified[old_current_z]:
+                        self.roi_modified[old_current_z][roi_id] = True
 
                 self.update_display(z_changed = True)
 
@@ -336,8 +342,9 @@ class VolumeSegmentationApp:
             self.current_z = min(self.image_stack.shape[0] - 1, self.current_z + 1)
             if self.current_z != old_current_z:
                 # Re-draw rois when this plane is re-visited
-                for roi_id in self.roi_modified[old_current_z]:
-                    self.roi_modified[old_current_z][roi_id] = True
+                if self.roi_modified.get(old_current_z, None):
+                    for roi_id in self.roi_modified[old_current_z]:
+                        self.roi_modified[old_current_z][roi_id] = True
 
                 self.update_display(z_changed = True)
 
@@ -364,7 +371,8 @@ class VolumeSegmentationApp:
                 self.ax.set_ylim(self.stored_ylim)
                 self.canvas.draw_idle()
         if old_z != self.current_z:
-            for roi_id in self.roi_modified[old_z]:
+            if self.roi_modified.get(old_z, None):
+                for roi_id in self.roi_modified[old_z]:
                     self.roi_modified[old_z][roi_id] = True
             self.update_display(z_changed=True)
         else:
@@ -373,14 +381,23 @@ class VolumeSegmentationApp:
 
     def on_closing(self):
         # Volumes exist, perform export
-        if len(self.volumes) > 0 and self.input_args.autosave_exit_path:
-            self.export_csv(export_path=self.input_args.autosave_exit_path)
+        if len(self.volumes) > 0 and self.volumes_changed and self.input_args.autosave_exit_path:
+            result = self.export_csv(export_path=self.input_args.autosave_exit_path, roi_export_path=self.input_args.roi_exit_path)
             # Get scenarios dict
             with open(self.input_args.scenarios_path, 'r') as file:
                 scenarios = json.load(file)
             # Update path to validation file
-            scenarios[self.input_args.active_scenario]["V_GT_CSV"] = self.input_args.autosave_exit_path
+            scenarios[self.input_args.active_scenario]["V_GT_CSV"] = self.input_args.autosave_name
             scenarios[self.input_args.active_scenario]["HAS_VALIDATION"] = True
+            if self.input_args.roi_exit_path: # Generate custom csv for this scenario
+                scenarios[self.input_args.active_scenario]["SEG_IN_FILE"] = self.input_args.roi_exit_path
+            # Determine if any ROIs are not in a volume
+            if result:
+                print("dataset is not reduced")
+                scenarios[self.input_args.active_scenario]["HAS_REDUCED_DATASET"] = False
+            else:
+                print("dataset is reduced")
+                scenarios[self.input_args.active_scenario]["HAS_REDUCED_DATASET"] = True
             # Export result
             with open(self.input_args.scenarios_path, 'w') as file:
                 json.dump(scenarios, file, indent=4)
@@ -394,8 +411,9 @@ class VolumeSegmentationApp:
                 z_value = int(self.z_entry.get())
                 if 0 <= z_value < self.image_stack.shape[0]:
                     # Re-draw rois when this plane is re-visited
-                    for roi_id in self.roi_modified[self.current_z]:
-                        self.roi_modified[self.current_z][roi_id] = True
+                    if self.roi_modified.get(self.current_z, None):
+                        for roi_id in self.roi_modified[self.current_z]:
+                            self.roi_modified[self.current_z][roi_id] = True
                     self.current_z = z_value
                     self.update_display(z_changed = True)
                 else:
@@ -608,8 +626,9 @@ class VolumeSegmentationApp:
 
     def toggle_visibility(self, volume_id):
         self.volume_visibility[volume_id] = not self.volume_visibility[volume_id]
-        for roi_id in self.roi_modified[self.current_z]:
-            self.roi_modified[self.current_z][roi_id] = True # Redraw when visible
+        if self.roi_modified.get(self.current_z, None):
+            for roi_id in self.roi_modified[self.current_z]:
+                self.roi_modified[self.current_z][roi_id] = True # Redraw when visible
         self.update_volume_sidebar(preserve_scroll=True)
         self.update_display()
 
@@ -650,6 +669,7 @@ class VolumeSegmentationApp:
                         del self.roi_to_volume[roi]
                         print(f"ROI {roi_id} disassociated from {associated_volume}")
                         self.roi_modified[self.current_z][roi_id] = True
+                        self.volumes_changed = True
                         # tk.messagebox.showinfo("Info", f"ROI {roi_id} disassociated from {associated_volume}.")
                     elif roi in existing_rois:
                         print(f"ROI is already in {self.current_volume}")
@@ -664,6 +684,7 @@ class VolumeSegmentationApp:
                         self.volumes[self.current_volume].add(roi)
                         self.roi_to_volume[roi] = self.current_volume
                         self.roi_modified[self.current_z][roi_id] = True
+                        self.volumes_changed = True
                         # tk.messagebox.showinfo("Info", f"ROI {roi_id} associated with {self.current_volume}.")
 
                     # Update display and sidebar
@@ -676,6 +697,7 @@ class VolumeSegmentationApp:
         segmentation_path = path or filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if segmentation_path:
             # Read the CSV file containing segmentation data
+            print(f"Importing from : {segmentation_path}")
             segmentation_data = pd.read_csv(segmentation_path)
             # Check if the CSV has the required columns
             required_columns = {'x', 'y', 'z', 'ROI_ID', 'VOLUME_ID'}
@@ -748,7 +770,7 @@ class VolumeSegmentationApp:
             tk.messagebox.showerror("Error", "No file selected.")
 
 
-    def export_csv(self, export_path):
+    def export_csv(self, export_path = None, roi_export_path = None):
         # Export the modified CSV with numerical VOLUME_IDs
         if self.data is not None:
             # Create a mapping of volume names to numerical IDs
@@ -764,10 +786,22 @@ class VolumeSegmentationApp:
                 export_path = filedialog.asksaveasfilename(defaultextension=".csv",
                                                     filetypes=[("CSV Files", "*.csv")])
             if export_path:
+                print(f"Exporting to: {export_path}")
                 export_data.to_csv(export_path, index=False)
-                tk.messagebox.showinfo("Export Complete", "CSV has been exported successfully.")
+                print("Volume Data Exported Successfully")
+
+            # Export ROI base data if provided
+            if roi_export_path:
+                self.data.to_csv(roi_export_path, index=False)
+
+            # Determine if any ROIs are not in a volume
+            if (export_data['VOLUME_ID'] == -1).any():
+                return 1
+            else: 
+                return 0
         else:
             tk.messagebox.showerror("Error", "No CSV file has been loaded.")
+            return -1
 
 
 
