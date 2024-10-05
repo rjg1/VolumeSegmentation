@@ -29,6 +29,17 @@ XZ_IO_PATH = None
 ROI_PROJECTION_N_POINTS = 300
 # Whether to use fit-for-purpose DRG segmentation or generalised segmentation
 RESTRICTED_MODE = True
+# Default FFP Parameters
+ROI_PROJECTION_N_POINTS = 300           # Number of points to project around an ROI boundary when deciding intersection (Higher -> more computation)
+CENTROID_DISTANCE_MAX = 10              # Maximum allowable distance between centroids of two adjacent XY ROIs
+CENTROID_DISTANCE_PERC = 68             # Maximum allowable distance between centroids of two adjacent XY ROIs as a percentage of the radius of a centroid
+MATCH_Z_THRESHOLD = 4                   # Maximum distance between two adjacent XY rois in Z to be part of same volume
+AREA_DELTA_PERC_THRESHOLD = 50          # Maximum change in percent of ROI area between two XY rois in a volume
+RESTRICT_AREA = False                   # Restriction in the difference in area between two adjacent XY ROIs in a volume
+RESTRICT_CENTROID_DISTANCE = True       # Restriction on the distance between centroid of two adjacent XY ROIs in a volume
+USE_PERCENT_CENTROID_DISTANCE = False   # Centroid distance threshold is a percent of the radius of an XY ROI instead of a flat value
+RESTRICT_ADJACENCY = True               # Restriction on how close an XY ROI must be in Z to its nearest neighbour in the volume
+RESTRICT_MULTIPLE_XY_PER_VOL = True     # Restriction on whether or not two XY ROIs are allowed to be in the same z-level per volume
 
 def main():
     # Set up argument parser
@@ -39,6 +50,17 @@ def main():
     parser.add_argument('--out_file', default=OUT_FILE, help='Output filepath where the results csv will be placed (default: %(default)s)')
     parser.add_argument('--xz_io_path', default=XZ_IO_PATH, help='Directory to look in for/generate an XZ plane cache (default: %(default)s)')
     parser.add_argument('--restricted_mode', default=RESTRICTED_MODE, help='Use DRG segmentation technique (default: %(default)s)')
+    # Arguments for FFP parameters
+    parser.add_argument('--use_flat_centroid', default=RESTRICT_CENTROID_DISTANCE or USE_PERCENT_CENTROID_DISTANCE, help='Restrict relative centroid distance of adjacent ROIs in z in a volume by a flat amount (default: %(default)s)')
+    parser.add_argument('--use_perc_centroid', default=USE_PERCENT_CENTROID_DISTANCE, help='Restrict relative centroid distance of adjacent ROIs in z per volume by a percentage of the avg radius of the roi (default: %(default)s)')
+    parser.add_argument('--use_z_threshold', default=RESTRICT_ADJACENCY, help='Only allow ROIs to be added to the same volume if their relative z value is within this threshold to its adjacent ROI in z(default: %(default)s)')
+    parser.add_argument('--use_area_restriction', default=RESTRICT_AREA, help='Prevent adjacent ROIs in z from being added to the same volume if the percent area change is too large (default: %(default)s)')
+    parser.add_argument('--use_xy_restriction', default=RESTRICT_MULTIPLE_XY_PER_VOL, help='Only allow one xy roi per z per volume (default: %(default)s)')
+    parser.add_argument('--num_projection_points', default=ROI_PROJECTION_N_POINTS, help='Number of points to project when determining intersection (default: %(default)s)')
+    parser.add_argument('--flat_centroid_dist', default=CENTROID_DISTANCE_MAX, help='Flat threshold for centroid check(default: %(default)s)')
+    parser.add_argument('--perc_centroid_dist', default=CENTROID_DISTANCE_PERC, help='Percent threshold for centroid check(default: %(default)s)')
+    parser.add_argument('--match_z_threshold', default=MATCH_Z_THRESHOLD, help='Match z threshold (default: %(default)s)')
+    parser.add_argument('--area_delta_perc', default=AREA_DELTA_PERC_THRESHOLD, help='Area percent threshold for area restriction (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -51,7 +73,20 @@ def main():
         xz_io_path = None
     # Avoid short circuit with boolean restricted mode
     restricted_mode = str_to_bool(args.restricted_mode) if args.restricted_mode is not None else RESTRICTED_MODE
-
+    if restricted_mode:
+        # Unpack parameters to use
+        algo_parameters = {
+            'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
+            'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
+            'restrict_adjacency': str_to_bool(args.use_z_threshold),
+            'restrict_area': str_to_bool(args.use_area_restriction),
+            'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
+            'roi_projection_n_points': int(args.num_projection_points),
+            'centroid_distance_max': int(args.flat_centroid_dist),
+            'centroid_distance_perc': int(args.perc_centroid_dist),
+            'match_z_threshold': int(args.match_z_threshold),
+            'area_delta_perc_threshold': int(args.area_delta_perc)
+        }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
     # Generate XZ ROIs
@@ -82,19 +117,21 @@ def main():
     print("Cluster segmentation complete. Performing Volume Segmentation...")
     # Perform volume segmentation using XY ROIs and XZ Regions
     if restricted_mode:
-        volumes = segment_volumes_drg(clustered_hulls, points)
+        volumes = segment_volumes_drg(clustered_hulls, points, parameters=algo_parameters)
     else:
         volumes = segment_volumes(clustered_hulls, points)
-    # DEBUG: EST PRINTING OUTPUT OF VOLUMES
-    for volume_id, volume in volumes.items():
-        print(f"Volume_id: {volume_id}")
-        xz_rois = volume.get_xz_rois()
-        xy_rois = volume.get_xy_rois()
-        print(f"Num xz_rois: {len(xz_rois)}")
-        print(f"Num xy_rois: {len(xy_rois)}")
+    
+    if volumes:
+        # DEBUG: EST PRINTING OUTPUT OF VOLUMES
+        for volume_id, volume in volumes.items():
+            print(f"Volume_id: {volume_id}")
+            xz_rois = volume.get_xz_rois()
+            xy_rois = volume.get_xy_rois()
+            print(f"Num xz_rois: {len(xz_rois)}")
+            print(f"Num xy_rois: {len(xy_rois)}")
 
-    # Export segmentation to csv
-    export_segmentation(volumes, filename=out_file)
+        # Export segmentation to csv
+        export_segmentation(volumes, filename=out_file)
 
 
 def str_to_bool(value):

@@ -12,6 +12,7 @@ ALGO_CSV_FILENAME = 'real_data_filtered_algo_VOLUMES.csv'  # Algorithmic CSV fil
 MAPPING_FILENAME = 'mapping.csv'
 MAX_POINTS = 8000 # Maximum points to sample
 DRAW_LINES = False
+UNMATCHED_MARKER = 'x'
 
 def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
@@ -71,11 +72,11 @@ def assign_colors_by_volume_id(gt_df, algo_df, volume_mapping):
     return gt_colors_array, algo_colors_array
 
 def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume_mapping):
-    """Visualize the ground truth and algorithmic points side by side in 3D, with indicators for unmatched ground truth volumes."""
+    """Visualize the ground truth and algorithmic points side by side in 3D, with indicators for matched and unmatched volumes."""
 
     fig = plt.figure(figsize=(12, 6))
 
-    # Ground truth plot
+    # Ground truth plot (ax1)
     ax1 = fig.add_subplot(121, projection='3d')
     
     # Extract unmatched ground truth volumes
@@ -85,17 +86,13 @@ def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume
     
     # Plot matched ground truth volumes
     matched_gt_points = gt_df[~gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)]
-    ax1.scatter(matched_gt_points['x'], matched_gt_points['y'], matched_gt_points['z'], c=gt_colors[~gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)], s=1, label="Matched GT Volumes")
+    ax1.scatter(matched_gt_points['x'], matched_gt_points['y'], matched_gt_points['z'], 
+                c=gt_colors[~gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)], s=1, label="Matched GT Volumes")
 
-    # Highlight unmatched ground truth volumes with a distinct color (e.g., red) and marker style (e.g., 'x')
+    # Highlight unmatched ground truth volumes
     unmatched_gt_points = gt_df[gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)]
     ax1.scatter(unmatched_gt_points['x'], unmatched_gt_points['y'], unmatched_gt_points['z'], 
-                c=gt_colors[gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)], s=10, label="Unmatched GT Volumes")
-
-    # Optional: Add lines to indicate unmatched points (e.g., connecting to the origin or a specific point)
-    if DRAW_LINES:
-        for i, row in unmatched_gt_points.iterrows():
-            ax1.plot([row['x'], 512], [row['y'], 512], [row['z'], 512], color='red', linestyle='--', linewidth=0.5) 
+                c=gt_colors[gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)], s=1, label="Unmatched GT Volumes", marker=UNMATCHED_MARKER)
 
     ax1.set_xlabel('X')
     ax1.set_ylabel('Y')
@@ -106,14 +103,24 @@ def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume
     ax1.set_zlim3d(0, 1024)
     ax1.legend()
 
-    # Filter algorithmic volumes to only plot matched ones
-    matched_algo_volumes = set(volume_mapping.values())
-    matched_algo_points = algo_df[algo_df['VOLUME_ID'].isin(matched_algo_volumes)]
-
-    # Algorithmic segmentation plot
+    # Algorithmic segmentation plot (ax2)
     ax2 = fig.add_subplot(122, projection='3d')
-    # ax2.scatter(algo_df['x'], algo_df['y'], algo_df['z'], c=algo_colors, s=1)
-    ax2.scatter(matched_algo_points['x'], matched_algo_points['y'], matched_algo_points['z'], c=algo_colors[algo_df['VOLUME_ID'].isin(matched_algo_volumes)], s=1)
+
+    # Extract matched and unmatched algorithmic volumes
+    matched_algo_volumes = set(volume_mapping.values())
+    all_algo_volumes = set(algo_df['VOLUME_ID'].unique())
+    unmatched_algo_volumes = all_algo_volumes - matched_algo_volumes
+
+    # Filter and plot matched algorithmic volumes
+    matched_algo_points = algo_df[algo_df['VOLUME_ID'].isin(matched_algo_volumes)]
+    ax2.scatter(matched_algo_points['x'], matched_algo_points['y'], matched_algo_points['z'], 
+                c=algo_colors[algo_df['VOLUME_ID'].isin(matched_algo_volumes)], s=1, label="Matched Algorithmic Volumes")
+
+    # Filter and plot unmatched algorithmic volumes
+    unmatched_algo_points = algo_df[algo_df['VOLUME_ID'].isin(unmatched_algo_volumes)]
+    ax2.scatter(unmatched_algo_points['x'], unmatched_algo_points['y'], unmatched_algo_points['z'], 
+                c=algo_colors[algo_df['VOLUME_ID'].isin(unmatched_algo_volumes)], s=1, label="Unmatched Algorithmic Volumes", marker=UNMATCHED_MARKER)
+
     ax2.set_xlabel('X')
     ax2.set_ylabel('Y')
     ax2.set_zlabel('Z')
@@ -121,10 +128,10 @@ def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume
     ax2.set_xlim3d(0, 1024)
     ax2.set_ylim3d(0, 1024)
     ax2.set_zlim3d(0, 1024)
+    ax2.legend()
 
     plt.tight_layout()
     plt.show()
-
 
 def load_volume_mapping(mapping_filename):
     """

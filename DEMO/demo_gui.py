@@ -24,14 +24,26 @@ VOLUME_SEGMENTER_PATH = "../GUI/manual_seg.py"
 # Force new scenarios to reduce data first
 FORCE_REQUIRE_REDUCED_DATA = True
 # Save scenarios json on close
-SAVE_SCENARIOS_ON_CLOSE = False
+SAVE_SCENARIOS_ON_CLOSE = True
 # Data paths to default data used
 DEFAULT_DATA_PATHS = [RAW_DATA_PATH, MERGED_DATA_PATH]
 # Maximum number of points to sample for raw data viewer
 MAX_SAMPLE_POINTS = 15000
 # Whether to draw some z-slices of the original .tif file on the raw data
 SHOW_Z_SLICES = False
-
+# Maximum label width for info display
+MAX_LABEL_WIDTH = 20
+# Default FFP segmentation parameters
+USE_FLAT_CENTROID = True
+USE_PERC_CENTROID = False
+USE_Z_THRESHOLD = True
+USE_AREA_RESTRICTION = False
+USE_XY_RESTRICTION = True
+NUM_PROJECTION_POINTS = 300
+FLAT_CENTROID_DIST = 10
+PERC_CENTROID_DIST = 68
+MATCH_Z_THRESHOLD = 2
+AREA_DELTA_PERC = 50
 
 class DemoGUIApp:
     def __init__(self, root):
@@ -172,29 +184,93 @@ class DemoGUIApp:
         self.ffp_checkbox = tk.Checkbutton(self.lower_right_frame, text="Use Fit-For-Purpose Algorithm", variable=self.ffp_var, command=self.update_scenario_from_checkboxes)
         self.ffp_checkbox.grid(row=3, column=0, sticky="w", padx=5, pady=2)
 
+        # ALGORITHM PARAMETERS
+        self.algorithm_frame = tk.Frame(self.outer_frame)
+        self.algorithm_frame.grid(row=0, column=2, padx=5, pady=15, sticky="new", columnspan=2)
+        self.algorithm_frame.grid_remove()  # Hide initially
+        
+        # Create the widgets inside the frame
+        label = tk.Label(self.algorithm_frame, text="Algorithm Parameters", font=("Arial", 12, "bold"))
+        label.grid(row=0, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
+
+        # Row 1: Entry + Checkbox
+        self.flat_centroid_entry_var = tk.StringVar()  # Use StringVar to track changes
+        self.flat_centroid_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.flat_centroid_entry_var)
+        self.flat_centroid_entry.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
+        self.flat_centroid_entry.bind("<Return>", self.update_algo_parameters) 
+
+        self.flat_centroid_check_var = tk.IntVar()  # Variable for Checkbutton
+        self.flat_centroid_check = tk.Checkbutton(self.algorithm_frame, text="Flat centroid distance", variable=self.flat_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="flat"))
+        self.flat_centroid_check.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+        # Row 2: Entry + Checkbox
+        self.perc_centroid_entry_var = tk.StringVar()
+        self.perc_centroid_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.perc_centroid_entry_var)
+        self.perc_centroid_entry.grid(row=2, column=0, padx=5, pady=2, sticky="ew")
+        self.perc_centroid_entry.bind("<Return>", self.update_algo_parameters) 
+
+        self.perc_centroid_check_var = tk.IntVar()
+        self.perc_centroid_check = tk.Checkbutton(self.algorithm_frame, text="Percent radius centroid distance", variable=self.perc_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="perc"))
+        self.perc_centroid_check.grid(row=2, column=1, padx=5, pady=2, sticky="w")
+
+        # Row 3: Entry + Checkbox
+        self.match_z_entry_var = tk.StringVar()
+        self.match_z_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.match_z_entry_var)
+        self.match_z_entry.grid(row=3, column=0, padx=5, pady=2, sticky="ew")
+        self.match_z_entry.bind("<Return>", self.update_algo_parameters) 
+
+        self.match_z_check_var = tk.IntVar()
+        self.match_z_check = tk.Checkbutton(self.algorithm_frame, text="Match Z threshold", variable=self.match_z_check_var, command=self.update_algo_parameters)
+        self.match_z_check.grid(row=3, column=1, padx=5, pady=2, sticky="w")
+
+        # Row 4: Entry + Checkbox
+        self.restrict_area_entry_var = tk.StringVar()
+        self.restrict_area_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.restrict_area_entry_var)
+        self.restrict_area_entry.grid(row=4, column=0, padx=5, pady=2, sticky="ew")
+        self.restrict_area_entry.bind("<Return>", self.update_algo_parameters) 
+
+        self.restrict_area_check_var = tk.IntVar()
+        self.restrict_area_check = tk.Checkbutton(self.algorithm_frame, text="Restrict Area Delta Percent", variable=self.restrict_area_check_var, command=self.update_algo_parameters)
+        self.restrict_area_check.grid(row=4, column=1, padx=5, pady=2, sticky="w")
+
+        # Row 5: Entry + Label
+        self.num_points_entry_var = tk.StringVar()
+        self.num_points_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.num_points_entry_var)
+        self.num_points_entry.grid(row=5, column=0, padx=5, pady=2, sticky="ew")
+        self.num_points_entry.bind("<Return>", self.update_algo_parameters) 
+
+        label = tk.Label(self.algorithm_frame, text="Number of points to project")
+        label.grid(row=5, column=1, padx=5, pady=2, sticky="w")
+
+        # Row 6: Checkbox
+        self.xy_restrict_check_var = tk.IntVar()
+        self.xy_restrict_check = tk.Checkbutton(self.algorithm_frame, text="One XY ROI per z-level per volume", variable=self.xy_restrict_check_var, command=self.update_algo_parameters)
+        self.xy_restrict_check.grid(row=6, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+
+        # END algorithm options
         self.xz_checkbox = tk.Checkbutton(self.lower_right_frame, text="Regenerate XZ Planes", variable=self.remake_xz, command=self.update_scenario_from_checkboxes)
-        self.xz_checkbox.grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        self.xz_checkbox.grid(row=5, column=0, sticky="w", padx=5, pady=2)
 
         self.seg_checkbox = tk.Checkbutton(self.lower_right_frame, text="Run Volume Segmentation", variable=self.seg_var, command=self.update_scenario_from_checkboxes)
-        self.seg_checkbox.grid(row=5, column=0, sticky="w", padx=5, pady=2)
+        self.seg_checkbox.grid(row=6, column=0, sticky="w", padx=5, pady=2)
 
         plot_label = tk.Label(self.lower_right_frame, text="Plot Options", font=("Arial", 10, "bold"))
-        plot_label.grid(row=6, column=0, padx=10, pady=5)
+        plot_label.grid(row=7, column=0, padx=10, pady=5)
 
         self.gt_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Ground Truth Volumes", variable=self.gt_var, command=self.update_scenario_from_checkboxes)
-        self.gt_checkbox.grid(row=7, column=0, sticky="w", padx=5, pady=2)
+        self.gt_checkbox.grid(row=8, column=0, sticky="w", padx=5, pady=2)
 
         self.algo_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Algorithmic Volumes", variable=self.algo_var, command=self.update_scenario_from_checkboxes)
-        self.algo_checkbox.grid(row=8, column=0, sticky="w", padx=5, pady=2)
+        self.algo_checkbox.grid(row=9, column=0, sticky="w", padx=5, pady=2)
 
         # Execute button with fixed width
         self.execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        self.execute_button.grid(row=9, column=0, padx=5, pady=2, sticky="ew")
+        self.execute_button.grid(row=10, column=0, padx=5, pady=2, sticky="ew")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()
         checkbox_value = bool(self.check_var.get())
-        print(f"Creating scenario: {scenario_name} | Merge data flag: {checkbox_value}")
+        print(f"Creating scenario: {scenario_name} | Reduce data flag: {checkbox_value}")
         if scenario_name in self.scenarios or len(scenario_name) < 1:
             messagebox.showinfo("Creation Fail", f"Cannot create scenario with name \'{scenario_name}\'. Please choose a unique name with at least 1 character.")
         else:
@@ -228,7 +304,19 @@ class DemoGUIApp:
                 "V_TEMP_REDUCED_FILE": scenario_name + "_VOLUMES_REDUCED.csv",
                 "V_GT_CSV": "", # Generated by running volume seg tool
                 "V_ALGO_CSV": "", # Generated by running algorithmic seg tool
-                "V_MAPPING_CSV": "mapping.csv"
+                "V_MAPPING_CSV": "mapping.csv",
+                "algo_parameters" : {
+                    "use_flat_centroid" : USE_FLAT_CENTROID,
+                    "use_perc_centroid" : USE_PERC_CENTROID,
+                    "use_z_threshold" : USE_Z_THRESHOLD,
+                    "use_area_restriction" : USE_AREA_RESTRICTION,
+                    "use_xy_restriction": USE_XY_RESTRICTION,
+                    "num_projection_points" : NUM_PROJECTION_POINTS,
+                    "flat_centroid_dist" : FLAT_CENTROID_DIST,
+                    "perc_centroid_dist" : PERC_CENTROID_DIST,
+                    "match_z_threshold" : MATCH_Z_THRESHOLD,
+                    "area_delta_perc" : AREA_DELTA_PERC
+                }
             }
             self.update_dropdown()
 
@@ -286,6 +374,65 @@ class DemoGUIApp:
             exec_args.extend(['--roi_exit_path', roi_exit_path])
         threading.Thread(target=self.run_subprocess, args=(exec_args, "volume_segmenter_tool")).start()
         self.check_queue()
+
+    # Updates the dictionary of a scenario with its algorithm parameters
+    def update_algo_parameters(self, event = None, checkbox_name = None):
+        print("Updating algo parameters")
+        algo_parameters = self.scenarios[self.active_scenario]["algo_parameters"]
+        # Handle conflicting centroid presses
+        if checkbox_name == "flat" and self.perc_centroid_check_var.get():
+            self.perc_centroid_check_var.set(0)
+        elif checkbox_name == "perc" and self.flat_centroid_check_var.get():
+            self.flat_centroid_check_var.set(0)
+        # Update checkbox variables
+        algo_parameters['use_flat_centroid'] = bool(self.flat_centroid_check_var.get())
+        algo_parameters['use_perc_centroid'] = bool(self.perc_centroid_check_var.get())
+        algo_parameters['use_z_threshold'] = bool(self.match_z_check_var.get())
+        algo_parameters['use_area_restriction'] = bool(self.restrict_area_check_var.get())
+        algo_parameters['use_xy_restriction'] = bool(self.xy_restrict_check_var.get())
+        # Update entry variables if applicable
+        entries = [self.flat_centroid_entry, self. perc_centroid_entry, self.match_z_entry,
+                   self.restrict_area_entry, self.num_points_entry]
+        ranges = [(0,100), (0,1000), (0, 150), (0,1000), (100,500)]
+        keys = ["flat_centroid_dist", "perc_centroid_dist", "match_z_threshold", 
+                "area_delta_perc", "num_projection_points"]
+        for idx, entry in enumerate(entries): # Process each entry and attempt to parse the variable
+            value = entry.get()
+            try:
+                # Ensure the value is an integer
+                value_as_int = int(value)
+                # Ensure the value is in range
+                min_range, max_range = ranges[idx]
+                if value_as_int >= min_range and value_as_int <= max_range:
+                    algo_parameters[keys[idx]] = value_as_int # Update the dictionary
+            except ValueError:
+                print(f"Please enter an integer value, or a value in a suitable range.")
+                pass
+
+    # Loads algorithm parameters and sets values of widgets
+    def load_algo_parameters(self):
+        if not self.active_scenario:
+            return
+        algo_parameters = self.scenarios[self.active_scenario]['algo_parameters']
+        if algo_parameters["use_flat_centroid"] and algo_parameters["use_perc_centroid"]:
+            algo_parameters["use_perc_centroid"] = False # only allow one centroid restriction
+        # CHECKBOX UPDATES
+        self.flat_centroid_check_var.set(1 if algo_parameters["use_flat_centroid"] else 0)
+        self.perc_centroid_check_var.set(1 if algo_parameters["use_perc_centroid"] else 0)
+        self.match_z_check_var.set(1 if algo_parameters["use_z_threshold"] else 0)
+        self.restrict_area_check_var.set(1 if algo_parameters["use_area_restriction"] else 0)
+        self.xy_restrict_check_var.set(1 if algo_parameters["use_xy_restriction"] else 0)
+        # ENTRY UPDATES
+        self.num_points_entry.delete(0, tk.END)
+        self.num_points_entry.insert(0, str(algo_parameters["num_projection_points"]))
+        self.match_z_entry.delete(0, tk.END)
+        self.match_z_entry.insert(0, str(algo_parameters["match_z_threshold"]))
+        self.flat_centroid_entry.delete(0, tk.END)
+        self.flat_centroid_entry.insert(0, str(algo_parameters["flat_centroid_dist"]))
+        self.perc_centroid_entry.delete(0, tk.END)
+        self.perc_centroid_entry.insert(0, str(algo_parameters["perc_centroid_dist"]))
+        self.restrict_area_entry.delete(0, tk.END)
+        self.restrict_area_entry.insert(0, str(algo_parameters["area_delta_perc"]))
 
     def generate_data_plot(self, slices=SHOW_Z_SLICES):
         if not self.active_scenario:
@@ -375,6 +522,8 @@ class DemoGUIApp:
 
     # Run set of commands on a scenario
     def execute_commands(self):
+        # Update the algorithm parameters to the latest valid values stored
+        self.update_algo_parameters()
         # Save current scenarios
         self.save_scenarios_to_json(filepath=SCENARIOS_PATH)
         exec_args = [
@@ -540,12 +689,22 @@ class DemoGUIApp:
             self.ffp_var.set(1 if scenario_data.get("RESTRICTED_MODE", None) else 0)
             self.seg_var.set(1 if scenario_data.get("RUN_SEGMENTATION", None) else 0)
             self.run_reduced_var.set(1 if scenario_data.get("SEGMENT_VALIDATED_ONLY", None) else 0)
+            
+            # Update ffp algorithm GUI widgets
+            if scenario_data["RESTRICTED_MODE"]:
+                self.load_algo_parameters()
+            
             self.update_scenario_from_checkboxes()
         else:
             print(f"Unable to load scenario: {scenario_name}")
 
     def update_checkbox_enable_state(self):
         scenario_data = self.scenarios[self.active_scenario]
+        # Show algorithm parameters if FFP used
+        if self.ffp_var.get():
+            self.algorithm_frame.grid()
+        else:
+            self.algorithm_frame.grid_remove()
         # May only view GT if a validation set has been generated
         if scenario_data.get("HAS_VALIDATION", False):
             self.gt_checkbox.config(state="normal")
@@ -597,8 +756,14 @@ class DemoGUIApp:
 
             # Add updated labels for the values
             for idx, (key, value) in enumerate(scenario_data.items()):
-                value_label = tk.Label(self.right_info_frame, text=str(value), anchor="w", justify="left")
+                display_value = str(value)
+                if len(display_value) > MAX_LABEL_WIDTH:
+                    display_value = display_value[:MAX_LABEL_WIDTH - 3] + "..." 
+
+                # Create the label with a fixed width and wrapping
+                value_label = tk.Label(self.right_info_frame, text=display_value, anchor="w", justify="left", width=MAX_LABEL_WIDTH)
                 value_label.grid(row=idx, column=1, sticky="w", padx=5, pady=2)
+
             # Update other fields
             self.update_reduction_button()
         else:

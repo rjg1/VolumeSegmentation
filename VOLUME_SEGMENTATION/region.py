@@ -9,11 +9,12 @@ def calculate_area_of_roi(boundary_points):
     Calculate the area of a region using the boundary points.
     Assumes the boundary points form a closed polygon in 2D (x, y).
     """
+    # Extract 2D points (x, y) from the boundary points
+    polygon_points = [(x, y) for x, y, z in boundary_points]  # Use only the x and y coordinates
+    
     if len(polygon_points) < 3:
         # print(f"Invalid ROI: Only {len(polygon_points)} points provided.")
         return 0.0  # Return 0 area for invalid polygons
-    # Extract 2D points (x, y) from the boundary points
-    polygon_points = [(x, y) for x, y, z in boundary_points]  # Use only the x and y coordinates
     polygon = Polygon(polygon_points)  # Create a polygon from the points
     return polygon.area
 

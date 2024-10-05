@@ -107,6 +107,16 @@ def main():
                 ]
                 subprocess.run(process_args, check=True)
                 # Wait for processing to be complete
+            if restricted_mode:
+                # Add in parameters for the restricted mode
+                out_params = []
+                algo_parameters = parameters.get("algo_parameters", {})
+                for parameter, value in algo_parameters.items():
+                    command = "--" + str(parameter)
+                    out_params.extend([command, str(value)])
+                # Add parameter list to seg args
+                seg_args.extend(out_params)
+            print(f"Running seg with: {seg_args}")
             subprocess.run(seg_args, check=True)
             # Update json to point to new algo output csv
             has_algorithmic = True

@@ -7,22 +7,12 @@ from volume import Volume
 import random
 
 from scipy.spatial import distance
-# Parameters
-ROI_PROJECTION_N_POINTS = 300           # Number of points to project around an ROI boundary when deciding intersection (Higher -> more computation)
-CENTROID_DISTANCE_MAX = 10              # Maximum allowable distance between centroids of two adjacent XY ROIs
-CENTROID_DISTANCE_PERC = 68             # Maximum allowable distance between centroids of two adjacent XY ROIs as a percentage of the radius of a centroid
-MATCH_Z_THRESHOLD = 4                   # Maximum distance between two adjacent XY rois in Z to be part of same volume
-AREA_DELTA_PERC_THRESHOLD = 50          # Maximum change in percent of ROI area between two XY rois in a volume
-RESTRICT_AREA = False                   # Restriction in the difference in area between two adjacent XY ROIs in a volume
-RESTRICT_CENTROID_DISTANCE = True       # Restriction on the distance between centroid of two adjacent XY ROIs in a volume
-USE_PERCENT_CENTROID_DISTANCE = False    # Centroid distance threshold is a percent of the radius of an XY ROI instead of a flat value
-RESTRICT_ADJACENCY = True               # Restriction on how close an XY ROI must be in Z to its nearest neighbour in the volume
-RESTRICT_MULTIPLE_XY_PER_VOL = True     # Restriction on whether or not two XY ROIs are allowed to be in the same z-level per volume
 
 # Create a dictionary of {volume id : <Volume> object} where id is the id of a unique volume
-def segment_volumes_drg(xz_hulls, xyz_points):
+def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
     # Output dict of {volume id : <Volume> object}
     print("Beginning Caching for Volume Segmentation")
+    print(f"Parameters: {parameters}")
     volumes = {}
     # Make dict of {z: {id: [(x,y)]}} for each z-plane 
     z_planes = {}
@@ -42,9 +32,9 @@ def segment_volumes_drg(xz_hulls, xyz_points):
             points_3d = [(x,y,z) for x,y in points]
             xy_rois[xy_id] = BoundaryRegion(points_3d, 
                                             original_index=id, 
-                                            precalc_area=RESTRICT_AREA, 
-                                            precalc_centroid=RESTRICT_CENTROID_DISTANCE,
-                                            precalc_radius=USE_PERCENT_CENTROID_DISTANCE)
+                                            precalc_area=parameters['restrict_area'], 
+                                            precalc_centroid=parameters['restrict_centroid_distance'],
+                                            precalc_radius=parameters['use_percent_centroid_distance'])
             xy_id += 1
     # Make dict of xz ROIs -> {xz_id : BoundaryRegion of pts}
     xz_rois = {}
@@ -87,7 +77,7 @@ def segment_volumes_drg(xz_hulls, xyz_points):
             if not xy_roi.overlaps_with_region(xz_roi):
                 continue # Objects cannot spacially overlap
             # Execution reached here - more detailed check for collision
-            intersection = check_region_intersection(xy_roi.get_boundary_points(), xz_roi.get_boundary_points())
+            intersection = check_region_intersection(xy_roi.get_boundary_points(), xz_roi.get_boundary_points(), parameters=parameters)
             if intersection: # XZ and XY ROIs are part of same object
                 # Determine what 3D object id to assign to these two ROIs
                 xz_roi_objs = set()# List of possible XZ ROI objs
@@ -117,7 +107,7 @@ def segment_volumes_drg(xz_hulls, xyz_points):
                         # Merge only if there are no common z-levels and centroid check passes
                         xy_rois_keep = volumes[keep_obj].get_xy_rois().values()
                         xy_rois_discard = volumes[discard_obj].get_xy_rois().values()
-                        restriction_check = check_restrictions(xy_rois_keep, xy_rois_discard, distance_threshold=CENTROID_DISTANCE_MAX, z_distance_threshold=MATCH_Z_THRESHOLD)
+                        restriction_check = check_restrictions(xy_rois_keep, xy_rois_discard, distance_threshold=parameters['centroid_distance_max'], z_distance_threshold=parameters['match_z_threshold'], parameters=parameters)
                         if not restriction_check:
                             # Cannot merge, but can add XZ roi for future linkages
                             # print(f"Merge failed between vols {keep_obj} and {discard_obj}.")
@@ -139,7 +129,7 @@ def segment_volumes_drg(xz_hulls, xyz_points):
                     elif xz_roi_obj is not None and xy_roi_obj is None:
                         # Ensure volume restrictions are upheld when adding in this XY ROI
                         xz_obj_xy_rois = volumes[xz_roi_obj].get_xy_rois().values()
-                        restriction_check = check_restrictions(xz_obj_xy_rois, [xy_roi], distance_threshold=CENTROID_DISTANCE_MAX, z_distance_threshold=MATCH_Z_THRESHOLD)
+                        restriction_check = check_restrictions(xz_obj_xy_rois, [xy_roi], distance_threshold=parameters['centroid_distance_max'], z_distance_threshold=parameters['match_z_threshold'], parameters=parameters)
                         if not restriction_check:
                             # Cannot add XY roi to XZ's volume, but can create a new volume for them
                             # print(f"XY ROI Addition failed between xz vol {xz_roi_obj} and xy ROI {xy_id}.")
@@ -190,14 +180,14 @@ def get_hull_boundary_points(hull):
     return boundary_points
 
 # Checks two sets of ROIs to ensure they meet the restrictions imposed in the parameters
-def check_restrictions(xy_rois_1, xy_rois_2, distance_threshold, z_distance_threshold):
+def check_restrictions(xy_rois_1, xy_rois_2, distance_threshold, z_distance_threshold, parameters):
     # Combine XY ROIs from both keep and discard volumes
     combined_xy_rois = list(xy_rois_1) + list(xy_rois_2)
     rois_by_z = {}
     for roi in combined_xy_rois:
         roi_points = roi.get_boundary_points()
         z_value = roi_points[0][2] # Take first point, and 2nd index for static z-value of xy roi
-        if rois_by_z.get(z_value, None) and RESTRICT_MULTIPLE_XY_PER_VOL: # Two XY rois at same z-level in same volume detected, and this is not allowed
+        if rois_by_z.get(z_value, None) and parameters['restrict_multiple_xy_per_vol']: # Two XY rois at same z-level in same volume detected, and this is not allowed
             # print("Two XY ROIs at same level between volumes")
             return False
         else:
@@ -212,23 +202,23 @@ def check_restrictions(xy_rois_1, xy_rois_2, distance_threshold, z_distance_thre
         # Check for the ROI above (next in the sorted list)
         if i < len(sorted_z_rois) - 1:  # There is a next ROI
             z_above, roi_above = sorted_z_rois[i + 1]
-            if not enforce_restrictions(z, z_above, roi, roi_above, z_distance_threshold, distance_threshold):
+            if not enforce_restrictions(z, z_above, roi, roi_above, z_distance_threshold, distance_threshold, parameters):
                 return False
         # Check for the ROI below (previous in the sorted list)
         if i > 0:  # There is a previous ROI
             z_below, roi_below = sorted_z_rois[i - 1]
-            if not enforce_restrictions(z, z_below, roi, roi_below, z_distance_threshold, distance_threshold):
+            if not enforce_restrictions(z, z_below, roi, roi_below, z_distance_threshold, distance_threshold, parameters):
                 return False
     return True
 
 # Enforce all volume segmentation restrictions set in parameters
-def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_threshold):
-    if RESTRICT_ADJACENCY:
+def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_threshold, parameters):
+    if parameters['restrict_adjacency']:
         z_gap = abs(z1 - z2)
         if z_gap > z_distance_threshold:
             # print(f"Distance check failed: z_gap={z_gap}")
             return False
-    if RESTRICT_CENTROID_DISTANCE:
+    if parameters['restrict_centroid_distance']:
         # Get centroid of first XY ROI
         roi1_centroid = roi1.get_centroid()
         # Get centroid of second XY ROI
@@ -236,23 +226,25 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
         # Calculate XY distance in 2D and check against thresholds
         xy_distance = distance.euclidean(roi1_centroid[:2], roi2_centroid[:2])
         # Modify the distance threshold if necessary
-        if USE_PERCENT_CENTROID_DISTANCE:
+        if parameters['use_percent_centroid_distance']:
             # When using a percent centroid distance restriction, the XY ROI higher in Z may not move more than a percentage of the lower's radius
             lower_roi = roi1 if roi1_centroid[2] < roi2_centroid[2] else roi2 
             lower_roi_avg_radius = lower_roi.get_radius()
             # Redefine flat distance threshold as a percentage of the lower XY roi's avg radius
-            distance_threshold = (CENTROID_DISTANCE_PERC/100) * lower_roi_avg_radius
+            distance_threshold = (parameters['centroid_distance_perc']/100) * lower_roi_avg_radius
         if xy_distance > distance_threshold:
             # print(f"Distance check failed: xy_dist={xy_distance}")
             return False
-    if RESTRICT_AREA:
+    if parameters['restrict_area']:
         # Calculate area of roi1
         roi1_area = roi1.get_area()
         # Get the area of the ROI above
         roi2_area = roi2.get_area()
-        # Calculate the percentage change in area
-        area_delta_perc = (abs(roi1_area - roi2_area) / roi1_area) * 100
-        if area_delta_perc > AREA_DELTA_PERC_THRESHOLD:
+        larger_area = roi1_area if roi1_area > roi2_area else roi2_area
+        smaller_area = roi1_area if roi1_area < roi2_area else roi2_area
+        # Calculate the percentage change in area from small to big (e.g 300% -> 3x increase)
+        area_delta_perc = (larger_area / smaller_area) * 100
+        if area_delta_perc > parameters['area_delta_perc_threshold']:
             # print(f"Area change failed: area_delta_perc={area_delta_perc}%")
             return False
     # All checks passed if execution reached here
@@ -340,7 +332,7 @@ def plot_volumes(volume1, volume2, labels, subset_fraction=0.5):
 
 
 # Determines if an XY roi and an XZ roi intersect
-def check_region_intersection(xy_points, xz_points):
+def check_region_intersection(xy_points, xz_points, parameters):
     # Determine the fixed y at which the ZX plane is situated
     _ ,fixed_y, _ = xz_points[0]
     # Determine the fixed z at which the XY plane is situated 
@@ -361,7 +353,7 @@ def check_region_intersection(xy_points, xz_points):
     sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
     line = LineString(sorted_points)
     # Generate n zx points around the boundary of the ROI polygon
-    distances = np.linspace(0, line.length, ROI_PROJECTION_N_POINTS)
+    distances = np.linspace(0, line.length, parameters['roi_projection_n_points'])
     points = [line.interpolate(distance) for distance in distances]
     # Update 2d xz points to use new point projection
     xz_points_2d = [(point.x, point.y) for point in points]
