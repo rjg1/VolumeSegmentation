@@ -5,7 +5,7 @@
         "TEMP_REDUCED_FILE": "./demo_data/drg_subset_1_11_s.csv",
         "SEG_XZ_IO_FILE": "../VOLUME_SEGMENTATION/xz_cache/real_data_filtered_v0_ROIS_XZ.csv",
         "RESTRICTED_MODE": true,
-        "RUN_SEGMENTATION": false,
+        "RUN_SEGMENTATION": true,
         "HAS_VALIDATION": true,
         "HAS_ALGORITHMIC": true,
         "HAS_REDUCED_DATASET": true,
@@ -27,7 +27,7 @@
             "num_projection_points": 300,
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
-            "match_z_threshold": 2,
+            "match_z_threshold": 4,
             "area_delta_perc": 150
         }
     },
@@ -180,14 +180,14 @@
         "V_MAPPING_CSV": "mapping.csv",
         "algo_parameters": {
             "use_flat_centroid": false,
-            "use_perc_centroid": false,
+            "use_perc_centroid": true,
             "use_z_threshold": true,
-            "use_area_restriction": true,
+            "use_area_restriction": false,
             "use_xy_restriction": true,
             "num_projection_points": 300,
             "flat_centroid_dist": 10,
-            "perc_centroid_dist": 40,
-            "match_z_threshold": 2,
+            "perc_centroid_dist": 24,
+            "match_z_threshold": 4,
             "area_delta_perc": 121
         }
     }

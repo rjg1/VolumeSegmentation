@@ -42,7 +42,7 @@ USE_XY_RESTRICTION = True
 NUM_PROJECTION_POINTS = 300
 FLAT_CENTROID_DIST = 10
 PERC_CENTROID_DIST = 68
-MATCH_Z_THRESHOLD = 2
+MATCH_Z_THRESHOLD = 4
 AREA_DELTA_PERC = 150
 
 class DemoGUIApp:
@@ -377,7 +377,6 @@ class DemoGUIApp:
 
     # Updates the dictionary of a scenario with its algorithm parameters
     def update_algo_parameters(self, event = None, checkbox_name = None):
-        print("Updating algo parameters")
         algo_parameters = self.scenarios[self.active_scenario]["algo_parameters"]
         # Handle conflicting centroid presses
         if checkbox_name == "flat" and self.perc_centroid_check_var.get():

@@ -20,11 +20,9 @@ from volume_seg_ffp import segment_volumes_drg
 
 # GLOBAL VARIABLES
 # Name of input file. Structured csv with |x|y|z|roi ID|. Note ID is per z layer
-# OUT_FILE = './results/real_data_filtered_algo_VOLUMES.csv'
-# XZ_IO_PATH = "./xz_cache/real_data_filtered_v0_ROIS_XZ.csv"
-OUT_FILE = './results/real_data_filtered_1_VOLUMES.csv'
-IN_FILE = './run_data/real_data_filtered_ROIS.csv'
-XZ_IO_PATH = None
+OUT_FILE = './results/real_data_filtered_algo_VOLUMES.csv'
+XZ_IO_PATH = "./xz_cache/real_data_filtered_v0_ROIS_XZ.csv"
+IN_FILE = './run_data/real_data_filtered_v0_ROIS.csv'
 # Number of points to project around an ROI boundary when deciding intersection (Higher -> more computation)
 ROI_PROJECTION_N_POINTS = 300
 # Whether to use fit-for-purpose DRG segmentation or generalised segmentation
@@ -34,7 +32,7 @@ ROI_PROJECTION_N_POINTS = 300           # Number of points to project around an 
 CENTROID_DISTANCE_MAX = 10              # Maximum allowable distance between centroids of two adjacent XY ROIs
 CENTROID_DISTANCE_PERC = 68             # Maximum allowable distance between centroids of two adjacent XY ROIs as a percentage of the radius of a centroid
 MATCH_Z_THRESHOLD = 4                   # Maximum distance between two adjacent XY rois in Z to be part of same volume
-AREA_DELTA_PERC_THRESHOLD = 50          # Maximum change in percent of ROI area between two XY rois in a volume
+AREA_DELTA_PERC_THRESHOLD = 150         # Maximum change in percent of ROI area between two XY rois in a volume (from small to large -> change of 150%)
 RESTRICT_AREA = False                   # Restriction in the difference in area between two adjacent XY ROIs in a volume
 RESTRICT_CENTROID_DISTANCE = True       # Restriction on the distance between centroid of two adjacent XY ROIs in a volume
 USE_PERCENT_CENTROID_DISTANCE = False   # Centroid distance threshold is a percent of the radius of an XY ROI instead of a flat value
@@ -69,24 +67,38 @@ def main():
     out_file = args.out_file or OUT_FILE
     xz_io_path = args.xz_io_path or XZ_IO_PATH
     # Allow no xz caching
-    if xz_io_path.lower() == "none":
+    if xz_io_path and xz_io_path.lower() == "none":
         xz_io_path = None
     # Avoid short circuit with boolean restricted mode
-    restricted_mode = str_to_bool(args.restricted_mode) if args.restricted_mode is not None else RESTRICTED_MODE
+    restricted_mode = str_to_bool(args.restricted_mode) if isinstance(args.restricted_mode,str) else RESTRICTED_MODE
     if restricted_mode:
         # Unpack parameters to use
-        algo_parameters = {
-            'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
-            'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
-            'restrict_adjacency': str_to_bool(args.use_z_threshold),
-            'restrict_area': str_to_bool(args.use_area_restriction),
-            'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
-            'roi_projection_n_points': int(args.num_projection_points),
-            'centroid_distance_max': int(args.flat_centroid_dist),
-            'centroid_distance_perc': int(args.perc_centroid_dist),
-            'match_z_threshold': int(args.match_z_threshold),
-            'area_delta_perc_threshold': int(args.area_delta_perc)
-        }
+        if isinstance(args.use_flat_centroid,str):
+            algo_parameters = {
+                'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
+                'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
+                'restrict_adjacency': str_to_bool(args.use_z_threshold),
+                'restrict_area': str_to_bool(args.use_area_restriction),
+                'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
+                'roi_projection_n_points': int(args.num_projection_points),
+                'centroid_distance_max': int(args.flat_centroid_dist),
+                'centroid_distance_perc': int(args.perc_centroid_dist),
+                'match_z_threshold': int(args.match_z_threshold),
+                'area_delta_perc_threshold': int(args.area_delta_perc)
+            }
+        else:
+            algo_parameters = {
+                'restrict_centroid_distance': RESTRICT_CENTROID_DISTANCE,
+                'use_percent_centroid_distance': USE_PERCENT_CENTROID_DISTANCE,
+                'restrict_adjacency': RESTRICT_ADJACENCY,
+                'restrict_area': RESTRICT_AREA,
+                'restrict_multiple_xy_per_vol': RESTRICT_MULTIPLE_XY_PER_VOL,
+                'roi_projection_n_points': ROI_PROJECTION_N_POINTS,
+                'centroid_distance_max': CENTROID_DISTANCE_MAX,
+                'centroid_distance_perc': CENTROID_DISTANCE_PERC,
+                'match_z_threshold': MATCH_Z_THRESHOLD,
+                'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD
+            }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
     # Generate XZ ROIs

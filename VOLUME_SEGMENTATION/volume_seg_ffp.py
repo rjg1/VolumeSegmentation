@@ -227,11 +227,13 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
         xy_distance = distance.euclidean(roi1_centroid[:2], roi2_centroid[:2])
         # Modify the distance threshold if necessary
         if parameters['use_percent_centroid_distance']:
-            # When using a percent centroid distance restriction, the XY ROI higher in Z may not move more than a percentage of the lower's radius
-            lower_roi = roi1 if roi1_centroid[2] < roi2_centroid[2] else roi2 
-            lower_roi_avg_radius = lower_roi.get_radius()
-            # Redefine flat distance threshold as a percentage of the lower XY roi's avg radius
-            distance_threshold = (parameters['centroid_distance_perc']/100) * lower_roi_avg_radius
+            # When using a percent centroid distance restriction, the ROI with a larger average radius is used for the comparison
+            roi1_radius = roi1.get_radius()
+            roi2_radius = roi2.get_radius()
+            # avg_radius = int((roi1_radius + roi2_radius) / 2)
+            larger_radius = roi1_radius if roi1_radius > roi2_radius else roi2_radius
+            # Redefine flat distance threshold as a percentage of the larger radius between rois
+            distance_threshold = (parameters['centroid_distance_perc']/100) * larger_radius #avg_radius # testing different metrics...
         if xy_distance > distance_threshold:
             # print(f"Distance check failed: xy_dist={xy_distance}")
             return False
