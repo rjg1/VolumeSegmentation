@@ -10,6 +10,7 @@ DATA_FOLDER = './validation_runs/test_1'
 CSV_FILENAME = 'real_data_filtered_1_VOLUMES.csv'  # Ground truth CSV file path 
 PLOT_TITLE = f'Plot of Ground Truth data for dataset: {DATA_FOLDER}'
 MAX_POINTS = 10000 # Maximum points to sample
+AX_LIMIT_MAX = 1024
 
 def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
@@ -49,7 +50,7 @@ def assign_colors_by_volume_id(df):
 
     return colors_array
 
-def visualize_points(df, colors, title):
+def visualize_points(df, colors, title, ax_limit_max):
     """Visualize the sampled points in 3D space with colors assigned by volume ID."""
     # Create a Matplotlib 3D plot
     fig = plt.figure(figsize=(10, 8))
@@ -62,14 +63,16 @@ def visualize_points(df, colors, title):
 
     # Plot the points with the assigned colors
     ax.scatter(x, y, z, c=colors, s=1)
+    max_val = max(df[['x', 'y', 'z']].max().max())
+    min_val = min(df[['x', 'y', 'z']].min().min())
 
     # Set labels and show plot
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
-    ax.set_xlim3d(0,1024)
-    ax.set_ylim3d(0,1024)
-    ax.set_zlim3d(0,1024)
+    ax.set_xlim3d(min_val,max_val)
+    ax.set_ylim3d(min_val,max_val)
+    ax.set_zlim3d(min_val,max_val)
     ax.set_title(title)
     plt.show()
 
@@ -82,7 +85,8 @@ def main():
     parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
     parser.add_argument('--csv_filename', default=CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--plot_title', default=PLOT_TITLE, help='Title for plot (default: %(default)s)')
-    
+    parser.add_argument('--ax_limit_max', default=AX_LIMIT_MAX, help='Max limit on axes (default: %(default)s)')
+
     # Parse arguments
     args = parser.parse_args()
     
@@ -99,7 +103,7 @@ def main():
     colors = assign_colors_by_volume_id(sampled_df)
 
     # Visualize the points with assigned colors
-    visualize_points(sampled_df, colors, plot_title)
+    visualize_points(sampled_df, colors, plot_title, args.ax_limit_max)
 
 if __name__ == "__main__":
     main()

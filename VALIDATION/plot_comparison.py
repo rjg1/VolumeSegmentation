@@ -13,6 +13,7 @@ MAPPING_FILENAME = 'mapping.csv'
 MAX_POINTS = 8000 # Maximum points to sample
 DRAW_LINES = False
 UNMATCHED_MARKER = 'x'
+AX_LIMIT_MAX = 1024
 
 def load_and_sample_data(filename):
     """Load the CSV data and sample a subset of points for visualization."""
@@ -71,7 +72,7 @@ def assign_colors_by_volume_id(gt_df, algo_df, volume_mapping):
 
     return gt_colors_array, algo_colors_array
 
-def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume_mapping):
+def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume_mapping, ax_limit_max):
     """Visualize the ground truth and algorithmic points side by side in 3D, with indicators for matched and unmatched volumes."""
 
     fig = plt.figure(figsize=(12, 6))
@@ -94,13 +95,17 @@ def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume
     ax1.scatter(unmatched_gt_points['x'], unmatched_gt_points['y'], unmatched_gt_points['z'], 
                 c=gt_colors[gt_df['VOLUME_ID'].isin(unmatched_gt_volumes)], s=1, label="Unmatched GT Volumes", marker=UNMATCHED_MARKER)
 
+    # Determine axis limits
+    max_val = max(gt_df[['x', 'y', 'z']].max().max(), algo_df[['x', 'y', 'z']].max().max())
+    min_val = min(gt_df[['x', 'y', 'z']].min().min(), algo_df[['x', 'y', 'z']].min().min())
+
     ax1.set_xlabel('X')
     ax1.set_ylabel('Y')
     ax1.set_zlabel('Z')
     ax1.set_title('Ground Truth Segmentation')
-    ax1.set_xlim3d(0, 1024)
-    ax1.set_ylim3d(0, 1024)
-    ax1.set_zlim3d(0, 1024)
+    ax1.set_xlim3d(min_val,max_val)
+    ax1.set_ylim3d(min_val,max_val)
+    ax1.set_zlim3d(min_val,max_val)
     ax1.legend()
 
     # Algorithmic segmentation plot (ax2)
@@ -125,9 +130,9 @@ def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume
     ax2.set_ylabel('Y')
     ax2.set_zlabel('Z')
     ax2.set_title('Algorithmic Segmentation')
-    ax2.set_xlim3d(0, 1024)
-    ax2.set_ylim3d(0, 1024)
-    ax2.set_zlim3d(0, 1024)
+    ax2.set_xlim3d(min_val,max_val)
+    ax2.set_ylim3d(min_val,max_val)
+    ax2.set_zlim3d(min_val,max_val)
     ax2.legend()
 
     plt.tight_layout()
@@ -154,7 +159,8 @@ def main():
     parser.add_argument('--gt_csv', default=GT_CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--algo_csv', default=ALGO_CSV_FILENAME, help='Algorithmic CSV file (default: %(default)s)')
     parser.add_argument('--mapping_csv', default=MAPPING_FILENAME, help='Output mapping CSV file (default: %(default)s)')
-    
+    parser.add_argument('--ax_limit_max', default=AX_LIMIT_MAX, help='Max limit on axes (default: %(default)s)')
+
     # Parse arguments
     args = parser.parse_args()
     
@@ -180,7 +186,7 @@ def main():
     gt_colors, algo_colors = assign_colors_by_volume_id(gt_sampled_df, algo_sampled_df, volume_mapping)
 
     # Visualize the points side by side
-    visualize_points_side_by_side(gt_sampled_df, algo_sampled_df, gt_colors, algo_colors, volume_mapping)
+    visualize_points_side_by_side(gt_sampled_df, algo_sampled_df, gt_colors, algo_colors, volume_mapping, args.ax_limit_max)
 
 
 if __name__ == "__main__":
