@@ -4,6 +4,11 @@ import random
 from shapely.geometry import Polygon, Point
 from scipy.spatial import distance
 
+# Seed for random operation random
+RANDOM_SEED = 10
+# Points to sample for radius
+RADIUS_SAMPLE_POINTS = 20
+
 def calculate_area_of_roi(boundary_points):
     """
     Calculate the area of a region using the boundary points.
@@ -24,7 +29,7 @@ def find_centroid_3d(points):
     centroid = np.mean(points, axis=0)  # [mean_x, mean_y, mean_z]
     return centroid
 
-def calculate_avg_radius(boundary_points, centroid, num_samples = 10):
+def calculate_avg_radius(boundary_points, centroid, num_samples, random_generator):
     """
     Calculate an approximate average radius of an ROI by randomly sampling points
     from the boundary points. The radius is calculated based on the distances
@@ -32,8 +37,8 @@ def calculate_avg_radius(boundary_points, centroid, num_samples = 10):
     """
     num_samples = min(num_samples, len(boundary_points))
 
-    # Randomly sample points from the boundary
-    sampled_points = random.sample(boundary_points, num_samples)
+    # Randomly sample points from the boundary using the provided random generator
+    sampled_points = random_generator.sample(boundary_points, num_samples)
 
     # Calculate distances from the centroid to each sampled point
     distances = [distance.euclidean(centroid[:2], (x, y)) for x, y, z in sampled_points]
@@ -44,6 +49,7 @@ def calculate_avg_radius(boundary_points, centroid, num_samples = 10):
 class Region:
     def __init__(self, points=None, original_index = None, precalc_area = False, precalc_centroid = False, precalc_radius = False):
         # Initialise max bound points
+        self.random_generator = random.Random(RANDOM_SEED)
         self.xmin = np.inf
         self.ymin = np.inf
         self.zmin = np.inf
@@ -70,7 +76,7 @@ class Region:
             self.centroid = find_centroid_3d(self.points)
         # Pre-calc roi radius if applicable
         if precalc_radius:
-            self.avg_radius = calculate_avg_radius(self.points, self.get_centroid())
+            self.avg_radius = calculate_avg_radius(self.points, self.get_centroid(), num_samples=RADIUS_SAMPLE_POINTS, random_generator=self.random_generator)
     
     def get_centroid(self):
         if self.centroid is None:
@@ -84,7 +90,7 @@ class Region:
 
     def get_radius(self):
         if self.avg_radius is None:
-            self.avg_radius = calculate_avg_radius(self.points, self.get_centroid())
+            self.avg_radius = calculate_avg_radius(self.points, self.get_centroid(), num_samples=RADIUS_SAMPLE_POINTS, random_generator=self.random_generator)
         return self.avg_radius
 
     def get_original_index(self):
@@ -164,7 +170,7 @@ class BoundaryRegion(Region):
         points = []
     
         while len(points) < num_points:
-            random_point = Point(random.uniform(min_x, max_x), random.uniform(min_y, max_y))
+            random_point = Point(self.random_generator.uniform(min_x, max_x), self.random_generator.uniform(min_y, max_y))
             if polygon.contains(random_point):
                 points.append((random_point.x, random_point.y))
             

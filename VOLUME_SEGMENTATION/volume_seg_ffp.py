@@ -108,7 +108,14 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                         xy_rois_keep = volumes[keep_obj].get_xy_rois().values()
                         xy_rois_discard = volumes[discard_obj].get_xy_rois().values()
                         restriction_check = check_restrictions(xy_rois_keep, xy_rois_discard, distance_threshold=parameters['centroid_distance_max'], z_distance_threshold=parameters['match_z_threshold'], parameters=parameters)
-                        if not restriction_check:
+                        # Perform volume check if required
+                        ar_restrict_check = True
+                        if restriction_check and parameters['restrict_area_change']:
+                            ar_restrict_check = check_area_diff(parameters['ar_change_perc'],
+                                                                   volumes[keep_obj], volumes[discard_obj],
+                                                                   parameters['ar_change_num_samples'],
+                                                                   parameters['ar_change_activation_thresh'])
+                        if not restriction_check or not ar_restrict_check:
                             # Cannot merge, but can add XZ roi for future linkages
                             # print(f"Merge failed between vols {keep_obj} and {discard_obj}.")
                             # plot_volumes(volumes[keep_obj], volumes[discard_obj], labels=[f"Volume {keep_obj}", f"Volume {discard_obj}"])
@@ -130,11 +137,21 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                         # Ensure volume restrictions are upheld when adding in this XY ROI
                         xz_obj_xy_rois = volumes[xz_roi_obj].get_xy_rois().values()
                         restriction_check = check_restrictions(xz_obj_xy_rois, [xy_roi], distance_threshold=parameters['centroid_distance_max'], z_distance_threshold=parameters['match_z_threshold'], parameters=parameters)
-                        if not restriction_check:
+                        # Check volume area difference if required
+                        ar_restrict_check = True
+                        if restriction_check and parameters['restrict_area_change']:
+                            # Make a temporary volume for xy roi_obj
+                            xy_vol = Volume(-1, track_avg_area=True)
+                            xy_vol.add_xy_roi(xy_roi_id, xy_roi) # Add the single xy roi to this temp volume
+                            ar_restrict_check = check_area_diff(parameters['ar_change_perc'],
+                                                                   volumes[xz_roi_obj], xy_vol,
+                                                                   parameters['ar_change_num_samples'],
+                                                                   parameters['ar_change_activation_thresh'])
+                        if not restriction_check or not ar_restrict_check:
                             # Cannot add XY roi to XZ's volume, but can create a new volume for them
                             # print(f"XY ROI Addition failed between xz vol {xz_roi_obj} and xy ROI {xy_id}.")
                             # Create a new volume object
-                            new_volume = Volume(current_obj_id)
+                            new_volume = Volume(current_obj_id, track_avg_area=parameters['restrict_area_change'])
                             # Add the intersecting XY and XZ ROIs to the object
                             new_volume.add_xy_roi(xy_roi_id, xy_roi)
                             new_volume.add_xz_roi(xz_roi_id, xz_roi)
@@ -151,7 +168,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                             xy_roi_obj = xz_roi_obj # Update object ID in case more XZ ROIs to handle
                     else:
                         # Create a new volume object
-                        new_volume = Volume(current_obj_id)
+                        new_volume = Volume(current_obj_id, track_avg_area=parameters['restrict_area_change'])
                         # Add the intersecting XY and XZ ROIs to the object
                         new_volume.add_xy_roi(xy_roi_id, xy_roi)
                         new_volume.add_xz_roi(xz_roi_id, xz_roi)
@@ -178,6 +195,125 @@ def get_hull_boundary_points(hull):
     boundary_points = [(x, y) for x, y in vertices]
     
     return boundary_points
+
+# Determines if volume 1's average area per ROI is changed by perc_diff or more when merged with volume 2
+def check_area_diff(perc_diff, volume_1, volume_2, rois_to_compare, min_rois):
+    vol_1_num_rois = len(volume_1.xy_rois_per_z)
+    vol_2_num_rois = len(volume_2.xy_rois_per_z)
+    
+    # Check to ensure enough rois exist
+    if vol_1_num_rois < min_rois and not (vol_2_num_rois > min_rois and (vol_1_num_rois + vol_2_num_rois) > (min_rois + rois_to_compare)) \
+        or vol_2_num_rois < min_rois and not (vol_1_num_rois > min_rois and (vol_1_num_rois + vol_2_num_rois) > (min_rois + rois_to_compare)):
+        return True # Not enough ROIs to make a confident prediction - passes check
+    
+    # Determine current running volume averages (modified in if/else chain below)
+    _, v1_running_avg_list = volume_1.get_roi_areas()
+    _, v2_running_avg_list = volume_2.get_roi_areas()
+    v1_avg = v1_running_avg_list[-1]
+    v2_avg = v2_running_avg_list[-1]
+
+    if vol_1_num_rois >= min_rois and vol_2_num_rois < min_rois:
+        # Vol 1 is bigger volume, augment volume 2 with enough ROIs
+        v1_avg, v2_avg = determine_average_area_per_roi(volume_1, volume_2, rois_to_compare)
+    elif vol_2_num_rois >= min_rois and vol_1_num_rois < min_rois:
+        # Vol 2 is bigger volume, augment volume 1 with enough ROIs
+        v2_avg, v1_avg = determine_average_area_per_roi(volume_2, volume_1, rois_to_compare)
+    
+    # This occurs when the volumes are overlapping in 3d space (share a z-level for xy rois)
+    if v1_avg is None or v2_avg is None:
+        return True # This restriction is not able to complete (result is discarded as a pass/true)
+    
+    return compare_average_area_per_roi(v1_avg, v2_avg) <= perc_diff
+
+# Augments smaller volumes with a subset of the larger volume, and calculates average rois per z
+def determine_average_area_per_roi(larger_volume, smaller_volume, rois_to_compare):
+    num_smaller_rois = len(smaller_volume.xy_rois_per_z)
+    num_to_add = rois_to_compare - num_smaller_rois
+    
+    # Sort both by z-values (extract the zmin from the first ROI in the tuple list)
+    smaller_rois_sorted = sorted(smaller_volume.xy_rois_per_z.items(), key=lambda item: item[0])
+    larger_rois_sorted = sorted(larger_volume.xy_rois_per_z.items(), key=lambda item: item[0])
+    
+    # Get zmin and zmax of smaller volume
+    smaller_z_min = smaller_rois_sorted[0][0]
+    smaller_z_max = smaller_rois_sorted[-1][0]
+
+    # Check if the larger volume has any ROIs inside the smaller volume's z-range
+    for z_val, _ in larger_rois_sorted:
+        if smaller_z_min <= z_val <= smaller_z_max:
+            return None, None  # Exit early since the larger volume has ROIs inside the smaller volume
+    
+    # Collect ROIs closest to smaller volume from the larger volume
+    rois_to_add = []
+    rois_selected = set()  # Track which rois were selected by closest z
+    
+    # Keep adding ROIs from the larger volume until we reach num_to_add
+    while len(rois_to_add) < num_to_add:
+        if len(rois_selected) == len(larger_rois_sorted):
+            break
+
+        closest_roi = None
+        closest_distance = float('inf')
+
+        # Find the closest ROI in z from the larger volume that hasn't been added
+        for z_val, roi_list in larger_rois_sorted:
+            if z_val in rois_selected:
+                continue  # Skip already selected rois
+            
+            # Compute the z-distance to the smaller volume's boundaries
+            distance_to_min = abs(z_val - smaller_z_min)
+            distance_to_max = abs(z_val - smaller_z_max)
+            
+            # Choose the minimum distance
+            distance = min(distance_to_min, distance_to_max)
+            
+            # If this ROI is the closest, mark it for selection
+            if distance < closest_distance:
+                closest_roi = (z_val, roi_list)
+                closest_distance = distance
+        
+        if closest_roi is not None:
+            # Add the closest ROI to the list of ROIs to be added
+            for roi_id, roi in roi_list:
+                if len(rois_to_add) < num_to_add:  # Ensure we only add the required number of ROIs
+                    rois_to_add.append((z_val, (roi_id, roi)))  # Track individual ROIs
+                    rois_selected.add(z_val)  # Mark this z_val as selected
+
+    # Retrieve volume info from the larger volume
+    l_area_dict = larger_volume.roi_areas
+    
+    # Use a copy of the smaller volume's volume dictionary
+    s_area_dict = smaller_volume.roi_areas.copy()  # Assuming smaller_volume has a volume dictionary
+    
+    # Update the smaller volume with the selected ROIs from the larger volume
+    for z_val, (roi_id, roi) in rois_to_add:
+        s_area_dict[roi_id] = l_area_dict[roi_id]
+    
+    # Recalculate the running average for the smaller volume
+    smaller_running_avg = recalculate_running_average(s_area_dict)
+    
+    # Recalculate the running average for the larger volume (excluding the augmented ROIs)
+    l_area_dict_updated = {roi_id: l_area_dict[roi_id] for roi_id in l_area_dict if roi_id not in s_area_dict}
+    larger_running_avg = recalculate_running_average(l_area_dict_updated)
+    
+    return larger_running_avg, smaller_running_avg
+    
+# Recalculate the running average of volumes from the volume dictionary
+def recalculate_running_average(area_dict):
+    total_volume = sum(area_dict.values())
+    num_rois = len(area_dict)
+    return total_volume / num_rois if num_rois > 0 else 0
+
+# Compare symmetric percentage difference in average area per roi in volumes
+def compare_average_area_per_roi(v1_avg, v2_avg):
+    if v1_avg == 0 and v2_avg == 0:
+        return 0  # No difference if both are 0
+    if v1_avg == 0 or v2_avg == 0:
+        return float('inf')  # If only one is 0, return infinity
+    
+    avg_of_avgs = (v1_avg + v2_avg) / 2
+    percent_change = ((v1_avg - v2_avg) / avg_of_avgs) * 100
+    return abs(percent_change)
 
 # Checks two sets of ROIs to ensure they meet the restrictions imposed in the parameters
 def check_restrictions(xy_rois_1, xy_rois_2, distance_threshold, z_distance_threshold, parameters):
@@ -231,9 +367,10 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
             roi1_radius = roi1.get_radius()
             roi2_radius = roi2.get_radius()
             # avg_radius = int((roi1_radius + roi2_radius) / 2)
-            larger_radius = roi1_radius if roi1_radius > roi2_radius else roi2_radius
-            # Redefine flat distance threshold as a percentage of the larger radius between rois
-            distance_threshold = (parameters['centroid_distance_perc']/100) * larger_radius #avg_radius # testing different metrics...
+            # smaller_radius = min(roi1_radius, roi2_radius)
+            larger_radius = max(roi1_radius, roi2_radius)
+            # Redefine flat distance threshold as a percentage of the {smaller,larger, avg} radius between rois
+            distance_threshold = (parameters['centroid_distance_perc']/100) * larger_radius  # testing different metrics...
         if xy_distance > distance_threshold:
             # print(f"Distance check failed: xy_dist={xy_distance}")
             return False
@@ -242,12 +379,22 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
         roi1_area = roi1.get_area()
         # Get the area of the ROI above
         roi2_area = roi2.get_area()
-        larger_area = roi1_area if roi1_area > roi2_area else roi2_area
-        smaller_area = roi1_area if roi1_area < roi2_area else roi2_area
-        # Calculate the percentage change in area from small to big (e.g 300% -> 3x increase)
-        area_delta_perc = (larger_area / smaller_area) * 100
+        # larger_area = roi1_area if roi1_area > roi2_area else roi2_area
+        # smaller_area = roi1_area if roi1_area < roi2_area else roi2_area
+        # # Calculate the percentage change in area from small to big (e.g 300% -> 3x increase)
+        # area_delta_perc = (larger_area / smaller_area) * 100
+        # if area_delta_perc > parameters['area_delta_perc_threshold']:
+        #     # print(f"Area change failed: area_delta_perc={area_delta_perc}%")
+        #     return False
+            # Handle zero areas to prevent division by zero
+        if roi1_area == 0 or roi2_area == 0:
+            return False  # Or handle zero-area cases as you see fit
+
+        # Calculate the average area for a more symmetric percentage change
+        avg_area = (roi1_area + roi2_area) / 2
+        area_delta_perc = (abs(roi1_area - roi2_area) / avg_area) * 100
+        # Check if the change in area exceeds the threshold
         if area_delta_perc > parameters['area_delta_perc_threshold']:
-            # print(f"Area change failed: area_delta_perc={area_delta_perc}%")
             return False
     # All checks passed if execution reached here
     return True

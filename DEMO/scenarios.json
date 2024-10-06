@@ -25,10 +25,14 @@
             "use_area_restriction": false,
             "use_xy_restriction": true,
             "num_projection_points": 300,
-            "flat_centroid_dist": 10,
-            "perc_centroid_dist": 68,
+            "flat_centroid_dist": 10.0,
+            "perc_centroid_dist": 68.0,
             "match_z_threshold": 4,
-            "area_delta_perc": 150
+            "area_delta_perc": 150.0,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30.0,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
         }
     },
     "drg_subset_1_3": {
@@ -41,7 +45,7 @@
         "HAS_VALIDATION": true,
         "HAS_ALGORITHMIC": true,
         "HAS_REDUCED_DATASET": true,
-        "SEGMENT_VALIDATED_ONLY": true,
+        "SEGMENT_VALIDATED_ONLY": false,
         "REQUIRES_REDUCED_DATASET": true,
         "PLOT_TYPE": "gt",
         "VALIDATION_DIR": "../VALIDATION/",
@@ -60,7 +64,11 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 150
+            "area_delta_perc": 150,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
         }
     },
     "drg_subset_1_1": {
@@ -92,7 +100,11 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 150
+            "area_delta_perc": 150,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
         }
     },
     "b": {
@@ -124,7 +136,11 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 150
+            "area_delta_perc": 150,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
         }
     },
     "a": {
@@ -156,7 +172,11 @@
             "flat_centroid_dist": 10,
             "perc_centroid_dist": 68,
             "match_z_threshold": 2,
-            "area_delta_perc": 150
+            "area_delta_perc": 150,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
         }
     },
     "c": {
@@ -185,10 +205,14 @@
             "use_area_restriction": false,
             "use_xy_restriction": true,
             "num_projection_points": 300,
-            "flat_centroid_dist": 10,
-            "perc_centroid_dist": 24,
-            "match_z_threshold": 4,
-            "area_delta_perc": 121
+            "flat_centroid_dist": 3.0,
+            "perc_centroid_dist": 23.0,
+            "match_z_threshold": 2,
+            "area_delta_perc": 20.0,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 60.0,
+            "ar_change_num_samples": 5,
+            "ar_change_activation_thresh": 15
         }
     }
 }

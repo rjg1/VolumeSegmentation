@@ -44,6 +44,10 @@ FLAT_CENTROID_DIST = 10
 PERC_CENTROID_DIST = 68
 MATCH_Z_THRESHOLD = 4
 AREA_DELTA_PERC = 150
+AR_CHANGE_PERC = 30                     # Maximum allowed change in average area per ROI over a number of ROI additions
+AR_CHANGE_NUM_SAMPLES = 2               # Number of xy roi samples that are considered when comparing change in average area per roi for a volume
+AR_CHANGE_ACTIVATION_THRESH = 10        # Number of XY ROIs required in a volume before area restriction kicks in
+RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
 
 class DemoGUIApp:
     def __init__(self, root):
@@ -189,63 +193,104 @@ class DemoGUIApp:
         self.algorithm_frame.grid(row=0, column=2, padx=5, pady=15, sticky="new", columnspan=2)
         self.algorithm_frame.grid_remove()  # Hide initially
         
-        # Create the widgets inside the frame
+        # Create the header label outside the container frame
         label = tk.Label(self.algorithm_frame, text="Algorithm Parameters", font=("Arial", 12, "bold"))
         label.grid(row=0, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
 
+        # Create a LabelFrame
+        self.algorithm_container_frame = tk.LabelFrame(self.algorithm_frame, padx=10, pady=10)  # No text for the label frame
+        self.algorithm_container_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+
         # Row 1: Entry + Checkbox
         self.flat_centroid_entry_var = tk.StringVar()  # Use StringVar to track changes
-        self.flat_centroid_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.flat_centroid_entry_var)
+        self.flat_centroid_entry = tk.Entry(self.algorithm_container_frame, width=5, textvariable=self.flat_centroid_entry_var)
         self.flat_centroid_entry.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
         self.flat_centroid_entry.bind("<Return>", self.update_algo_parameters) 
 
         self.flat_centroid_check_var = tk.IntVar()  # Variable for Checkbutton
-        self.flat_centroid_check = tk.Checkbutton(self.algorithm_frame, text="Flat centroid distance", variable=self.flat_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="flat"))
+        self.flat_centroid_check = tk.Checkbutton(self.algorithm_container_frame, text="Flat centroid distance", variable=self.flat_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="flat"))
         self.flat_centroid_check.grid(row=1, column=1, padx=5, pady=2, sticky="w")
 
         # Row 2: Entry + Checkbox
         self.perc_centroid_entry_var = tk.StringVar()
-        self.perc_centroid_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.perc_centroid_entry_var)
+        self.perc_centroid_entry = tk.Entry(self.algorithm_container_frame, width=5, textvariable=self.perc_centroid_entry_var)
         self.perc_centroid_entry.grid(row=2, column=0, padx=5, pady=2, sticky="ew")
         self.perc_centroid_entry.bind("<Return>", self.update_algo_parameters) 
 
         self.perc_centroid_check_var = tk.IntVar()
-        self.perc_centroid_check = tk.Checkbutton(self.algorithm_frame, text="Percent radius centroid distance", variable=self.perc_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="perc"))
+        self.perc_centroid_check = tk.Checkbutton(self.algorithm_container_frame, text="Percent radius centroid distance", variable=self.perc_centroid_check_var,  command=lambda: self.update_algo_parameters(checkbox_name="perc"))
         self.perc_centroid_check.grid(row=2, column=1, padx=5, pady=2, sticky="w")
 
         # Row 3: Entry + Checkbox
         self.match_z_entry_var = tk.StringVar()
-        self.match_z_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.match_z_entry_var)
+        self.match_z_entry = tk.Entry(self.algorithm_container_frame, width=5, textvariable=self.match_z_entry_var)
         self.match_z_entry.grid(row=3, column=0, padx=5, pady=2, sticky="ew")
         self.match_z_entry.bind("<Return>", self.update_algo_parameters) 
 
         self.match_z_check_var = tk.IntVar()
-        self.match_z_check = tk.Checkbutton(self.algorithm_frame, text="Match Z threshold", variable=self.match_z_check_var, command=self.update_algo_parameters)
+        self.match_z_check = tk.Checkbutton(self.algorithm_container_frame, text="Z gap maximum", variable=self.match_z_check_var, command=self.update_algo_parameters)
         self.match_z_check.grid(row=3, column=1, padx=5, pady=2, sticky="w")
 
         # Row 4: Entry + Checkbox
         self.restrict_area_entry_var = tk.StringVar()
-        self.restrict_area_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.restrict_area_entry_var)
+        self.restrict_area_entry = tk.Entry(self.algorithm_container_frame, width=5, textvariable=self.restrict_area_entry_var)
         self.restrict_area_entry.grid(row=4, column=0, padx=5, pady=2, sticky="ew")
         self.restrict_area_entry.bind("<Return>", self.update_algo_parameters) 
 
         self.restrict_area_check_var = tk.IntVar()
-        self.restrict_area_check = tk.Checkbutton(self.algorithm_frame, text="Restrict Area Delta Percent", variable=self.restrict_area_check_var, command=self.update_algo_parameters)
+        self.restrict_area_check = tk.Checkbutton(self.algorithm_container_frame, text="Restrict area delta percent", variable=self.restrict_area_check_var, command=self.update_algo_parameters)
         self.restrict_area_check.grid(row=4, column=1, padx=5, pady=2, sticky="w")
 
         # Row 5: Entry + Label
         self.num_points_entry_var = tk.StringVar()
-        self.num_points_entry = tk.Entry(self.algorithm_frame, width=5, textvariable=self.num_points_entry_var)
+        self.num_points_entry = tk.Entry(self.algorithm_container_frame, width=5, textvariable=self.num_points_entry_var)
         self.num_points_entry.grid(row=5, column=0, padx=5, pady=2, sticky="ew")
         self.num_points_entry.bind("<Return>", self.update_algo_parameters) 
 
-        label = tk.Label(self.algorithm_frame, text="Number of points to project")
+        label = tk.Label(self.algorithm_container_frame, text="Number of points to project")
         label.grid(row=5, column=1, padx=5, pady=2, sticky="w")
 
         # Row 6: Checkbox
         self.xy_restrict_check_var = tk.IntVar()
-        self.xy_restrict_check = tk.Checkbutton(self.algorithm_frame, text="One XY ROI per z-level per volume", variable=self.xy_restrict_check_var, command=self.update_algo_parameters)
+        self.xy_restrict_check = tk.Checkbutton(self.algorithm_container_frame, text="One XY ROI per z-level per volume", variable=self.xy_restrict_check_var, command=self.update_algo_parameters)
         self.xy_restrict_check.grid(row=6, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        # Row 7: Entry>Label Entry>Label Entry>Label >Checkbox
+        # Create a frame for the experimental area derivative restriction
+        self.experimental_area_frame = tk.LabelFrame(self.algorithm_frame, text="Experimental Area Derivative Restriction", padx=10, pady=10)
+        self.experimental_area_frame.grid(row=7, column=0, columnspan=6, padx=5, pady=5, sticky="ew")
+
+        # Percent difference entry + label
+        self.percent_diff_entry_var = tk.StringVar()
+        self.percent_diff_entry = tk.Entry(self.experimental_area_frame, width=5, textvariable=self.percent_diff_entry_var)
+        self.percent_diff_entry.grid(row=0, column=0, padx=5, pady=2, sticky="ew")
+        self.percent_diff_entry.bind("<Return>", self.update_algo_parameters)
+
+        percent_diff_label = tk.Label(self.experimental_area_frame, text="Percent diff in area between volume and subset of ROIs", wraplength=200)
+        percent_diff_label.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+        # Number of XY ROIs to compare entry + label
+        self.num_xy_rois_entry_var = tk.StringVar()
+        self.num_xy_rois_entry = tk.Entry(self.experimental_area_frame, width=5, textvariable=self.num_xy_rois_entry_var)
+        self.num_xy_rois_entry.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
+        self.num_xy_rois_entry.bind("<Return>", self.update_algo_parameters)
+
+        num_xy_rois_label = tk.Label(self.experimental_area_frame, text="Subset number of XY ROIs to compare", wraplength=200)
+        num_xy_rois_label.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+        # Minimum samples required entry + label 
+        self.min_samples_entry_var = tk.StringVar()
+        self.min_samples_entry = tk.Entry(self.experimental_area_frame, width=5, textvariable=self.min_samples_entry_var)
+        self.min_samples_entry.grid(row=3, column=0, padx=5, pady=2, sticky="ew")
+        self.min_samples_entry.bind("<Return>", self.update_algo_parameters)
+
+        min_samples_label = tk.Label(self.experimental_area_frame, text="Min ROIs per volume before enabled", wraplength=200)
+        min_samples_label.grid(row=3, column=1, padx=5, pady=2, sticky="w")
+
+        # Enable mode checkbox
+        self.enable_mode_check_var = tk.IntVar()
+        self.enable_mode_check = tk.Checkbutton(self.experimental_area_frame, text="Enable restriction", variable=self.enable_mode_check_var, command=self.update_algo_parameters)
+        self.enable_mode_check.grid(row=4, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+
 
         # END algorithm options
         self.xz_checkbox = tk.Checkbutton(self.lower_right_frame, text="Regenerate XZ Planes", variable=self.remake_xz, command=self.update_scenario_from_checkboxes)
@@ -315,7 +360,11 @@ class DemoGUIApp:
                     "flat_centroid_dist" : FLAT_CENTROID_DIST,
                     "perc_centroid_dist" : PERC_CENTROID_DIST,
                     "match_z_threshold" : MATCH_Z_THRESHOLD,
-                    "area_delta_perc" : AREA_DELTA_PERC
+                    "area_delta_perc" : AREA_DELTA_PERC,
+                    "use_area_deriv_restriction": RESTRICT_AREA_CHANGE,
+                    "ar_change_perc": AR_CHANGE_PERC,
+                    "ar_change_num_samples": AR_CHANGE_NUM_SAMPLES,
+                    "ar_change_activation_thresh": AR_CHANGE_ACTIVATION_THRESH
                 }
             }
             self.update_dropdown()
@@ -389,24 +438,34 @@ class DemoGUIApp:
         algo_parameters['use_z_threshold'] = bool(self.match_z_check_var.get())
         algo_parameters['use_area_restriction'] = bool(self.restrict_area_check_var.get())
         algo_parameters['use_xy_restriction'] = bool(self.xy_restrict_check_var.get())
+        algo_parameters['use_area_deriv_restriction'] = bool(self.enable_mode_check_var.get())
         # Update entry variables if applicable
         entries = [self.flat_centroid_entry, self. perc_centroid_entry, self.match_z_entry,
-                   self.restrict_area_entry, self.num_points_entry]
-        ranges = [(0,100), (0,1000), (0, 150), (100,1000), (100,500)]
+                   self.restrict_area_entry, self.num_points_entry, 
+                   self.percent_diff_entry, self.num_xy_rois_entry, self.min_samples_entry]
+        ranges = [(0,100), (0,1000), (0, 150), 
+                  (0,1000), (100,500), 
+                  (0,1000), (0,100), (0,100)]
         keys = ["flat_centroid_dist", "perc_centroid_dist", "match_z_threshold", 
-                "area_delta_perc", "num_projection_points"]
-        for idx, entry in enumerate(entries): # Process each entry and attempt to parse the variable
+                "area_delta_perc", "num_projection_points", 
+                "ar_change_perc", "ar_change_num_samples", "ar_change_activation_thresh"]
+        int_keys = {"num_projection_points", "ar_change_num_samples", "ar_change_activation_thresh",
+                    "match_z_threshold"} # Track keys to store as int instead of float
+        for idx, entry in enumerate(entries): 
             value = entry.get()
             try:
-                # Ensure the value is an integer
-                value_as_int = int(value)
-                # Ensure the value is in range
+                key = keys[idx]
+                # Determine if the value should be an int or a float
+                value_parsed = float(value)
+                if key in int_keys and value_parsed.is_integer():
+                    value_parsed = int(value_parsed)
+
                 min_range, max_range = ranges[idx]
-                if value_as_int >= min_range and value_as_int <= max_range:
-                    algo_parameters[keys[idx]] = value_as_int # Update the dictionary
+                if min_range <= value_parsed <= max_range:
+                    algo_parameters[key] = value_parsed 
             except ValueError:
-                print(f"Please enter an integer value, or a value in a suitable range.")
-                pass
+                print(f"Please enter a valid number for {key} in the range {min_range}-{max_range}.")
+        pass
 
     # Loads algorithm parameters and sets values of widgets
     def load_algo_parameters(self):
@@ -421,6 +480,7 @@ class DemoGUIApp:
         self.match_z_check_var.set(1 if algo_parameters["use_z_threshold"] else 0)
         self.restrict_area_check_var.set(1 if algo_parameters["use_area_restriction"] else 0)
         self.xy_restrict_check_var.set(1 if algo_parameters["use_xy_restriction"] else 0)
+        self.enable_mode_check_var.set(1 if algo_parameters["use_area_deriv_restriction"] else 0)
         # ENTRY UPDATES
         self.num_points_entry.delete(0, tk.END)
         self.num_points_entry.insert(0, str(algo_parameters["num_projection_points"]))
@@ -432,6 +492,13 @@ class DemoGUIApp:
         self.perc_centroid_entry.insert(0, str(algo_parameters["perc_centroid_dist"]))
         self.restrict_area_entry.delete(0, tk.END)
         self.restrict_area_entry.insert(0, str(algo_parameters["area_delta_perc"]))
+        # Experimental vars
+        self.percent_diff_entry.delete(0, tk.END)
+        self.percent_diff_entry.insert(0, str(algo_parameters["ar_change_perc"]))
+        self.num_xy_rois_entry.delete(0, tk.END)
+        self.num_xy_rois_entry.insert(0, str(algo_parameters["ar_change_num_samples"]))
+        self.min_samples_entry.delete(0, tk.END)
+        self.min_samples_entry.insert(0, str(algo_parameters["ar_change_activation_thresh"]))
 
     def generate_data_plot(self, slices=SHOW_Z_SLICES):
         if not self.active_scenario:
@@ -652,6 +719,10 @@ class DemoGUIApp:
             # Show the upper and lower right frames when a scenario is active
             self.upper_right_frame.grid()  # Make upper frame visible
             self.lower_right_frame.grid()  # Make lower frame visible
+
+            # Encourage users to use their cache
+            if os.path.exists(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"]):
+                self.remake_xz.set(0)
 
             # Clear existing labels
             for widget in self.left_info_frame.winfo_children():

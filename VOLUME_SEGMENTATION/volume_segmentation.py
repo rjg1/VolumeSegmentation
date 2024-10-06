@@ -23,8 +23,6 @@ from volume_seg_ffp import segment_volumes_drg
 OUT_FILE = './results/real_data_filtered_algo_VOLUMES.csv'
 XZ_IO_PATH = "./xz_cache/real_data_filtered_v0_ROIS_XZ.csv"
 IN_FILE = './run_data/real_data_filtered_v0_ROIS.csv'
-# Number of points to project around an ROI boundary when deciding intersection (Higher -> more computation)
-ROI_PROJECTION_N_POINTS = 300
 # Whether to use fit-for-purpose DRG segmentation or generalised segmentation
 RESTRICTED_MODE = True
 # Default FFP Parameters
@@ -33,11 +31,15 @@ CENTROID_DISTANCE_MAX = 10              # Maximum allowable distance between cen
 CENTROID_DISTANCE_PERC = 68             # Maximum allowable distance between centroids of two adjacent XY ROIs as a percentage of the radius of a centroid
 MATCH_Z_THRESHOLD = 4                   # Maximum distance between two adjacent XY rois in Z to be part of same volume
 AREA_DELTA_PERC_THRESHOLD = 150         # Maximum change in percent of ROI area between two XY rois in a volume (from small to large -> change of 150%)
+AR_CHANGE_PERC = 30                     # Maximum allowed change in average area per ROI over a number of ROI additions
+AR_CHANGE_NUM_SAMPLES = 2               # Number of xy roi samples that are considered when comparing change in average area per roi for a volume
+AR_CHANGE_ACTIVATION_THRESH = 10        # Number of XY ROIs required in a volume before area restriction kicks in
 RESTRICT_AREA = False                   # Restriction in the difference in area between two adjacent XY ROIs in a volume
 RESTRICT_CENTROID_DISTANCE = True       # Restriction on the distance between centroid of two adjacent XY ROIs in a volume
 USE_PERCENT_CENTROID_DISTANCE = False   # Centroid distance threshold is a percent of the radius of an XY ROI instead of a flat value
 RESTRICT_ADJACENCY = True               # Restriction on how close an XY ROI must be in Z to its nearest neighbour in the volume
 RESTRICT_MULTIPLE_XY_PER_VOL = True     # Restriction on whether or not two XY ROIs are allowed to be in the same z-level per volume
+RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
 
 def main():
     # Set up argument parser
@@ -54,11 +56,15 @@ def main():
     parser.add_argument('--use_z_threshold', default=RESTRICT_ADJACENCY, help='Only allow ROIs to be added to the same volume if their relative z value is within this threshold to its adjacent ROI in z(default: %(default)s)')
     parser.add_argument('--use_area_restriction', default=RESTRICT_AREA, help='Prevent adjacent ROIs in z from being added to the same volume if the percent area change is too large (default: %(default)s)')
     parser.add_argument('--use_xy_restriction', default=RESTRICT_MULTIPLE_XY_PER_VOL, help='Only allow one xy roi per z per volume (default: %(default)s)')
+    parser.add_argument('--use_area_deriv_restriction', default=RESTRICT_AREA_CHANGE, help='Enable volume per roi change restriction (default: %(default)s)')
     parser.add_argument('--num_projection_points', default=ROI_PROJECTION_N_POINTS, help='Number of points to project when determining intersection (default: %(default)s)')
     parser.add_argument('--flat_centroid_dist', default=CENTROID_DISTANCE_MAX, help='Flat threshold for centroid check(default: %(default)s)')
     parser.add_argument('--perc_centroid_dist', default=CENTROID_DISTANCE_PERC, help='Percent threshold for centroid check(default: %(default)s)')
     parser.add_argument('--match_z_threshold', default=MATCH_Z_THRESHOLD, help='Match z threshold (default: %(default)s)')
     parser.add_argument('--area_delta_perc', default=AREA_DELTA_PERC_THRESHOLD, help='Area percent threshold for area restriction (default: %(default)s)')
+    parser.add_argument('--ar_change_perc', default=AR_CHANGE_PERC, help='Allowed percentage difference in avg vol per roi in two volumes (default: %(default)s)')
+    parser.add_argument('--ar_change_num_samples', default=AR_CHANGE_NUM_SAMPLES, help='Number of XY rois to compare to the overall volume in volume change (default: %(default)s)')
+    parser.add_argument('--ar_change_activation_thresh', default=AR_CHANGE_ACTIVATION_THRESH, help='Number of XY rois to add to a volume before volume change kicks in (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -80,11 +86,15 @@ def main():
                 'restrict_adjacency': str_to_bool(args.use_z_threshold),
                 'restrict_area': str_to_bool(args.use_area_restriction),
                 'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
+                'restrict_area_change' : str_to_bool(args.use_area_deriv_restriction),
                 'roi_projection_n_points': int(args.num_projection_points),
-                'centroid_distance_max': int(args.flat_centroid_dist),
-                'centroid_distance_perc': int(args.perc_centroid_dist),
+                'centroid_distance_max': float(args.flat_centroid_dist),
+                'centroid_distance_perc': float(args.perc_centroid_dist),
                 'match_z_threshold': int(args.match_z_threshold),
-                'area_delta_perc_threshold': int(args.area_delta_perc)
+                'area_delta_perc_threshold': float(args.area_delta_perc),
+                'ar_change_perc' : float(args.ar_change_perc),
+                'ar_change_num_samples' : int(args.ar_change_num_samples),
+                'ar_change_activation_thresh' : int(args.ar_change_activation_thresh)
             }
         else:
             algo_parameters = {
@@ -93,11 +103,15 @@ def main():
                 'restrict_adjacency': RESTRICT_ADJACENCY,
                 'restrict_area': RESTRICT_AREA,
                 'restrict_multiple_xy_per_vol': RESTRICT_MULTIPLE_XY_PER_VOL,
+                'restrict_area_change' : RESTRICT_AREA_CHANGE,
                 'roi_projection_n_points': ROI_PROJECTION_N_POINTS,
                 'centroid_distance_max': CENTROID_DISTANCE_MAX,
                 'centroid_distance_perc': CENTROID_DISTANCE_PERC,
                 'match_z_threshold': MATCH_Z_THRESHOLD,
-                'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD
+                'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD,
+                'ar_change_perc' : AR_CHANGE_PERC,
+                'ar_change_num_samples' : AR_CHANGE_NUM_SAMPLES,
+                'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH
             }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
