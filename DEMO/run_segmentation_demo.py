@@ -127,7 +127,7 @@ def main():
                 json.dump(all_scenarios, file, indent=4)
         if has_validation and has_algorithmic and plot_type == "both":
             # Run validation script if remap required
-            if all_scenarios[active_scenario].get("REMAP_VOLUMES", None) or restricted_mode:
+            if all_scenarios[active_scenario].get("REMAP_VOLUMES", None) or run_segmentation:
                 subprocess.run(v_args, check=True)
             # Visualise GT and ALGO side by side
             subprocess.run(v_vis_args, check=True)
