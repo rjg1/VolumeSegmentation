@@ -212,10 +212,10 @@ def check_area_diff(perc_diff, volume_1, volume_2, rois_to_compare, min_rois):
     v1_avg = v1_running_avg_list[-1]
     v2_avg = v2_running_avg_list[-1]
 
-    if vol_1_num_rois >= min_rois and vol_2_num_rois < min_rois:
+    if vol_1_num_rois >= min_rois and vol_2_num_rois < rois_to_compare:
         # Vol 1 is bigger volume, augment volume 2 with enough ROIs
         v1_avg, v2_avg = determine_average_area_per_roi(volume_1, volume_2, rois_to_compare)
-    elif vol_2_num_rois >= min_rois and vol_1_num_rois < min_rois:
+    elif vol_2_num_rois >= min_rois and vol_1_num_rois < rois_to_compare:
         # Vol 2 is bigger volume, augment volume 1 with enough ROIs
         v2_avg, v1_avg = determine_average_area_per_roi(volume_2, volume_1, rois_to_compare)
     
@@ -355,11 +355,10 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
             # print(f"Distance check failed: z_gap={z_gap}")
             return False
     if parameters['restrict_centroid_distance']:
-        # Get centroid of first XY ROI
+        # Get centroids
         roi1_centroid = roi1.get_centroid()
-        # Get centroid of second XY ROI
         roi2_centroid = roi2.get_centroid()
-        # Calculate XY distance in 2D and check against thresholds
+        # Calculate XY distance in 2D and check against threshold
         xy_distance = distance.euclidean(roi1_centroid[:2], roi2_centroid[:2])
         # Modify the distance threshold if necessary
         if parameters['use_percent_centroid_distance']:

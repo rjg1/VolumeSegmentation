@@ -669,14 +669,11 @@ class DemoGUIApp:
     def update_reduction_button(self):
         if self.active_scenario:
             is_reduced = self.scenarios[self.active_scenario]["HAS_REDUCED_DATASET"]
-            if is_reduced:
+            has_validation_dataset = self.scenarios[self.active_scenario]["HAS_VALIDATION"]
+            if is_reduced or not has_validation_dataset:
                 self.reduce_data_button.config(state="disabled", bg='darkgray')
             else:
-                requires_reduction = self.scenarios[self.active_scenario]["REQUIRES_REDUCED_DATASET"]
-                if requires_reduction:
-                    self.reduce_data_button.config(state="normal", bg='orange')
-                else:
-                    self.reduce_data_button.config(state="normal", bg='orange')
+                self.reduce_data_button.config(state="normal", bg='orange')
             # Execute button logic
             if self.seg_var.get() or self.algo_var.get() or self.gt_var.get():
                 self.execute_button.config(state = "normal", bg = "lightgreen")
