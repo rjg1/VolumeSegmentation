@@ -59,13 +59,21 @@ class DemoGUIApp:
         self.scenarios = self.load_scenarios_from_json(SCENARIOS_PATH)
         self.active_scenario = None # No active scenario on startup
 
+        # 3D Playground section
+        self.create_label = tk.Label(self.root, text="3D Playground", font=("Arial", 12, "bold"))
+        self.create_label.grid(row=0, column=0, padx=5, pady=10, sticky="w")
+
+        # Create 3D Playground Button
+        self.create_button = tk.Button(self.root, text="Open Playground", command=self.open_playground, width=15)
+        self.create_button.grid(row =1, padx=5, pady=1, sticky="w")
+        
         # Create scenario section
         self.create_label = tk.Label(self.root, text="Create Scenario", font=("Arial", 12, "bold"))
-        self.create_label.grid(row=0, column=0, padx=5, pady=10, sticky="w")
+        self.create_label.grid(row=2, column=0, padx=5, pady=10, sticky="w")
 
         # Create a frame to hold the entry, checkboxes, and button
         self.entry_checkbox_frame = tk.Frame(self.root)
-        self.entry_checkbox_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+        self.entry_checkbox_frame.grid(row=3, column=0, columnspan=4, padx=5, pady=5, sticky="w")
 
         # Create scenario name entry inside the frame
         self.scenario_entry = tk.Entry(self.entry_checkbox_frame, width=30)
@@ -89,11 +97,11 @@ class DemoGUIApp:
 
         # Load scenario section
         self.load_label = tk.Label(self.root, text="Load Scenario", font=("Arial", 12, "bold"))
-        self.load_label.grid(row=3, column=0, padx=5, pady=10, sticky="w")
+        self.load_label.grid(row=4, column=0, padx=5, pady=10, sticky="w")
 
         # Create a frame to hold the dropdown and load button
         self.dropdown_frame = tk.Frame(self.root)
-        self.dropdown_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="w")
+        self.dropdown_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="w")
 
         # Dropdown for loading scenario inside the frame
         self.scenario_combobox = ttk.Combobox(self.dropdown_frame, values=list(self.scenarios.keys()), width=27)
@@ -107,11 +115,11 @@ class DemoGUIApp:
         
         # Label for active scenario
         self.active_scenario_label = tk.Label(self.root, text="No Active Scenario", font=("Arial", 12, "bold"))
-        self.active_scenario_label.grid(row=5, column=0, padx=10, pady=5, sticky="w")
+        self.active_scenario_label.grid(row=6, column=0, padx=10, pady=5, sticky="w")
 
         # Outer frame (contains the inner left/right frames)
         self.outer_frame = ttk.Frame(self.root, width=600, height=300, relief=tk.SUNKEN)
-        self.outer_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+        self.outer_frame.grid(row=7, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
 
         # Inner left frame (contains keys/values, split into two subframes)
         self.inner_left_frame = tk.Frame(self.outer_frame, width=400)  # Fixed width
@@ -603,6 +611,14 @@ class DemoGUIApp:
             os.remove(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"])
         # Start the subprocess in a new thread to keep the GUI responsive
         threading.Thread(target=self.run_subprocess, args=[exec_args, "execute_commands"]).start()
+        self.check_queue()
+
+    def open_playground(self):
+        pg_args = [
+            'python', '../3D_SIMULATOR/3dtest7.py'
+        ]
+        # Start the subprocess
+        threading.Thread(target=self.run_subprocess, args=[pg_args, "playground"]).start()
         self.check_queue()
 
     # Create a new thread to run the subprocess in the background
