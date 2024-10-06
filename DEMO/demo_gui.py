@@ -186,6 +186,7 @@ class DemoGUIApp:
         self.algo_var = tk.IntVar()
         self.remake_xz = tk.IntVar()
         self.run_reduced_var = tk.IntVar()
+        self.mapping_var = tk.IntVar()
 
         seg_label = tk.Label(self.lower_right_frame, text="Segmentation Options", font=("Arial", 10, "bold"))
         seg_label.grid(row=1, column=0, padx=10, pady=5)
@@ -316,9 +317,12 @@ class DemoGUIApp:
         self.algo_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Algorithmic Volumes", variable=self.algo_var, command=self.update_scenario_from_checkboxes)
         self.algo_checkbox.grid(row=9, column=0, sticky="w", padx=5, pady=2)
 
+        self.mapping_checkbox = tk.Checkbutton(self.lower_right_frame, text="Re-map Volumes", variable=self.mapping_var, command=self.update_scenario_from_checkboxes)
+        self.mapping_checkbox.grid(row=10, column=0, sticky="w", padx=5, pady=2)
+
         # Execute button with fixed width
         self.execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        self.execute_button.grid(row=10, column=0, padx=5, pady=2, sticky="ew")
+        self.execute_button.grid(row=11, column=0, padx=5, pady=2, sticky="ew")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()
@@ -349,6 +353,7 @@ class DemoGUIApp:
                 "HAS_VALIDATION": False, # Set after volume seg tool is run with some output
                 "HAS_ALGORITHMIC": False, # Set after an algorithmic seg is run
                 "HAS_REDUCED_DATASET": False, # Set when dataset reduction occurs
+                "REMAP_VOLUMES" : True, # A mapping should be generated for a new dataset
                 "SEGMENT_VALIDATED_ONLY": bool(self.reduce_var.get()),
                 "REQUIRES_REDUCED_DATASET": bool(self.reduce_var.get()),
                 "PLOT_TYPE": "None",
@@ -434,6 +439,8 @@ class DemoGUIApp:
 
     # Updates the dictionary of a scenario with its algorithm parameters
     def update_algo_parameters(self, event = None, checkbox_name = None):
+        if not self.scenarios[self.active_scenario]['RESTRICTED_MODE']:
+            return
         algo_parameters = self.scenarios[self.active_scenario]["algo_parameters"]
         # Handle conflicting centroid presses
         if checkbox_name == "flat" and self.perc_centroid_check_var.get():
@@ -472,7 +479,7 @@ class DemoGUIApp:
                 if min_range <= value_parsed <= max_range:
                     algo_parameters[key] = value_parsed 
             except ValueError:
-                print(f"Please enter a valid number for {key} in the range {min_range}-{max_range}.")
+                print(f"Please enter a valid number.")
         pass
 
     # Loads algorithm parameters and sets values of widgets
@@ -706,6 +713,7 @@ class DemoGUIApp:
             self.scenarios[self.active_scenario]["RESTRICTED_MODE"] = bool(self.ffp_var.get())
             self.scenarios[self.active_scenario]["RUN_SEGMENTATION"] = bool(self.seg_var.get())
             self.scenarios[self.active_scenario]["SEGMENT_VALIDATED_ONLY"] = bool(self.run_reduced_var.get())
+            self.scenarios[self.active_scenario]["REMAP_VOLUMES"] = bool(self.mapping_var.get())
             if self.algo_var.get() and self.gt_var.get():
                 self.scenarios[self.active_scenario]["PLOT_TYPE"] = "both"
             elif self.algo_var.get(): 
@@ -772,10 +780,10 @@ class DemoGUIApp:
             self.ffp_var.set(1 if scenario_data.get("RESTRICTED_MODE", None) else 0)
             self.seg_var.set(1 if scenario_data.get("RUN_SEGMENTATION", None) else 0)
             self.run_reduced_var.set(1 if scenario_data.get("SEGMENT_VALIDATED_ONLY", None) else 0)
-            
+            self.mapping_var.set(1 if scenario_data.get("REMAP_VOLUMES", None) else 0)
+
             # Update ffp algorithm GUI widgets
-            if scenario_data["RESTRICTED_MODE"]:
-                self.load_algo_parameters()
+            self.load_algo_parameters()
             
             self.update_scenario_from_checkboxes()
         else:
@@ -818,7 +826,14 @@ class DemoGUIApp:
         else:
             self.seg_checkbox.config(state="normal")
 
+        # Allow a user to not remap volumes iff there is a validation and algorithmic already
+        if not scenario_data.get("HAS_VALIDATION", None) or not scenario_data.get("HAS_ALGORITHMIC", None) or self.seg_var.get():
+            self.mapping_var.set(1)
+            self.mapping_checkbox.config(state="disabled")
+        else:
+            self.mapping_checkbox.config(state="normal")
 
+        # Can only view an algorithmic volume if it has been generated
         if scenario_data.get("HAS_ALGORITHMIC", False) or self.seg_var.get():
             self.algo_checkbox.config(state="normal")
         else:
