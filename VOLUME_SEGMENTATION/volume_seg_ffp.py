@@ -41,18 +41,17 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
     xz_id = 0
     for y, hull_list in xz_hulls.items():
         for item in hull_list:
+            points_3d = []
             if isinstance(item, ConvexHull):
                 # Handle ConvexHull objects
                 boundary_points = get_hull_boundary_points(item)
-                points_3d = [(x, y, z) for x, z in boundary_points]
-            elif isinstance(item, np.ndarray) and len(item) == 2:
-                # Handle line segments (2 points)
-                points_3d = [(item[0][0], y, item[0][1]), (item[1][0], y, item[1][1])]
-            elif isinstance(item, np.ndarray) and len(item) == 1:
-                # Handle single points
-                points_3d = [(item[0][0], y, item[0][1])]
-            xz_rois[xz_id] = BoundaryRegion(points_3d)
-            xz_id += 1
+                points_3d.extend([(x, y, z) for x, z in boundary_points])
+            elif isinstance(item, np.ndarray):
+                for point in item:
+                    points_3d.append((point[0], y, point[1]))
+            if len(points_3d) > 0:
+                xz_rois[xz_id] = BoundaryRegion(points_3d)
+                xz_id += 1
 
     print(f"Finished Volume Segmentation Caching - beginning algorithm")
     # Iterate through all XY ROIs and determine collisions with XZ ROIs
@@ -60,7 +59,8 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
     removed_objects = [] # List of objects removed during merge operations
     num_xy_rois = len(xy_rois) # Debug code used to provide progress
     xy_roi_count = 0 # Count of number of XY rois processed
-    last_z_level = None
+    last_z_level = None # Debug
+    xy_untracked = [] # Debug
     for xy_roi_id, xy_roi in xy_rois.items():
         #TEST DEBUG
         xy_roi_zmin = xy_roi.zmin
@@ -71,6 +71,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
         if xy_roi_count % 100 == 0:
             print(f"Evaluating XY ROI {xy_roi_count + 1}/{num_xy_rois}")
         xy_roi_count += 1
+        found_link = False
         # END DEBUG
         for xz_roi_id, xz_roi in xz_rois.items():
             # Rough check if an intersection is theoretically possible
@@ -79,6 +80,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
             # Execution reached here - more detailed check for collision
             intersection = check_region_intersection(xy_roi.get_boundary_points(), xz_roi.get_boundary_points(), parameters=parameters)
             if intersection: # XZ and XY ROIs are part of same object
+                found_link = True # Test code
                 # Determine what 3D object id to assign to these two ROIs
                 xz_roi_objs = set()# List of possible XZ ROI objs
                 xy_roi_obj = None
@@ -178,11 +180,16 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                         xy_roi_obj = current_obj_id
                         # Increment the id for the next volume
                         current_obj_id += 1
-
+        # TEST DEBUG
+        if not found_link:
+            xy_untracked.append(xy_roi_id)
+        # END DEBUG
     # Remove deleted volumes
     for obj in removed_objects:
         volumes.pop(obj)
-
+    # DEBUG
+    print(f"{len(xy_untracked)} unlinked xy volumes: {xy_untracked}")
+    # END DEBUG
     # Return volumes dictionary
     return volumes
 

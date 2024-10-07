@@ -120,7 +120,8 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
             continue
 
         if min_samples is None:
-            min_samples = estimate_min_samples(xz_values)
+            # min_samples = estimate_min_samples(xz_values)
+            min_samples = 2
             # print(f"y= {y} min_samples = {min_samples} len_xz = {len(xz_values)}")
         if eps is None:
             eps = determine_eps(xz_values, min_samples=min_samples)
@@ -134,8 +135,13 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
                 continue
             cluster_points = xz_values[labels == label]
             if points_collinear(cluster_points):
-                continue  # Skip collinear points
-
+                # Add colinear points as a np array
+                if y not in clustered_hulls:
+                    clustered_hulls[y] = []
+                clustered_hulls[y].append(xz_values)
+                print("Added colinear pts!")
+                continue
+            
             try:
                 hull = ConvexHull(cluster_points)
                 if y not in clustered_hulls:
@@ -238,9 +244,9 @@ def determine_eps(xz_values, min_samples=DEFAULT_MIN_SAMPLES):
     deltas = np.diff(sorted_distances)
     max_delta_index = np.argmax(deltas)  # Index of the maximum delta
     optimal_k_index = max(0, max_delta_index - 1)
-    optimal_eps = sorted_distances[optimal_k_index]  # eps is the distance at the point after the elbow
+    optimal_eps = sorted_distances[optimal_k_index]  # eps is the distance at the point before the elbow
 
-    return optimal_eps * EPS_REDUCTION
+    return max(1,optimal_eps * EPS_REDUCTION)
 
 
 def estimate_min_samples(points, percentile=10):
