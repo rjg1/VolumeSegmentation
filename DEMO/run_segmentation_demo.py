@@ -130,6 +130,9 @@ def main():
             if all_scenarios[active_scenario].get("REMAP_VOLUMES", None) or run_segmentation:
                 subprocess.run(v_args, check=True)
             # Visualise GT and ALGO side by side
+            if all_scenarios[active_scenario].get("SAMPLE_POINT_MAX", None):
+                sample_point_max = str(all_scenarios[active_scenario]["SAMPLE_POINT_MAX"])
+                v_vis_args.extend(["--sample_point_max", sample_point_max])
             subprocess.run(v_vis_args, check=True)
         elif has_validation and plot_type == "gt":
             # Argument list for single visualisation script on gt data
@@ -139,6 +142,9 @@ def main():
                 '--csv_filename', v_gt_csv,
                 '--plot_title', f'Plot of Ground Truth Data for Dataset: {v_data_folder}'
             ]
+            if all_scenarios[active_scenario].get("SAMPLE_POINT_MAX", None):
+                sample_point_max = str(all_scenarios[active_scenario]["SAMPLE_POINT_MAX"])
+                v_single_args.extend(["--sample_point_max", sample_point_max])
             subprocess.run(v_single_args, check=True)
         elif has_algorithmic and plot_type == "algo":
             # Argument list for single visualisation script on algo data
@@ -148,7 +154,10 @@ def main():
                 '--csv_filename', v_algo_csv,
                 '--plot_title', f'Plot of Algorithmic Data for Dataset: {v_data_folder}'
             ]
-            print(v_single_args)
+            
+            if all_scenarios[active_scenario].get("SAMPLE_POINT_MAX", None):
+                sample_point_max = str(all_scenarios[active_scenario]["SAMPLE_POINT_MAX"])
+                v_single_args.extend(["--sample_point_max", sample_point_max])
             subprocess.run(v_single_args, check=True)
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")

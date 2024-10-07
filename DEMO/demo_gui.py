@@ -541,10 +541,13 @@ class DemoGUIApp:
 
         # Check the total number of points
         total_points = len(data)
-        if total_points > MAX_SAMPLE_POINTS:
+        max_sample_points = MAX_SAMPLE_POINTS if not self.scenarios[self.active_scenario].get("SAMPLE_POINT_MAX",None) else self.scenarios[self.active_scenario].get("SAMPLE_POINT_MAX",None)
+        if total_points > max_sample_points:
             # Subsample points
-            sample_frac = MAX_SAMPLE_POINTS / total_points
+            sample_frac = max_sample_points / total_points
             data = data.sample(frac=sample_frac, random_state=42)
+        else:
+            sample_frac = 1
         
         # Create a new column for color grouping (combining z and ROI_ID)
         data['color_group'] = data.apply(lambda row: (row['z'], row['ROI_ID']), axis=1)

@@ -15,7 +15,7 @@ DRAW_LINES = False
 UNMATCHED_MARKER = 'x'
 AX_LIMIT_MAX = 1024
 
-def load_and_sample_data(filename):
+def load_and_sample_data(filename, sample_point_max):
     """Load the CSV data and sample a subset of points for visualization."""
     df = pd.read_csv(filename)
     df = df[df['VOLUME_ID'] != -1] # Filter noise points
@@ -23,7 +23,7 @@ def load_and_sample_data(filename):
     # Display the first few rows to check data
     # print(f"Loaded {filename} Preview:")
     # print(df.head())
-    subset_ratio = min(1, MAX_POINTS/len(df))
+    subset_ratio = min(1, sample_point_max/len(df))
     if 'VOLUME_ID' not in df.columns:
         raise ValueError("CSV does not contain VOLUME_ID column. Ensure export was done with volumes enabled.")
 
@@ -32,7 +32,7 @@ def load_and_sample_data(filename):
     sampled_data = df.groupby('VOLUME_ID').apply(lambda x: x.sample(frac=subset_ratio, random_state=42))
     sampled_data.reset_index(drop=True, inplace=True)
 
-    # print(f"Sampled {len(sampled_data)} points out of {len(df)} total points from {filename}.")
+    print(f"Sampled {len(sampled_data)} points out of {len(df)} total points from {filename}.")
     return sampled_data
 
 def assign_colors_by_volume_id(gt_df, algo_df, volume_mapping):
@@ -72,7 +72,7 @@ def assign_colors_by_volume_id(gt_df, algo_df, volume_mapping):
 
     return gt_colors_array, algo_colors_array
 
-def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume_mapping, ax_limit_max):
+def visualize_points_side_by_side(gt_df, algo_df, gt_colors, algo_colors, volume_mapping):
     """Visualize the ground truth and algorithmic points side by side in 3D, with indicators for matched and unmatched volumes."""
 
     fig = plt.figure(figsize=(12, 6))
@@ -159,7 +159,7 @@ def main():
     parser.add_argument('--gt_csv', default=GT_CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--algo_csv', default=ALGO_CSV_FILENAME, help='Algorithmic CSV file (default: %(default)s)')
     parser.add_argument('--mapping_csv', default=MAPPING_FILENAME, help='Output mapping CSV file (default: %(default)s)')
-    parser.add_argument('--ax_limit_max', default=AX_LIMIT_MAX, help='Max limit on axes (default: %(default)s)')
+    parser.add_argument('--sample_point_max', default=MAX_POINTS, help='Max number of points to sample (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -176,8 +176,8 @@ def main():
     mapping_csv_path = os.path.join(data_folder, mapping_filename)
 
     # Load and sample the ground truth and algorithmic data
-    gt_sampled_df = load_and_sample_data(gt_csv_path)
-    algo_sampled_df = load_and_sample_data(algo_csv_path)
+    gt_sampled_df = load_and_sample_data(gt_csv_path, int(args.sample_point_max))
+    algo_sampled_df = load_and_sample_data(algo_csv_path, int(args.sample_point_max))
 
     # Load the volume mapping from CSV
     volume_mapping = load_volume_mapping(mapping_csv_path)
@@ -186,7 +186,7 @@ def main():
     gt_colors, algo_colors = assign_colors_by_volume_id(gt_sampled_df, algo_sampled_df, volume_mapping)
 
     # Visualize the points side by side
-    visualize_points_side_by_side(gt_sampled_df, algo_sampled_df, gt_colors, algo_colors, volume_mapping, args.ax_limit_max)
+    visualize_points_side_by_side(gt_sampled_df, algo_sampled_df, gt_colors, algo_colors, volume_mapping)
 
 
 if __name__ == "__main__":

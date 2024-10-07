@@ -12,16 +12,19 @@ PLOT_TITLE = f'Plot of Ground Truth data for dataset: {DATA_FOLDER}'
 MAX_POINTS = 10000 # Maximum points to sample
 AX_LIMIT_MAX = 1024
 
-def load_and_sample_data(filename):
+def load_and_sample_data(filename, sample_point_max):
     """Load the CSV data and sample a subset of points for visualization."""
     # Read CSV file into a pandas DataFrame
     df = pd.read_csv(filename)
     df = df[df['VOLUME_ID'] != -1] # Filter noise points
+    # Test filter good parts of DRG
+    # df = df[df['z'] <= 80]
+    # df = df[df['z'] >= 30]
 
     # Display the first few rows to check data
     # print("Loaded Data Preview:")
     # print(df.head())
-    subset_ratio = min(1, MAX_POINTS/len(df))
+    subset_ratio = min(1, sample_point_max/len(df))
     # Check if volume IDs are present
     if 'VOLUME_ID' not in df.columns:
         raise ValueError("CSV does not contain VOLUME_ID column. Ensure export was done with volumes enabled.")
@@ -50,7 +53,7 @@ def assign_colors_by_volume_id(df):
 
     return colors_array
 
-def visualize_points(df, colors, title, ax_limit_max):
+def visualize_points(df, colors, title):
     """Visualize the sampled points in 3D space with colors assigned by volume ID."""
     # Create a Matplotlib 3D plot
     fig = plt.figure(figsize=(10, 8))
@@ -63,9 +66,8 @@ def visualize_points(df, colors, title, ax_limit_max):
 
     # Plot the points with the assigned colors
     ax.scatter(x, y, z, c=colors, s=1)
-    max_val = max(df[['x', 'y', 'z']].max().max())
-    min_val = min(df[['x', 'y', 'z']].min().min())
-
+    max_val = df[['x', 'y', 'z']].max().max()
+    min_val = df[['x', 'y', 'z']].min().min()
     # Set labels and show plot
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -73,6 +75,7 @@ def visualize_points(df, colors, title, ax_limit_max):
     ax.set_xlim3d(min_val,max_val)
     ax.set_ylim3d(min_val,max_val)
     ax.set_zlim3d(min_val,max_val)
+    # ax.set_zlim3d(20,100)
     ax.set_title(title)
     plt.show()
 
@@ -85,7 +88,7 @@ def main():
     parser.add_argument('--data_folder', default=DATA_FOLDER, help='Data folder within run folder (default: %(default)s)')
     parser.add_argument('--csv_filename', default=CSV_FILENAME, help='Ground truth CSV file (default: %(default)s)')
     parser.add_argument('--plot_title', default=PLOT_TITLE, help='Title for plot (default: %(default)s)')
-    parser.add_argument('--ax_limit_max', default=AX_LIMIT_MAX, help='Max limit on axes (default: %(default)s)')
+    parser.add_argument('--sample_point_max', default=MAX_POINTS, help='Max limit number of points to sample (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -97,13 +100,13 @@ def main():
     plot_title = args.plot_title or PLOT_TITLE
     csv_path = os.path.join(data_folder, csv_filename)
     # Load and sample the data
-    sampled_df = load_and_sample_data(csv_path)
+    sampled_df = load_and_sample_data(csv_path, int(args.sample_point_max))
 
     # Assign colors based on volume IDs
     colors = assign_colors_by_volume_id(sampled_df)
 
     # Visualize the points with assigned colors
-    visualize_points(sampled_df, colors, plot_title, args.ax_limit_max)
+    visualize_points(sampled_df, colors, plot_title)
 
 if __name__ == "__main__":
     main()
