@@ -616,9 +616,12 @@ class DemoGUIApp:
             '--scenario_name', self.active_scenario,
         ]
         # Remove the XZ cache if desired
-        if self.remake_xz.get() and os.path.exists(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"]):
-            print("Removed XZ Cache")
-            os.remove(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"])
+        if self.remake_xz.get() and os.path.exists(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"]) \
+            and self.scenarios[self.active_scenario]["RUN_SEGMENTATION"]:
+            answer = messagebox.askyesno("Confirmation", "Are you sure you want to remove the XZ cache?")
+            if answer:
+                print("Removed XZ Cache")
+                os.remove(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"])
         # Start the subprocess in a new thread to keep the GUI responsive
         threading.Thread(target=self.run_subprocess, args=[exec_args, "execute_commands"]).start()
         self.check_queue()
