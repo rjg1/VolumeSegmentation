@@ -813,7 +813,7 @@ class DemoGUIApp:
         if scenario_data.get("REQUIRES_REDUCED_DATASET", False) and not scenario_data.get("HAS_REDUCED_DATASET", False):
             self.run_reduced_var.set(1)
             self.run_reduce_checkbox.config(state="disabled")
-        elif scenario_data.get("REQUIRES_REDUCED_DATASET", False) and scenario_data.get("HAS_REDUCED_DATASET", False):
+        elif scenario_data.get("REQUIRES_REDUCED_DATASET", False) and scenario_data.get("HAS_REDUCED_DATASET", False) or not scenario_data.get("HAS_VALIDATION", None):
             self.run_reduced_var.set(0)
             self.run_reduce_checkbox.config(state="disabled")
         else:

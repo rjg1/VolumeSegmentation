@@ -110,6 +110,43 @@
             "ar_change_activation_thresh": 10
         }
     },
+    "drg_complete": {
+        "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
+        "SEG_IN_FILE": "../GUI/cell_data/ROI_coordinates_20241003_x300_800_y0_500_z1_38.csv",
+        "TEMP_REDUCED_FILE": "./demo_data/drg_complete_s.csv",
+        "SEG_XZ_IO_FILE": "../VOLUME_SEGMENTATION/xz_cache/drg_complete_XZ.csv",
+        "RESTRICTED_MODE": true,
+        "RUN_SEGMENTATION": true,
+        "HAS_VALIDATION": false,
+        "HAS_ALGORITHMIC": false,
+        "HAS_REDUCED_DATASET": false,
+        "SEGMENT_VALIDATED_ONLY": false,
+        "REQUIRES_REDUCED_DATASET": false,
+        "REMAP_VOLUMES": true,
+        "PLOT_TYPE": "algo",
+        "VALIDATION_DIR": "../VALIDATION/",
+        "V_DATA_FOLDER": "./demo_data/drg_complete",
+        "V_TEMP_REDUCED_FILE": "drg_complete_v.csv",
+        "V_GT_CSV": "drg_complete_VOLUMES.csv",
+        "V_ALGO_CSV": "drg_complete_algo_VOLUMES.csv",
+        "V_MAPPING_CSV": "mapping.csv",
+        "algo_parameters": {
+            "use_flat_centroid": true,
+            "use_perc_centroid": false,
+            "use_z_threshold": true,
+            "use_area_restriction": false,
+            "use_xy_restriction": true,
+            "num_projection_points": 300,
+            "flat_centroid_dist": 10.0,
+            "perc_centroid_dist": 68.0,
+            "match_z_threshold": 2,
+            "area_delta_perc": 150.0,
+            "use_area_deriv_restriction": false,
+            "ar_change_perc": 30.0,
+            "ar_change_num_samples": 2,
+            "ar_change_activation_thresh": 10
+        }
+    },
     "cell_validation_dataset": {
         "SEGMENTATION_DIR": "../VOLUME_SEGMENTATION/",
         "SEG_IN_FILE": "../VOLUME_SEGMENTATION/run_data/roi_validation_ROIS.csv",
