@@ -33,7 +33,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "drg_subset_1_3": {
@@ -70,7 +72,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "drg_subset_1_1": {
@@ -107,7 +111,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "drg_complete": {
@@ -145,7 +151,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "drg_complete_2": {
@@ -183,7 +191,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": false
         }
     },
     "cell_validation_dataset": {
@@ -220,7 +230,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "simple_validation_dataset_1": {
@@ -257,7 +269,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "simple_validation_dataset_2": {
@@ -294,7 +308,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "c": {
@@ -331,7 +347,9 @@
             "use_area_deriv_restriction": true,
             "ar_change_perc": 60.0,
             "ar_change_num_samples": 5,
-            "ar_change_activation_thresh": 15
+            "ar_change_activation_thresh": 15,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "abc": {
@@ -368,7 +386,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     },
     "clarissa": {
@@ -405,7 +425,9 @@
             "use_area_deriv_restriction": false,
             "ar_change_perc": 30,
             "ar_change_num_samples": 2,
-            "ar_change_activation_thresh": 10
+            "ar_change_activation_thresh": 10,
+            "cache_interpolated_xz": true,
+            "ignore_colinear_xz": true
         }
     }
 }

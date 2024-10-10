@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 from scipy.spatial import ConvexHull, Delaunay, QhullError
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import random
+from shapely import LineString
 import itertools
 
 # GLOBAL VARIABLES
@@ -83,7 +84,7 @@ def cluster_xz_rois(xz_roi_points):
 """
 Autonomously tunes minpts and eps of dbscan based on XZ planes
 """
-def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
+def cluster_xz_rois_tuned(xz_roi_points, parameters = {}, eps=None, min_samples=None):
     """
     Cluster points on each XZ plane independently using tuned eps and min_samples for each plane.
     
@@ -110,11 +111,12 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
 
         xz_values = np.array(xz_list)
 
-        if len(xz_values) <= 2:
-            print(f"Only {len(xz_values)} point(s) on y-plane {y}, returning the point.")
-            if y not in clustered_hulls:
-                clustered_hulls[y] = []
-            clustered_hulls[y].append(xz_values) 
+        if len(xz_list) < 2:
+            # print(f"Only {len(xz_list)} point(s) on y-plane {y}, returning the point.")
+            if parameters.get('ignore_colinear_xz'):
+                if y not in clustered_hulls:
+                    clustered_hulls[y] = []
+                clustered_hulls[y].append([(x,y,z) for x,z in xz_list]) 
             continue
 
         # min_samples = estimate_min_samples(xz_values)
@@ -130,23 +132,80 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
             if label == -1:  # Skip outliers
                 continue
             cluster_points = xz_values[labels == label]
+            point_list = []
             if points_collinear(cluster_points):
-                # Add colinear points as a np array
+                # Ignore colinear xz if designated
+                if parameters.get("ignore_colinear_xz"):
+                    continue
+                # Add colinear points
                 if y not in clustered_hulls:
                     clustered_hulls[y] = []
-                clustered_hulls[y].append(xz_values)
-                print("Added colinear pts!")
-                continue
+
+                # Determine if points are collinear along x or z
+                unique_x = len(set(cluster_points[:, 0])) == 1  # Check if all x values are the same
+                unique_z = len(set(cluster_points[:, 1])) == 1  # Check if all z values are the same
+                
+                if unique_x or unique_z:
+                    if unique_x:
+                        # Points are collinear along x, so sort by z
+                        start_z = cluster_points[cluster_points[:, 1].argmin(), 1].item()
+                        end_z = cluster_points[cluster_points[:, 1].argmax(), 1].item()    
+                        start_tuple = (cluster_points[0][0].item(), y, start_z)  
+                        end_tuple = (cluster_points[0][0].item(), y, end_z)      
+                    else:
+                        # Points are collinear along z, so sort by x
+                        start_x = cluster_points[cluster_points[:, 0].argmin(), 0].item()
+                        end_x = cluster_points[cluster_points[:, 0].argmax(), 0].item()    
+                        start_tuple = (start_x, y, cluster_points[0][1].item()) 
+                        end_tuple = (end_x, y, cluster_points[0][1].item())      
+                    point_list = [start_tuple, end_tuple]
+                    
+                    # print(f"Added colinear line segment! : {point_list}")
+            else:
+                try:
+                    hull = ConvexHull(cluster_points)
+                    if y not in clustered_hulls:
+                        clustered_hulls[y] = []
+                    # Extract boundary points of convex hull
+                    vertices = hull.points[hull.vertices]
+                    point_list = [((x, y, z) for x, z in vertices)]
+                except QhullError as e:
+                    print(f"QhullError: {e}")
             
-            try:
-                hull = ConvexHull(cluster_points)
-                if y not in clustered_hulls:
-                    clustered_hulls[y] = []
-                clustered_hulls[y].append(hull)
-            except QhullError as e:
-                print(f"QhullError: {e}")
+            # Interpolate boundary points and store
+            if parameters.get('cache_interpolated_xz', None) and len(point_list) > 1:
+                xz_points_2d = [(x,z) for x,y,z in point_list]
+                cx, cz = find_centroid(xz_points_2d)
+                sorted_points = sort_points_by_angle(xz_points_2d, (cx, cz))
+                sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
+                line = LineString(sorted_points)
+                # Generate n zx points around the boundary of the ROI polygon
+                distances = np.linspace(0, line.length, parameters['roi_projection_n_points'])
+                points = [line.interpolate(distance) for distance in distances]
+                # Update 2d xz points to use new point projection
+                xz_points_2d = [(point.x, point.y) for point in points]
+                # Translate back into 3d
+                point_list = [(x,y,z) for x,z in xz_points_2d]
+            # Add all valid point lists to the dictionary at this y-plane
+            if len(point_list) > 0:
+                clustered_hulls[y].append(point_list)
 
     return clustered_hulls
+
+
+# Function to sort points by angle from centroid
+def sort_points_by_angle(points, center):
+    cx, cz = center
+    def angle(point):
+        return np.arctan2(point[1] - cz, point[0] - cx)
+    return sorted(points, key=angle)
+
+# Function to calculate centroid of the points
+def find_centroid(points):
+    x, z = zip(*points)
+    cx = sum(x) / len(points)
+    cz = sum(z) / len(points)
+    return cx, cz
 
 def points_collinear(points):
     # points is a list of tuples [(x1, z1), (x2, z2), ...]

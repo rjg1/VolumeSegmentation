@@ -48,6 +48,8 @@ AR_CHANGE_PERC = 30                     # Maximum allowed change in average area
 AR_CHANGE_NUM_SAMPLES = 2               # Number of xy roi samples that are considered when comparing change in average area per roi for a volume
 AR_CHANGE_ACTIVATION_THRESH = 10        # Number of XY ROIs required in a volume before area restriction kicks in
 RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
+CACHE_INTERPOLATED_XZ = True
+IGNORE_COLINEAR_XZ = True
 
 class DemoGUIApp:
     def __init__(self, root):
@@ -263,8 +265,16 @@ class DemoGUIApp:
         self.xy_restrict_check_var = tk.IntVar()
         self.xy_restrict_check = tk.Checkbutton(self.algorithm_container_frame, text="One XY ROI per z-level per volume", variable=self.xy_restrict_check_var, command=self.update_algo_parameters)
         self.xy_restrict_check.grid(row=6, column=0, columnspan=2, padx=5, pady=2, sticky="w")
-        # Row 7: Entry>Label Entry>Label Entry>Label >Checkbox
-        # Create a frame for the experimental area derivative restriction
+        # Row 7 : Checkbox
+        self.xz_interpolate_check_var = tk.IntVar()
+        self.xz_interpolate_check = tk.Checkbutton(self.algorithm_container_frame, text="Interpolate and Cache XZ ROIs", variable=self.xz_interpolate_check_var, command=self.update_algo_parameters)
+        self.xz_interpolate_check.grid(row=7, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        # Row 8 : Checkbox
+        self.xz_colinear_check_var = tk.IntVar()
+        self.xz_colinear_check = tk.Checkbutton(self.algorithm_container_frame, text="Ignore Colinear XZ ROIs", variable=self.xz_colinear_check_var, command=self.update_algo_parameters)
+        self.xz_colinear_check.grid(row=8, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+       
+       # Create a frame for the experimental area derivative restriction
         self.experimental_area_frame = tk.LabelFrame(self.algorithm_frame, text="Experimental Area Derivative Restriction", padx=10, pady=10)
         self.experimental_area_frame.grid(row=7, column=0, columnspan=6, padx=5, pady=5, sticky="ew")
 
@@ -377,7 +387,9 @@ class DemoGUIApp:
                     "use_area_deriv_restriction": RESTRICT_AREA_CHANGE,
                     "ar_change_perc": AR_CHANGE_PERC,
                     "ar_change_num_samples": AR_CHANGE_NUM_SAMPLES,
-                    "ar_change_activation_thresh": AR_CHANGE_ACTIVATION_THRESH
+                    "ar_change_activation_thresh": AR_CHANGE_ACTIVATION_THRESH,
+                    "cache_interpolated_xz" : CACHE_INTERPOLATED_XZ,
+                    "ignore_colinear_xz" : IGNORE_COLINEAR_XZ
                 }
             }
             self.update_dropdown()
@@ -454,6 +466,8 @@ class DemoGUIApp:
         algo_parameters['use_area_restriction'] = bool(self.restrict_area_check_var.get())
         algo_parameters['use_xy_restriction'] = bool(self.xy_restrict_check_var.get())
         algo_parameters['use_area_deriv_restriction'] = bool(self.enable_mode_check_var.get())
+        algo_parameters['cache_interpolated_xz'] = bool(self.xz_interpolate_check_var.get())
+        algo_parameters['ignore_colinear_xz'] = bool(self.xz_colinear_check_var.get())
         # Update entry variables if applicable
         entries = [self.flat_centroid_entry, self. perc_centroid_entry, self.match_z_entry,
                    self.restrict_area_entry, self.num_points_entry, 
@@ -496,6 +510,8 @@ class DemoGUIApp:
         self.restrict_area_check_var.set(1 if algo_parameters["use_area_restriction"] else 0)
         self.xy_restrict_check_var.set(1 if algo_parameters["use_xy_restriction"] else 0)
         self.enable_mode_check_var.set(1 if algo_parameters["use_area_deriv_restriction"] else 0)
+        self.xz_colinear_check_var.set(1 if algo_parameters["ignore_colinear_xz"] else 0)
+        self.xz_interpolate_check_var.set(1 if algo_parameters["cache_interpolated_xz"] else 0)
         # ENTRY UPDATES
         self.num_points_entry.delete(0, tk.END)
         self.num_points_entry.insert(0, str(algo_parameters["num_projection_points"]))

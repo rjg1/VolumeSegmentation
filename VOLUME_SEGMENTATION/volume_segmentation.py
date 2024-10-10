@@ -40,6 +40,8 @@ USE_PERCENT_CENTROID_DISTANCE = False   # Centroid distance threshold is a perce
 RESTRICT_ADJACENCY = True               # Restriction on how close an XY ROI must be in Z to its nearest neighbour in the volume
 RESTRICT_MULTIPLE_XY_PER_VOL = True     # Restriction on whether or not two XY ROIs are allowed to be in the same z-level per volume
 RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
+CACHE_INTERPOLATED_XZ = True            # Whether to interpolate and store boundary points before volume segmentation (higher memory + speed)
+IGNORE_COLINEAR_XZ = True               # Whether to discard colinear XZ ROIs as noise (keeping -> higher memory usage, higher linking)
 
 def main():
     # Set up argument parser
@@ -65,6 +67,8 @@ def main():
     parser.add_argument('--ar_change_perc', default=AR_CHANGE_PERC, help='Allowed percentage difference in avg vol per roi in two volumes (default: %(default)s)')
     parser.add_argument('--ar_change_num_samples', default=AR_CHANGE_NUM_SAMPLES, help='Number of XY rois to compare to the overall volume in volume change (default: %(default)s)')
     parser.add_argument('--ar_change_activation_thresh', default=AR_CHANGE_ACTIVATION_THRESH, help='Number of XY rois to add to a volume before volume change kicks in (default: %(default)s)')
+    parser.add_argument('--ignore_colinear_xz', default=IGNORE_COLINEAR_XZ, help='Whether or not to ignore XZ ROIs made entirely of colinear points (default: %(default)s)')
+    parser.add_argument('--cache_interpolated_xz', default=IGNORE_COLINEAR_XZ, help='Whether or not to cache interpolated boundaries of XZ ROIs (default: %(default)s)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -94,7 +98,9 @@ def main():
                 'area_delta_perc_threshold': float(args.area_delta_perc),
                 'ar_change_perc' : float(args.ar_change_perc),
                 'ar_change_num_samples' : int(args.ar_change_num_samples),
-                'ar_change_activation_thresh' : int(args.ar_change_activation_thresh)
+                'ar_change_activation_thresh' : int(args.ar_change_activation_thresh),
+                'cache_interpolated_xz' : str_to_bool(args.cache_interpolated_xz),
+                'ignore_colinear_xz' : str_to_bool(args.ignore_colinear_xz)
             }
         else:
             algo_parameters = {
@@ -111,7 +117,9 @@ def main():
                 'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD,
                 'ar_change_perc' : AR_CHANGE_PERC,
                 'ar_change_num_samples' : AR_CHANGE_NUM_SAMPLES,
-                'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH
+                'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH,
+                'cache_interpolated_xz' : CACHE_INTERPOLATED_XZ,
+                'ignore_colinear_xz' : IGNORE_COLINEAR_XZ
             }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
@@ -137,7 +145,7 @@ def main():
             print("Generated XZ Planes. Performing XZ Cluster Segmentation.")
 
     # Cluster XZ ROI points
-    clustered_hulls = cluster_xz_rois_tuned(xz_roi_points)
+    clustered_hulls = cluster_xz_rois_tuned(xz_roi_points, parameters=algo_parameters)
     # DEBUG: view some clusters
     # visualize_random_clusters(clustered_hulls, num_planes=10) 
     print("Cluster segmentation complete. Performing Volume Segmentation...")
@@ -256,18 +264,19 @@ def segment_volumes(xz_hulls, xyz_points):
     xz_id = 0
     for y, hull_list in xz_hulls.items():
         for item in hull_list:
+            points_3d = []
             if isinstance(item, ConvexHull):
                 # Handle ConvexHull objects
                 boundary_points = get_hull_boundary_points(item)
                 points_3d = [(x, y, z) for x, z in boundary_points]
-            elif isinstance(item, np.ndarray) and len(item) == 2:
-                # Handle line segments (2 points)
-                points_3d = [(item[0][0], y, item[0][1]), (item[1][0], y, item[1][1])]
-            elif isinstance(item, np.ndarray) and len(item) == 1:
-                # Handle single points
-                points_3d = [(item[0][0], y, item[0][1])]
-            xz_rois[xz_id] = BoundaryRegion(points_3d)
-            xz_id += 1
+            elif isinstance(item, np.ndarray):
+                for point in item:
+                    points_3d.append((point[0], y, point[1]))
+            elif isinstance(item, list):
+                points_3d.extend(item)
+            if len(points_3d) > 0:
+                xz_rois[xz_id] = BoundaryRegion(points_3d)
+                xz_id += 1
     print(f"Finished Volume Segmentation Caching - beginning algorithm")
     # Iterate through all XY ROIs and determine collisions with XZ ROIs
     current_obj_id = 1 # ID of current object being created

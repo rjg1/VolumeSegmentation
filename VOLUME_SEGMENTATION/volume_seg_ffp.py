@@ -50,6 +50,8 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
             elif isinstance(item, np.ndarray):
                 for point in item:
                     points_3d.append((point[0], y, point[1]))
+            elif isinstance(item, list):
+                points_3d = item
             if len(points_3d) > 0:
                 xz_rois[xz_id] = BoundaryRegion(points_3d)
                 xz_id += 1
@@ -503,16 +505,18 @@ def check_region_intersection(xy_points, xz_points, parameters):
 
     # Calculate centroid of the xz points
     xz_points_2d = [(x,z) for x,y,z in xz_points]
-    cx, cz = find_centroid(xz_points_2d)
-    # Sort xz boundary points in predicted order around a polygon
-    sorted_points = sort_points_by_angle(xz_points_2d, (cx, cz))
-    sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
-    line = LineString(sorted_points)
-    # Generate n zx points around the boundary of the ROI polygon
-    distances = np.linspace(0, line.length, parameters['roi_projection_n_points'])
-    points = [line.interpolate(distance) for distance in distances]
-    # Update 2d xz points to use new point projection
-    xz_points_2d = [(point.x, point.y) for point in points]
+    # Generate n boundary points around xz roi if this has not already been done
+    if not parameters.get('cache_interpolated_xz'):
+        cx, cz = find_centroid(xz_points_2d)
+        # Sort xz boundary points in predicted order around a polygon
+        sorted_points = sort_points_by_angle(xz_points_2d, (cx, cz))
+        sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
+        line = LineString(sorted_points)
+        # Generate n zx points around the boundary of the ROI polygon
+        distances = np.linspace(0, line.length, parameters['roi_projection_n_points'])
+        points = [line.interpolate(distance) for distance in distances]
+        # Update 2d xz points to use new point projection
+        xz_points_2d = [(point.x, point.y) for point in points]
 
     # Generate a list of x points on the XZ roi boundary at fixed y and z sufficiently 
     # close to the z location of the XY plane. Stored as an (x,y) value
