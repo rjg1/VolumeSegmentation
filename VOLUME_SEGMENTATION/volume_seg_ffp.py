@@ -36,6 +36,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                                             precalc_centroid=parameters['restrict_centroid_distance'],
                                             precalc_radius=parameters['use_percent_centroid_distance'])
             xy_id += 1
+    print("Making xz dict...")
     # Make dict of xz ROIs -> {xz_id : BoundaryRegion of pts}
     xz_rois = {}
     xz_id = 0
@@ -45,7 +46,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
             if isinstance(item, ConvexHull):
                 # Handle ConvexHull objects
                 boundary_points = get_hull_boundary_points(item)
-                points_3d.extend([(x, y, z) for x, z in boundary_points])
+                points_3d = [(x, y, z) for x, z in boundary_points]
             elif isinstance(item, np.ndarray):
                 for point in item:
                     points_3d.append((point[0], y, point[1]))
@@ -180,7 +181,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
                         xy_roi_obj = current_obj_id
                         # Increment the id for the next volume
                         current_obj_id += 1
-        # TEST DEBUG
+        # DEBUG
         if not found_link:
             xy_untracked.append(xy_roi_id)
         # END DEBUG

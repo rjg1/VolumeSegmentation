@@ -105,8 +105,6 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
     # Cluster points on each y-plane using individually tuned parameters
     for y, xz_list in xz_points.items():
         print(f"Clustering y={y}")
-        min_samples = None
-        eps = None
         if not xz_list:  # Skip empty y-planes
             continue
 
@@ -119,12 +117,10 @@ def cluster_xz_rois_tuned(xz_roi_points, eps=None, min_samples=None):
             clustered_hulls[y].append(xz_values) 
             continue
 
-        if min_samples is None:
-            # min_samples = estimate_min_samples(xz_values)
-            min_samples = 2
-            # print(f"y= {y} min_samples = {min_samples} len_xz = {len(xz_values)}")
-        if eps is None:
-            eps = determine_eps(xz_values, min_samples=min_samples)
+        # min_samples = estimate_min_samples(xz_values)
+        min_samples = 2
+        # print(f"y= {y} min_samples = {min_samples} len_xz = {len(xz_values)}")
+        eps = determine_eps(xz_values, min_samples=min_samples)
 
         db = DBSCAN(eps=eps, min_samples=min_samples).fit(xz_values)
         labels = db.labels_
