@@ -113,7 +113,7 @@ def cluster_xz_rois_tuned(xz_roi_points, parameters = {}, eps=None, min_samples=
 
         if len(xz_list) < 2:
             # print(f"Only {len(xz_list)} point(s) on y-plane {y}, returning the point.")
-            if parameters.get('ignore_colinear_xz'):
+            if not parameters.get('ignore_colinear_xz'):
                 if y not in clustered_hulls:
                     clustered_hulls[y] = []
                 clustered_hulls[y].append([(x,y,z) for x,z in xz_list]) 

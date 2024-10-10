@@ -81,46 +81,45 @@ def main():
         xz_io_path = None
     # Avoid short circuit with boolean restricted mode
     restricted_mode = str_to_bool(args.restricted_mode) if isinstance(args.restricted_mode,str) else RESTRICTED_MODE
-    if restricted_mode:
-        # Unpack parameters to use
-        if isinstance(args.use_flat_centroid,str):
-            algo_parameters = {
-                'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
-                'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
-                'restrict_adjacency': str_to_bool(args.use_z_threshold),
-                'restrict_area': str_to_bool(args.use_area_restriction),
-                'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
-                'restrict_area_change' : str_to_bool(args.use_area_deriv_restriction),
-                'roi_projection_n_points': int(args.num_projection_points),
-                'centroid_distance_max': float(args.flat_centroid_dist),
-                'centroid_distance_perc': float(args.perc_centroid_dist),
-                'match_z_threshold': int(args.match_z_threshold),
-                'area_delta_perc_threshold': float(args.area_delta_perc),
-                'ar_change_perc' : float(args.ar_change_perc),
-                'ar_change_num_samples' : int(args.ar_change_num_samples),
-                'ar_change_activation_thresh' : int(args.ar_change_activation_thresh),
-                'cache_interpolated_xz' : str_to_bool(args.cache_interpolated_xz),
-                'ignore_colinear_xz' : str_to_bool(args.ignore_colinear_xz)
-            }
-        else:
-            algo_parameters = {
-                'restrict_centroid_distance': RESTRICT_CENTROID_DISTANCE,
-                'use_percent_centroid_distance': USE_PERCENT_CENTROID_DISTANCE,
-                'restrict_adjacency': RESTRICT_ADJACENCY,
-                'restrict_area': RESTRICT_AREA,
-                'restrict_multiple_xy_per_vol': RESTRICT_MULTIPLE_XY_PER_VOL,
-                'restrict_area_change' : RESTRICT_AREA_CHANGE,
-                'roi_projection_n_points': ROI_PROJECTION_N_POINTS,
-                'centroid_distance_max': CENTROID_DISTANCE_MAX,
-                'centroid_distance_perc': CENTROID_DISTANCE_PERC,
-                'match_z_threshold': MATCH_Z_THRESHOLD,
-                'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD,
-                'ar_change_perc' : AR_CHANGE_PERC,
-                'ar_change_num_samples' : AR_CHANGE_NUM_SAMPLES,
-                'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH,
-                'cache_interpolated_xz' : CACHE_INTERPOLATED_XZ,
-                'ignore_colinear_xz' : IGNORE_COLINEAR_XZ
-            }
+    # Unpack parameters to use
+    if isinstance(args.use_flat_centroid,str):
+        algo_parameters = {
+            'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
+            'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
+            'restrict_adjacency': str_to_bool(args.use_z_threshold),
+            'restrict_area': str_to_bool(args.use_area_restriction),
+            'restrict_multiple_xy_per_vol': str_to_bool(args.use_xy_restriction),
+            'restrict_area_change' : str_to_bool(args.use_area_deriv_restriction),
+            'roi_projection_n_points': int(args.num_projection_points),
+            'centroid_distance_max': float(args.flat_centroid_dist),
+            'centroid_distance_perc': float(args.perc_centroid_dist),
+            'match_z_threshold': int(args.match_z_threshold),
+            'area_delta_perc_threshold': float(args.area_delta_perc),
+            'ar_change_perc' : float(args.ar_change_perc),
+            'ar_change_num_samples' : int(args.ar_change_num_samples),
+            'ar_change_activation_thresh' : int(args.ar_change_activation_thresh),
+            'cache_interpolated_xz' : str_to_bool(args.cache_interpolated_xz),
+            'ignore_colinear_xz' : str_to_bool(args.ignore_colinear_xz)
+        }
+    else:
+        algo_parameters = {
+            'restrict_centroid_distance': RESTRICT_CENTROID_DISTANCE,
+            'use_percent_centroid_distance': USE_PERCENT_CENTROID_DISTANCE,
+            'restrict_adjacency': RESTRICT_ADJACENCY,
+            'restrict_area': RESTRICT_AREA,
+            'restrict_multiple_xy_per_vol': RESTRICT_MULTIPLE_XY_PER_VOL,
+            'restrict_area_change' : RESTRICT_AREA_CHANGE,
+            'roi_projection_n_points': ROI_PROJECTION_N_POINTS,
+            'centroid_distance_max': CENTROID_DISTANCE_MAX,
+            'centroid_distance_perc': CENTROID_DISTANCE_PERC,
+            'match_z_threshold': MATCH_Z_THRESHOLD,
+            'area_delta_perc_threshold': AREA_DELTA_PERC_THRESHOLD,
+            'ar_change_perc' : AR_CHANGE_PERC,
+            'ar_change_num_samples' : AR_CHANGE_NUM_SAMPLES,
+            'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH,
+            'cache_interpolated_xz' : CACHE_INTERPOLATED_XZ,
+            'ignore_colinear_xz' : IGNORE_COLINEAR_XZ
+        }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
     # Generate XZ ROIs
