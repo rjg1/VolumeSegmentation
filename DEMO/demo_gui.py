@@ -50,6 +50,9 @@ AR_CHANGE_ACTIVATION_THRESH = 10        # Number of XY ROIs required in a volume
 RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
 CACHE_INTERPOLATED_XZ = True
 IGNORE_COLINEAR_XZ = True
+NUM_XZ_SLICES = 300                     # Default number of XZ slices (y-planes) to generate
+DETERMINE_XZ_SLICES = False             # Whether or not to automatically determine the number of xz slices
+DEFAULT_X_POINTS = 30                   # Default number of x points to project across an XY ROI when generating a z-plane
 
 class DemoGUIApp:
     def __init__(self, root):
@@ -127,7 +130,7 @@ class DemoGUIApp:
         self.inner_left_frame = tk.Frame(self.outer_frame, width=400)  # Fixed width
         self.inner_left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-        # Inner right frame (options, placeholder for now)
+        # Inner right frame
         self.inner_right_frame = tk.Frame(self.outer_frame, width=200)  # Fixed width
         self.inner_right_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
@@ -144,11 +147,11 @@ class DemoGUIApp:
 
         # Upper and lower frame inside the right inner frame (for tools and commands)
         self.upper_right_frame = tk.Frame(self.inner_right_frame, width=200)
-        self.upper_right_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.upper_right_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         self.upper_right_frame.grid_remove()  # Hide initially
 
         self.lower_right_frame = tk.Frame(self.inner_right_frame, width=200)
-        self.lower_right_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        self.lower_right_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
         self.lower_right_frame.grid_remove()  # Hide initially
 
         # Upper frame content (Tools label and buttons)
@@ -158,7 +161,7 @@ class DemoGUIApp:
         self.upper_right_frame.grid_columnconfigure(0, weight=1)
 
         self.data_view_button = tk.Button(self.upper_right_frame, text="Raw Data Viewer", width=15, command=self.generate_data_plot)
-        self.data_view_button.grid(row=1, column=0, padx=5, pady=2, sticky="ew") 
+        self.data_view_button.grid(row=1, column=0, padx=5, pady=2, sticky="ew", columnspan=2) 
 
         self.cell_merger_button = tk.Button(self.upper_right_frame, text="Cell Merger", width=15, command=self.cell_merger_tool)
         self.cell_merger_button.grid(row=2, column=0, padx=5, pady=2, sticky="ew")  
@@ -201,7 +204,7 @@ class DemoGUIApp:
 
         # ALGORITHM PARAMETERS
         self.algorithm_frame = tk.Frame(self.outer_frame)
-        self.algorithm_frame.grid(row=0, column=2, padx=5, pady=15, sticky="new", columnspan=2)
+        self.algorithm_frame.grid(row=0, column=3, padx=5, pady=15, sticky="new", columnspan=2)
         self.algorithm_frame.grid_remove()  # Hide initially
         
         # Create the header label outside the container frame
@@ -315,24 +318,55 @@ class DemoGUIApp:
         self.xz_checkbox = tk.Checkbutton(self.lower_right_frame, text="Regenerate XZ Planes", variable=self.remake_xz, command=self.update_scenario_from_checkboxes)
         self.xz_checkbox.grid(row=5, column=0, sticky="w", padx=5, pady=2)
 
-        self.seg_checkbox = tk.Checkbutton(self.lower_right_frame, text="Run Volume Segmentation", variable=self.seg_var, command=self.update_scenario_from_checkboxes)
-        self.seg_checkbox.grid(row=6, column=0, sticky="w", padx=5, pady=2)
+        # Create a frame to hold the entry and label
+        self.xz_entry_check_frame = tk.Frame(self.lower_right_frame)
+        self.xz_entry_check_frame.grid(row=6, column=0, padx=5, pady=2, sticky="w")
 
+        # Entry inside the frame
+        self.xz_num_planes_entry_var = tk.StringVar()
+        self.xz_num_planes_entry = tk.Entry(self.xz_entry_check_frame, width=5, textvariable=self.xz_num_planes_entry_var)
+        self.xz_num_planes_entry.pack(side="left", padx=1, pady=2) 
+        self.xz_num_planes_entry.bind("<Return>", self.update_algo_parameters)
+        
+        xz_num_planes_label = tk.Label(self.xz_entry_check_frame, text="Num XZ Planes", wraplength=200)
+        xz_num_planes_label.pack(side="left", padx=5, pady=2)
+
+        # Estimate Num xz planes Checkbox
+        self.xz_auto_planes_check_var = tk.IntVar()
+        self.xz_auto_planes_check = tk.Checkbutton(self.lower_right_frame, text="Estimate Num XZ Planes", variable=self.xz_auto_planes_check_var, command=self.update_algo_parameters)
+        self.xz_auto_planes_check.grid(row=7, column=0, padx=5, pady=2, sticky="w")
+        # Num X points entry and label
+        # Create a frame to hold the entry and label
+        self.x_points_entry_frame = tk.Frame(self.lower_right_frame)
+        self.x_points_entry_frame.grid(row=8, column=0, padx=5, pady=2, sticky="w")
+
+        # Num x points Entry inside the frame
+        self.x_points_entry_var = tk.StringVar()
+        self.x_points_entry = tk.Entry(self.x_points_entry_frame, width=5, textvariable=self.x_points_entry_var)
+        self.x_points_entry.pack(side="left", padx=1, pady=2) 
+        self.x_points_entry.bind("<Return>", self.update_algo_parameters)
+        
+        x_points_label = tk.Label(self.x_points_entry_frame, text="Num X Projection Points", wraplength=200)
+        x_points_label.pack(side="left", padx=5, pady=2)
+        # Run volume segmentation box
+        self.seg_checkbox = tk.Checkbutton(self.lower_right_frame, text="Run Volume Segmentation", variable=self.seg_var, command=self.update_scenario_from_checkboxes)
+        self.seg_checkbox.grid(row=9, column=0, sticky="w", padx=5, pady=2)
+        # PLOT OPTIONS SECTION
         plot_label = tk.Label(self.lower_right_frame, text="Plot Options", font=("Arial", 10, "bold"))
-        plot_label.grid(row=7, column=0, padx=10, pady=5)
+        plot_label.grid(row=10, column=0, padx=10, pady=5)
 
         self.gt_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Ground Truth Volumes", variable=self.gt_var, command=self.update_scenario_from_checkboxes)
-        self.gt_checkbox.grid(row=8, column=0, sticky="w", padx=5, pady=2)
+        self.gt_checkbox.grid(row=11, column=0, sticky="w", padx=5, pady=2)
 
         self.algo_checkbox = tk.Checkbutton(self.lower_right_frame, text="View Algorithmic Volumes", variable=self.algo_var, command=self.update_scenario_from_checkboxes)
-        self.algo_checkbox.grid(row=9, column=0, sticky="w", padx=5, pady=2)
+        self.algo_checkbox.grid(row=12, column=0, sticky="w", padx=5, pady=2)
 
         self.mapping_checkbox = tk.Checkbutton(self.lower_right_frame, text="Re-map Volumes", variable=self.mapping_var, command=self.update_scenario_from_checkboxes)
-        self.mapping_checkbox.grid(row=10, column=0, sticky="w", padx=5, pady=2)
+        self.mapping_checkbox.grid(row=13, column=0, sticky="w", padx=5, pady=2)
 
         # Execute button with fixed width
         self.execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        self.execute_button.grid(row=11, column=0, padx=5, pady=2, sticky="ew")
+        self.execute_button.grid(row=14, column=0, padx=5, pady=2, sticky="w")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()
@@ -389,7 +423,10 @@ class DemoGUIApp:
                     "ar_change_num_samples": AR_CHANGE_NUM_SAMPLES,
                     "ar_change_activation_thresh": AR_CHANGE_ACTIVATION_THRESH,
                     "cache_interpolated_xz" : CACHE_INTERPOLATED_XZ,
-                    "ignore_colinear_xz" : IGNORE_COLINEAR_XZ
+                    "ignore_colinear_xz" : IGNORE_COLINEAR_XZ,
+                    "num_xz_slices" : NUM_XZ_SLICES,
+                    "determine_xz_slices" : DETERMINE_XZ_SLICES,
+                    "num_x_points" : DEFAULT_X_POINTS
                 }
             }
             self.update_dropdown()
@@ -404,8 +441,9 @@ class DemoGUIApp:
             exit_path = os.path.join("./demo_data/", self.active_scenario, self.active_scenario + "_ROIS.csv")
         else:
             exit_path = cell_data_path
+        python_path = self.get_python_executable()
         # Run cell merger tool
-        exec_args = ['python', CELL_MERGER_PATH,
+        exec_args = [python_path, CELL_MERGER_PATH,
                      '--cell_data_path', cell_data_path,
                      '--tif_file_path', "../GUI/tif_data/file_00001.tif",
                      '--scenarios_path', SCENARIOS_PATH,
@@ -429,8 +467,9 @@ class DemoGUIApp:
             cell_data_path = self.scenarios[self.active_scenario]['SEG_IN_FILE']
             autosave_name = self.active_scenario + "_VOLUMES.csv"
         exit_path = os.path.join(self.scenarios[self.active_scenario]['V_DATA_FOLDER'], autosave_name)
+        python_path = self.get_python_executable()
         # Run volume segmentation tool
-        exec_args = ['python', VOLUME_SEGMENTER_PATH,
+        exec_args = [python_path, VOLUME_SEGMENTER_PATH,
                      '--cell_data_path', cell_data_path,
                      '--tif_file_path', "../GUI/tif_data/file_00001.tif",
                      '--scenarios_path', SCENARIOS_PATH,
@@ -449,9 +488,22 @@ class DemoGUIApp:
         threading.Thread(target=self.run_subprocess, args=(exec_args, "volume_segmenter_tool")).start()
         self.check_queue()
 
+    def get_python_executable(self):
+        # Path to the virtual environment's python executable
+        env_python_path = os.path.abspath(os.path.join('..', '.env', 'scripts', 'python.exe'))
+
+        # Check if the Python executable exists in the virtual environment
+        if os.path.exists(env_python_path):
+            print(f"Using Python from virtual environment: {env_python_path}")
+            return env_python_path
+        else:
+            # Fallback to system Python
+            print("Using system Python")
+            return 'python'
+
     # Updates the dictionary of a scenario with its algorithm parameters
     def update_algo_parameters(self, event = None, checkbox_name = None):
-        if not self.scenarios[self.active_scenario]['RESTRICTED_MODE']:
+        if not self.active_scenario:
             return
         algo_parameters = self.scenarios[self.active_scenario]["algo_parameters"]
         # Handle conflicting centroid presses
@@ -468,18 +520,22 @@ class DemoGUIApp:
         algo_parameters['use_area_deriv_restriction'] = bool(self.enable_mode_check_var.get())
         algo_parameters['cache_interpolated_xz'] = bool(self.xz_interpolate_check_var.get())
         algo_parameters['ignore_colinear_xz'] = bool(self.xz_colinear_check_var.get())
+        algo_parameters['determine_xz_slices'] = bool(self.xz_auto_planes_check_var.get())
         # Update entry variables if applicable
         entries = [self.flat_centroid_entry, self. perc_centroid_entry, self.match_z_entry,
                    self.restrict_area_entry, self.num_points_entry, 
-                   self.percent_diff_entry, self.num_xy_rois_entry, self.min_samples_entry]
+                   self.percent_diff_entry, self.num_xy_rois_entry, self.min_samples_entry, 
+                   self.xz_num_planes_entry, self.x_points_entry]
         ranges = [(0,100), (0,1000), (0, 150), 
                   (0,1000), (100,500), 
-                  (0,1000), (0,100), (0,100)]
+                  (0,1000), (0,100), (0,100),
+                  (1,10000), (5, 10000)]
         keys = ["flat_centroid_dist", "perc_centroid_dist", "match_z_threshold", 
                 "area_delta_perc", "num_projection_points", 
-                "ar_change_perc", "ar_change_num_samples", "ar_change_activation_thresh"]
+                "ar_change_perc", "ar_change_num_samples", "ar_change_activation_thresh", "num_xz_slices",
+                "num_x_points"]
         int_keys = {"num_projection_points", "ar_change_num_samples", "ar_change_activation_thresh",
-                    "match_z_threshold"} # Track keys to store as int instead of float
+                    "match_z_threshold", "num_xz_slices", "num_x_points"} # Track keys to store as int instead of float
         for idx, entry in enumerate(entries): 
             value = entry.get()
             try:
@@ -494,13 +550,15 @@ class DemoGUIApp:
                     algo_parameters[key] = value_parsed 
             except ValueError:
                 print(f"Please enter a valid number.")
-        pass
+        # Update enable states and other scenario details
+        self.update_scenario_from_checkboxes()
 
     # Loads algorithm parameters and sets values of widgets
     def load_algo_parameters(self):
         if not self.active_scenario:
             return
         algo_parameters = self.scenarios[self.active_scenario]['algo_parameters']
+        # print(f"Loading algo parameters: {algo_parameters}")
         if algo_parameters["use_flat_centroid"] and algo_parameters["use_perc_centroid"]:
             algo_parameters["use_perc_centroid"] = False # only allow one centroid restriction
         # CHECKBOX UPDATES
@@ -512,6 +570,7 @@ class DemoGUIApp:
         self.enable_mode_check_var.set(1 if algo_parameters["use_area_deriv_restriction"] else 0)
         self.xz_colinear_check_var.set(1 if algo_parameters["ignore_colinear_xz"] else 0)
         self.xz_interpolate_check_var.set(1 if algo_parameters["cache_interpolated_xz"] else 0)
+        self.xz_auto_planes_check_var.set(1 if algo_parameters["determine_xz_slices"] else 0)
         # ENTRY UPDATES
         self.num_points_entry.delete(0, tk.END)
         self.num_points_entry.insert(0, str(algo_parameters["num_projection_points"]))
@@ -523,6 +582,10 @@ class DemoGUIApp:
         self.perc_centroid_entry.insert(0, str(algo_parameters["perc_centroid_dist"]))
         self.restrict_area_entry.delete(0, tk.END)
         self.restrict_area_entry.insert(0, str(algo_parameters["area_delta_perc"]))
+        self.xz_num_planes_entry.delete(0, tk.END)
+        self.xz_num_planes_entry.insert(0, str(algo_parameters["num_xz_slices"]))
+        self.x_points_entry.delete(0, tk.END)
+        self.x_points_entry.insert(0, str(algo_parameters["num_x_points"]))
         # Experimental vars
         self.percent_diff_entry.delete(0, tk.END)
         self.percent_diff_entry.insert(0, str(algo_parameters["ar_change_perc"]))
@@ -626,8 +689,9 @@ class DemoGUIApp:
         self.update_algo_parameters()
         # Save current scenarios
         self.save_scenarios_to_json(filepath=SCENARIOS_PATH)
+        python_path = self.get_python_executable()
         exec_args = [
-            'python', 'run_segmentation_demo.py',  
+            python_path, 'run_segmentation_demo.py',  
             '--scenarios_file', SCENARIOS_PATH,
             '--scenario_name', self.active_scenario,
         ]
@@ -638,13 +702,16 @@ class DemoGUIApp:
             if answer:
                 print("Removed XZ Cache")
                 os.remove(self.scenarios[self.active_scenario]["SEG_XZ_IO_FILE"])
+            else:
+                self.remake_xz.set(0)
         # Start the subprocess in a new thread to keep the GUI responsive
         threading.Thread(target=self.run_subprocess, args=[exec_args, "execute_commands"]).start()
         self.check_queue()
 
     def open_playground(self):
+        python_path = self.get_python_executable()
         pg_args = [
-            'python', '../3D_SIMULATOR/3dtest7.py'
+            python_path, '../3D_SIMULATOR/3dtest7.py'
         ]
         # Start the subprocess
         threading.Thread(target=self.run_subprocess, args=[pg_args, "playground"]).start()
@@ -691,8 +758,9 @@ class DemoGUIApp:
         if merge or reduce:
             print(f"Performing reduction on datasets for {self.active_scenario}")
             self.save_scenarios_to_json(filepath=SCENARIOS_PATH)
+            python_path = self.get_python_executable()
             process_args = [
-                'python', '../CELLPOSE_SCRIPTS/process_noise.py',  
+                python_path, '../CELLPOSE_SCRIPTS/process_noise.py',  
                 '--perform_grouping', str(merge),
                 '--perform_reduction', str(reduce),
                 '--temp_reduction', str(temp),
@@ -706,10 +774,14 @@ class DemoGUIApp:
             self.check_queue()
             
     def reduce_data(self):
-        v_out = os.path.join(self.scenarios[self.active_scenario]["V_DATA_FOLDER"],self.scenarios[self.active_scenario]["V_GT_CSV"])
-        s_out = self.scenarios[self.active_scenario]["SEG_IN_FILE"]
-        # Process the data by merging it, reducing it (dropping noise), and operating on real datasets
-        self.process_data(merge=True, reduce=True, v_out=v_out, s_out=s_out, temp=False)
+        if not self.scenarios[self.active_scenario].get("HAS_VALIDATION"):
+            return
+        answer = messagebox.askyesno("Confirmation", "Permanently modify dataset to eliminate all ROIs not in a manually segmented volume?")
+        if answer:
+            v_out = os.path.join(self.scenarios[self.active_scenario]["V_DATA_FOLDER"],self.scenarios[self.active_scenario]["V_GT_CSV"])
+            s_out = self.scenarios[self.active_scenario]["SEG_IN_FILE"]
+            # Process the data by merging it, reducing it (dropping noise), and operating on real datasets
+            self.process_data(merge=True, reduce=True, v_out=v_out, s_out=s_out, temp=False)
 
     def update_reduction_button(self):
         if self.active_scenario:
@@ -806,8 +878,8 @@ class DemoGUIApp:
 
             # Update ffp algorithm GUI widgets
             self.load_algo_parameters()
-            
             self.update_scenario_from_checkboxes()
+        
         else:
             print(f"Unable to load scenario: {scenario_name}")
 
@@ -861,8 +933,14 @@ class DemoGUIApp:
         else:
             self.algo_checkbox.config(state="disabled")
             self.algo_var.set(0)
-        
-        
+
+        # Can't set a value for xz planes if auto determining
+        algo_parameters = scenario_data.get("algo_parameters", {})
+        if algo_parameters.get("determine_xz_slices"):
+            self.xz_num_planes_entry.config(state = "disabled")
+        else:
+            self.xz_num_planes_entry.config(state = "normal")
+
 
     def update_info_labels(self):
         """Update the labels in the right frame of the inner left frame to reflect the current scenario values."""

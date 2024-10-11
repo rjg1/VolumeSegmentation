@@ -14,7 +14,7 @@ from volume import Volume
 import os
 import pandas as pd
 import argparse
-from xz_projection import generate_xz_single_y
+from xz_projection import generate_xz_single_y, generate_xz_rois
 from xz_segmentation import cluster_xz_rois_tuned
 from volume_seg_ffp import segment_volumes_drg
 
@@ -42,6 +42,9 @@ RESTRICT_MULTIPLE_XY_PER_VOL = True     # Restriction on whether or not two XY R
 RESTRICT_AREA_CHANGE = False            # Restriction on how fast a volume's average area per ROI can change
 CACHE_INTERPOLATED_XZ = True            # Whether to interpolate and store boundary points before volume segmentation (higher memory + speed)
 IGNORE_COLINEAR_XZ = True               # Whether to discard colinear XZ ROIs as noise (keeping -> higher memory usage, higher linking)
+NUM_XZ_SLICES = 60                      # Default number of XZ slices (y-planes) to generate
+DETERMINE_XZ_SLICES = False             # Whether or not to automatically determine the number of xz slices
+DEFAULT_X_POINTS = 10                   # Default number of x points to project across each ROI in a z-plane when making a XZ plane
 
 def main():
     # Set up argument parser
@@ -69,6 +72,10 @@ def main():
     parser.add_argument('--ar_change_activation_thresh', default=AR_CHANGE_ACTIVATION_THRESH, help='Number of XY rois to add to a volume before volume change kicks in (default: %(default)s)')
     parser.add_argument('--ignore_colinear_xz', default=IGNORE_COLINEAR_XZ, help='Whether or not to ignore XZ ROIs made entirely of colinear points (default: %(default)s)')
     parser.add_argument('--cache_interpolated_xz', default=IGNORE_COLINEAR_XZ, help='Whether or not to cache interpolated boundaries of XZ ROIs (default: %(default)s)')
+    parser.add_argument('--num_xz_slices', default=NUM_XZ_SLICES, help='Number of XZ Slices (y-planes) to project (default: %(default)s)')
+    parser.add_argument('--determine_xz_slices', default=DETERMINE_XZ_SLICES, help='Whether or not to automatically determine number of y-planes to generate(default: %(default)s)')
+    parser.add_argument('--num_x_points', default=DEFAULT_X_POINTS, help='Default number of x points to project across each ROI in a z-plane when making a XZ plane (default: %(default)s)')
+
 
     # Parse arguments
     args = parser.parse_args()
@@ -82,7 +89,7 @@ def main():
     # Avoid short circuit with boolean restricted mode
     restricted_mode = str_to_bool(args.restricted_mode) if isinstance(args.restricted_mode,str) else RESTRICTED_MODE
     # Unpack parameters to use
-    if isinstance(args.use_flat_centroid,str):
+    if isinstance(args.use_flat_centroid, str):
         algo_parameters = {
             'restrict_centroid_distance': str_to_bool(args.use_flat_centroid) or str_to_bool(args.use_perc_centroid),
             'use_percent_centroid_distance': str_to_bool(args.use_perc_centroid),
@@ -99,9 +106,12 @@ def main():
             'ar_change_num_samples' : int(args.ar_change_num_samples),
             'ar_change_activation_thresh' : int(args.ar_change_activation_thresh),
             'cache_interpolated_xz' : str_to_bool(args.cache_interpolated_xz),
-            'ignore_colinear_xz' : str_to_bool(args.ignore_colinear_xz)
+            'ignore_colinear_xz' : str_to_bool(args.ignore_colinear_xz),
+            'num_xz_slices' : int(args.num_xz_slices),
+            'determine_xz_slices' : str_to_bool(args.determine_xz_slices),
+            'num_x_points' : int(args.num_x_points)
         }
-    else:
+    else: # Use defaults
         algo_parameters = {
             'restrict_centroid_distance': RESTRICT_CENTROID_DISTANCE,
             'use_percent_centroid_distance': USE_PERCENT_CENTROID_DISTANCE,
@@ -118,7 +128,10 @@ def main():
             'ar_change_num_samples' : AR_CHANGE_NUM_SAMPLES,
             'ar_change_activation_thresh' : AR_CHANGE_ACTIVATION_THRESH,
             'cache_interpolated_xz' : CACHE_INTERPOLATED_XZ,
-            'ignore_colinear_xz' : IGNORE_COLINEAR_XZ
+            'ignore_colinear_xz' : IGNORE_COLINEAR_XZ,
+            'num_xz_slices' : NUM_XZ_SLICES,
+            'determine_xz_slices' : DETERMINE_XZ_SLICES,
+            'num_x_points' : DEFAULT_X_POINTS
         }
     # Get X, Y, Z, ROI_ID points
     points = import_csv(in_file=in_file)
@@ -130,7 +143,7 @@ def main():
         print(f"Imported XZ Planes. Performing XZ Cluster Segmentation.")
     else:
         print("Generating XZ Planes...")
-        xz_roi_points = generate_xz_single_y(points, min_y=0, max_y=1024)
+        xz_roi_points = generate_xz_rois(points, parameters=algo_parameters)
         if xz_io_path is not None:
             # Export points
             out_xz_points = []
@@ -145,14 +158,13 @@ def main():
 
     # Cluster XZ ROI points
     clustered_hulls = cluster_xz_rois_tuned(xz_roi_points, parameters=algo_parameters)
-    # DEBUG: view some clusters
     # visualize_random_clusters(clustered_hulls, num_planes=10) 
     print("Cluster segmentation complete. Performing Volume Segmentation...")
     # Perform volume segmentation using XY ROIs and XZ Regions
     if restricted_mode:
         volumes = segment_volumes_drg(clustered_hulls, points, parameters=algo_parameters)
     else:
-        volumes = segment_volumes(clustered_hulls, points)
+        volumes = segment_volumes(clustered_hulls, points, parameters=algo_parameters)
     
     if volumes:
         # DEBUG: EST PRINTING OUTPUT OF VOLUMES
@@ -236,7 +248,7 @@ def find_centroid(points):
     return cx, cz
 
 # Create a dictionary of {volume id : <Volume> object} where id is the id of a unique volume
-def segment_volumes(xz_hulls, xyz_points):
+def segment_volumes(xz_hulls, xyz_points, parameters = {}):
     # Output dict of {volume id : <Volume> object}
     print("Beginning Caching for Volume Segmentation")
     volumes = {}
@@ -291,7 +303,7 @@ def segment_volumes(xz_hulls, xyz_points):
             if not xy_roi.overlaps_with_region(xz_roi):
                 continue # Objects cannot spacially overlap
             # Execution reached here - more detailed check for collision
-            intersection = check_region_intersection(xy_roi.get_boundary_points(), xz_roi.get_boundary_points())
+            intersection = check_region_intersection(xy_roi.get_boundary_points(), xz_roi.get_boundary_points(), parameters=parameters)
             if intersection: # XZ and XY ROIs are part of same object
                 # Determine what 3D object id to assign to these two ROIs
                 xz_roi_obj = None
@@ -344,7 +356,7 @@ def segment_volumes(xz_hulls, xyz_points):
 
 
 # Determines if an XY roi and an XZ roi intersect
-def check_region_intersection(xy_points, xz_points):
+def check_region_intersection(xy_points, xz_points, parameters):
     # Determine the fixed y at which the ZX plane is situated
     _ ,fixed_y, _ = xz_points[0]
     # Determine the fixed z at which the XY plane is situated 
@@ -359,16 +371,18 @@ def check_region_intersection(xy_points, xz_points):
 
     # Calculate centroid of the xz points
     xz_points_2d = [(x,z) for x,y,z in xz_points]
-    cx, cz = find_centroid(xz_points_2d)
-    # Sort xz boundary points in predicted order around a polygon
-    sorted_points = sort_points_by_angle(xz_points_2d, (cx, cz))
-    sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
-    line = LineString(sorted_points)
-    # Generate n zx points around the boundary of the ROI polygon
-    distances = np.linspace(0, line.length, ROI_PROJECTION_N_POINTS)
-    points = [line.interpolate(distance) for distance in distances]
-    # Update 2d xz points to use new point projection
-    xz_points_2d = [(point.x, point.y) for point in points]
+    # Generate n boundary points around xz roi if this has not already been done
+    if not parameters.get('cache_interpolated_xz'):
+        cx, cz = find_centroid(xz_points_2d)
+        # Sort xz boundary points in predicted order around a polygon
+        sorted_points = sort_points_by_angle(xz_points_2d, (cx, cz))
+        sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
+        line = LineString(sorted_points)
+        # Generate n zx points around the boundary of the ROI polygon
+        distances = np.linspace(0, line.length, parameters['roi_projection_n_points'])
+        points = [line.interpolate(distance) for distance in distances]
+        # Update 2d xz points to use new point projection
+        xz_points_2d = [(point.x, point.y) for point in points]
 
     # Generate a list of x points on the XZ roi boundary at fixed y and z sufficiently 
     # close to the z location of the XY plane. Stored as an (x,y) value

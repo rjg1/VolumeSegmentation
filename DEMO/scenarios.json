@@ -35,7 +35,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": false,
+            "num_xz_slices": 300,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "drg_subset_1_3": {
@@ -74,7 +77,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 100,
+            "determine_xz_slices": false,
+            "num_x_points": 25
         }
     },
     "drg_subset_1_1": {
@@ -87,7 +93,7 @@
         "HAS_VALIDATION": true,
         "HAS_ALGORITHMIC": true,
         "HAS_REDUCED_DATASET": true,
-        "SEGMENT_VALIDATED_ONLY": true,
+        "SEGMENT_VALIDATED_ONLY": false,
         "REQUIRES_REDUCED_DATASET": true,
         "REMAP_VOLUMES": true,
         "PLOT_TYPE": "both",
@@ -104,16 +110,19 @@
             "use_area_restriction": false,
             "use_xy_restriction": true,
             "num_projection_points": 300,
-            "flat_centroid_dist": 10,
-            "perc_centroid_dist": 68,
+            "flat_centroid_dist": 10.0,
+            "perc_centroid_dist": 68.0,
             "match_z_threshold": 2,
-            "area_delta_perc": 150,
+            "area_delta_perc": 150.0,
             "use_area_deriv_restriction": false,
-            "ar_change_perc": 30,
+            "ar_change_perc": 30.0,
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 60,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "drg_complete": {
@@ -153,7 +162,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "drg_complete_2": {
@@ -193,7 +205,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": false
+            "ignore_colinear_xz": false,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "cell_validation_dataset": {
@@ -208,6 +223,7 @@
         "HAS_REDUCED_DATASET": false,
         "SEGMENT_VALIDATED_ONLY": false,
         "REQUIRES_REDUCED_DATASET": false,
+        "SAMPLE_POINT_MAX": 50000,
         "REMAP_VOLUMES": false,
         "PLOT_TYPE": "both",
         "VALIDATION_DIR": "../VALIDATION/",
@@ -232,7 +248,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "simple_validation_dataset_1": {
@@ -256,13 +275,13 @@
         "V_ALGO_CSV": "algo_seg.csv",
         "V_MAPPING_CSV": "mapping.csv",
         "algo_parameters": {
-            "use_flat_centroid": false,
+            "use_flat_centroid": true,
             "use_perc_centroid": false,
             "use_z_threshold": false,
             "use_area_restriction": false,
             "use_xy_restriction": false,
             "num_projection_points": 300,
-            "flat_centroid_dist": 10.0,
+            "flat_centroid_dist": 0.5,
             "perc_centroid_dist": 68.0,
             "match_z_threshold": 2,
             "area_delta_perc": 150.0,
@@ -271,7 +290,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 60,
+            "determine_xz_slices": false,
+            "num_x_points": 30
         }
     },
     "simple_validation_dataset_2": {
@@ -280,13 +302,13 @@
         "TEMP_REDUCED_FILE": "./demo_data/xyz_complex_points_ROIS_s.csv",
         "SEG_XZ_IO_FILE": "../VOLUME_SEGMENTATION/xz_cache/xyz_complex_points_ROIS_XZ.csv",
         "RESTRICTED_MODE": false,
-        "RUN_SEGMENTATION": false,
+        "RUN_SEGMENTATION": true,
         "HAS_VALIDATION": true,
         "HAS_ALGORITHMIC": true,
         "HAS_REDUCED_DATASET": false,
         "SEGMENT_VALIDATED_ONLY": false,
         "REQUIRES_REDUCED_DATASET": false,
-        "REMAP_VOLUMES": false,
+        "REMAP_VOLUMES": true,
         "PLOT_TYPE": "both",
         "VALIDATION_DIR": "../VALIDATION/",
         "V_DATA_FOLDER": "../VALIDATION/validation_runs/complex_points",
@@ -310,7 +332,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 60,
+            "determine_xz_slices": false,
+            "num_x_points": 10
         }
     },
     "c": {
@@ -349,7 +374,10 @@
             "ar_change_num_samples": 5,
             "ar_change_activation_thresh": 15,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 1024
         }
     },
     "abc": {
@@ -388,7 +416,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 1024
         }
     },
     "clarissa": {
@@ -427,7 +458,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": true
+            "ignore_colinear_xz": true,
+            "num_xz_slices": 1024,
+            "determine_xz_slices": false,
+            "num_x_points": 1024
         }
     }
 }

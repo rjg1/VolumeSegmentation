@@ -16,6 +16,7 @@ import itertools
 CLUSTER_GAP_BUFFER = 0.1
 DEFAULT_MIN_SAMPLES = 4
 MIN_PTS_PERCENTILE = 10
+MIN_EPS = 0.2
 EPS_REDUCTION = 0.8
 
 def cluster_xz_rois(xz_roi_points):
@@ -40,16 +41,14 @@ def cluster_xz_rois(xz_roi_points):
            if y_diff < y_diff_min and y_diff > 0:
                y_diff_min = y_diff
         prev_point = (x,y,z) 
-    
     # Determine max clustering distance
     # Candidate estimate is max(gap in z planes, gap in y planes)
     dist = max(y_diff_min, z_diff_min) + CLUSTER_GAP_BUFFER
-
     for y, xz_list in xz_points.items():
         # Get all x,z values for fixed y and make numpy array
         xz_values = np.array(xz_list)
         # Use DBSCAN clustering
-        db = DBSCAN(eps=dist, min_samples=5).fit(xz_values)
+        db = DBSCAN(eps=dist, min_samples=2).fit(xz_values)
         # Extract the clusters
         labels = db.labels_
         for label in set(labels):
@@ -97,6 +96,7 @@ def cluster_xz_rois_tuned(xz_roi_points, parameters = {}, eps=None, min_samples=
     clustered_hulls = {}
     xz_points = {}
 
+
     # Organize points into y-groups
     for x, y, z in xz_roi_points:
         if y not in xz_points:
@@ -120,7 +120,7 @@ def cluster_xz_rois_tuned(xz_roi_points, parameters = {}, eps=None, min_samples=
             continue
 
         # min_samples = estimate_min_samples(xz_values)
-        min_samples = 2
+        min_samples = DEFAULT_MIN_SAMPLES
         # print(f"y= {y} min_samples = {min_samples} len_xz = {len(xz_values)}")
         eps = determine_eps(xz_values, min_samples=min_samples)
 
@@ -168,7 +168,7 @@ def cluster_xz_rois_tuned(xz_roi_points, parameters = {}, eps=None, min_samples=
                         clustered_hulls[y] = []
                     # Extract boundary points of convex hull
                     vertices = hull.points[hull.vertices]
-                    point_list = [((x, y, z) for x, z in vertices)]
+                    point_list = [(x, y, z) for x, z in vertices]
                 except QhullError as e:
                     print(f"QhullError: {e}")
             
@@ -286,7 +286,7 @@ def determine_eps(xz_values, min_samples=DEFAULT_MIN_SAMPLES):
     """
     if len(xz_values) <= min_samples:
         print(f"Warning: Only {len(xz_values)} samples available. Using default epsilon.")
-        return 1
+        return MIN_EPS
     # Fit NearestNeighbors model to determine k-distance graph
     neighbors = NearestNeighbors(n_neighbors=min_samples)
     neighbors.fit(xz_values)
@@ -301,7 +301,7 @@ def determine_eps(xz_values, min_samples=DEFAULT_MIN_SAMPLES):
     optimal_k_index = max(0, max_delta_index - 1)
     optimal_eps = sorted_distances[optimal_k_index]  # eps is the distance at the point before the elbow
 
-    return max(1,optimal_eps * EPS_REDUCTION)
+    return max(MIN_EPS, optimal_eps * EPS_REDUCTION)
 
 
 def estimate_min_samples(points, percentile=10):

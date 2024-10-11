@@ -191,7 +191,7 @@ def segment_volumes_drg(xz_hulls, xyz_points, parameters = {}):
     for obj in removed_objects:
         volumes.pop(obj)
     # DEBUG
-    print(f"{len(xy_untracked)} unlinked xy volumes: {xy_untracked}")
+    print(f"{len(xy_untracked)} unlinked xy rois: {xy_untracked}")
     # END DEBUG
     # Return volumes dictionary
     return volumes
