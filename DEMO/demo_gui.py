@@ -366,7 +366,7 @@ class DemoGUIApp:
 
         # Execute button with fixed width
         self.execute_button = tk.Button(self.lower_right_frame, text="Execute", width=15, command=self.execute_commands)
-        self.execute_button.grid(row=14, column=0, padx=5, pady=2, sticky="w")
+        self.execute_button.grid(row=14, column=0, padx=5, pady=2, sticky="ew")
 
     def create_scenario(self):
         scenario_name = self.scenario_entry.get()

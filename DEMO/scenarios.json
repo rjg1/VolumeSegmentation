@@ -35,7 +35,7 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": false,
+            "ignore_colinear_xz": true,
             "num_xz_slices": 300,
             "determine_xz_slices": false,
             "num_x_points": 30
@@ -195,7 +195,7 @@
             "use_z_threshold": true,
             "use_area_restriction": false,
             "use_xy_restriction": true,
-            "num_projection_points": 300,
+            "num_projection_points": 200,
             "flat_centroid_dist": 10.0,
             "perc_centroid_dist": 68.0,
             "match_z_threshold": 4,
@@ -205,10 +205,10 @@
             "ar_change_num_samples": 2,
             "ar_change_activation_thresh": 10,
             "cache_interpolated_xz": true,
-            "ignore_colinear_xz": false,
+            "ignore_colinear_xz": true,
             "num_xz_slices": 1024,
             "determine_xz_slices": false,
-            "num_x_points": 30
+            "num_x_points": 20
         }
     },
     "cell_validation_dataset": {
