@@ -52,6 +52,8 @@ def main():
     v_algo_csv = parameters.get("V_ALGO_CSV", V_ALGO_CSV)
     v_mapping_csv = parameters.get("V_MAPPING_CSV", V_MAPPING_CSV)
     
+    python_path = get_python_executable()
+
     # Determine output file for segmentation
     if has_algorithmic: # Already has an algorithmic path - use this
         seg_out_filename = v_algo_csv
@@ -60,7 +62,7 @@ def main():
 
     seg_out_file = os.path.join(v_data_folder, seg_out_filename)
     seg_args = [
-        'python', seg_script_path,
+        python_path, seg_script_path,
         '--in_file', seg_in_file,
         '--xz_io_path', seg_xz_cache_file,
         '--out_file', seg_out_file,
@@ -81,7 +83,7 @@ def main():
     
     # Argument list for validation script
     v_args = [
-        'python', v_script_path, 
+        python_path, v_script_path, 
         '--data_folder', v_data_folder,
         '--gt_csv', v_gt_csv,
         '--algo_csv', v_algo_csv,
@@ -90,7 +92,7 @@ def main():
 
     # Argument list for comparison visualisation script
     v_vis_args = [
-        'python', v_vis_script_path,  
+        python_path, v_vis_script_path,  
         '--data_folder', v_data_folder,
         '--gt_csv', v_gt_csv,
         '--algo_csv', v_algo_csv,
@@ -104,7 +106,7 @@ def main():
                 v_out = os.path.join(v_data_folder, v_gt_csv)
                 # Generate temporary dataset if required
                 process_args = [
-                    'python', '../CELLPOSE_SCRIPTS/process_noise.py',  
+                    python_path, '../CELLPOSE_SCRIPTS/process_noise.py',  
                     '--perform_grouping', "True",
                     '--perform_reduction', "True",
                     '--temp_reduction', "True",
@@ -137,7 +139,7 @@ def main():
         elif has_validation and plot_type == "gt":
             # Argument list for single visualisation script on gt data
             v_single_args = [
-                'python', v_single_script_path,  
+                python_path, v_single_script_path,  
                 '--data_folder', v_data_folder,
                 '--csv_filename', v_gt_csv,
                 '--plot_title', f'Plot of Ground Truth Data for Dataset: {v_data_folder}'
@@ -149,7 +151,7 @@ def main():
         elif has_algorithmic and plot_type == "algo":
             # Argument list for single visualisation script on algo data
             v_single_args = [
-                'python', v_single_script_path,  
+                python_path, v_single_script_path,  
                 '--data_folder', v_data_folder,
                 '--csv_filename', v_algo_csv,
                 '--plot_title', f'Plot of Algorithmic Data for Dataset: {v_data_folder}'
@@ -177,6 +179,19 @@ def load_parameters_from_json(json_path, scenario):
         return None
     
     return all_scenarios, all_scenarios[scenario]
+
+def get_python_executable():
+    # Path to the virtual environment's python executable
+    env_python_path = os.path.abspath(os.path.join('..', '.env', 'scripts', 'python.exe'))
+
+    # Check if the Python executable exists in the virtual environment
+    if os.path.exists(env_python_path):
+        print(f"Using Python from virtual environment: {env_python_path}")
+        return env_python_path
+    else:
+        # Fallback to system Python
+        print("Using system Python")
+        return 'python'
 
 if __name__ == "__main__":
     main()

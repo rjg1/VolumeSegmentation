@@ -375,9 +375,9 @@
             "ar_change_activation_thresh": 15,
             "cache_interpolated_xz": true,
             "ignore_colinear_xz": true,
-            "num_xz_slices": 1024,
+            "num_xz_slices": 300,
             "determine_xz_slices": false,
-            "num_x_points": 1024
+            "num_x_points": 30
         }
     }
 }
