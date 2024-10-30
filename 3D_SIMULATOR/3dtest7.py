@@ -145,8 +145,8 @@ def main():
 
     # Show the plot
     plotter.show()
-
     return
+
     # PART TWO - VOLUME SEGMENTATION
     plotter.clear()
     plotter = pv.Plotter(shape=(1, 2))
@@ -156,6 +156,8 @@ def main():
         plotter.add_mesh(obj, color='grey', opacity=0.25)
     plotter.subplot(0, 0)
     plotter.add_mesh(bounding_box, color='grey', opacity=0.25)
+    plotter.show()
+    return
     segmented_objects = {}
     # Attempt to load a prior segmentation
     seg_file_path = f'segmentation_s{RAND_SEED}_o{len(objects)}.pickle'

@@ -117,8 +117,9 @@ def show_projection_start(volume_id = 1, roi_interval = 5):
 def main():
     # show_projection_start(volume_id=1, roi_interval=3)
     # plot_projection(volume_id =1, roi_interval = 2)
-    # plot_roi_coloring(volume_id=1, roi_interval=2, green_ids=[5,6,7,8,9,10], red_ids=[1,2,3,4,11,12,13])
-    plot_roi_restrictions(volume_id=1, roi_interval=2, green_ids=[4,5,6,7,8,9,10,11,12,13], red_ids=[1,2,3], n_rois=5, gap_interval = 3)
+    # plot_intersection()
+    plot_roi_coloring2(volume_id=1, roi_interval=2, green_ids=[1,2,3,4,5,6,7,8,9,10,11,12,13], red_ids=[])
+    # plot_roi_restrictions(volume_id=1, roi_interval=2, green_ids=[4,5,6,7,8,9,10,11,12,13], red_ids=[1,2,3], n_rois=5, gap_interval = 3)
 
 def plot_projection(volume_data = None, volume_id = 1, roi_interval = 5):
     # Load the CSV containing the volume data
@@ -322,14 +323,40 @@ def plot_intersection(volume_data = None, volume_id = 1, roi_interval =5):
     # Get the x, z coordinates for the top ROI
     if len(top_roi_data) >= 3:
         points = top_roi_data[['x', 'z']].values
-        hull = ConvexHull(points)
+
         
         # Plot the boundary of the convex hull in red
-        for simplex in hull.simplices:
-            ax.plot(points[simplex, 0], [mid_y] * len(simplex), points[simplex, 1], color='red', linewidth=2)
+        # hull = ConvexHull(points)
+        # for simplex in hull.simplices:
+        #     ax.plot(points[simplex, 0], [mid_y] * len(simplex), points[simplex, 1], color='red', linewidth=2)
         
+        #TEST interpolation
+        from shapely import LineString
+        cx, cz = find_centroid(points)
+        # Sort xz boundary points in predicted order around a polygon
+        sorted_points = sort_points_by_angle(points, (cx, cz))
+        sorted_points.append(sorted_points[0]) # wrap polygon back around on itself
+        line = LineString(sorted_points)
+        # Generate n zx points around the boundary of the ROI polygon
+        distances = np.linspace(0, line.length, 300)
+        points = [line.interpolate(distance) for distance in distances]
+        # Update 2d xz points to use new point projection
+        x_points = [point.x for point in points]
+        y_points = [587 for _ in points]
+        z_points = [point.y for point in points]
+        ax.scatter(x_points, y_points, z_points, c='darkblue', alpha=0.7, s=0.5)
+        #ENDTEST
+        print(max(z_points))
+        print(max_z)
+        xyz_pts = [(point.x, 587, point.y) for point in points]
+        xyz_pts = [(x,y,z) for x,y,z in xyz_pts if abs(z - max_z) < 0.4]
+        print(xyz_pts)
+        x_vals, y_vals, z_vals = zip(*xyz_pts)
+
+        ax.plot(x_vals, y_vals, z_vals, color='red')
+
         # Plot the remaining points of the top ROI
-        ax.scatter(top_roi_data['x'], top_roi_data['y'], top_roi_data['z'], c='darkblue', alpha=0.7, s=0.5)
+        # ax.scatter(top_roi_data['x'], top_roi_data['y'], top_roi_data['z'], c='darkblue', alpha=0.7, s=0.5)
     
     # Plot the middle xz projection points (y around mid_y)
     middle_projection_data = filtered_projection_data[
@@ -454,6 +481,118 @@ def plot_roi_coloring(volume_data=None, volume_id=1, roi_interval=5, green_ids=N
 
     # Plot a continuous line for the max z-plane using sorted points
     ax.plot(x_vals, y_vals, [max_z] * len(x_vals), color='green', alpha=0.7, linewidth=2)
+
+    # Set labels and show plot
+    ax.set_title('Volumetric Segmentation via XY and XZ ROI Intersection')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    plt.show()
+
+def plot_roi_coloring2(volume_data=None, volume_id=1, roi_interval=5, green_ids=None, red_ids=None):
+    # Load the CSV containing the volume data
+    file_path = '../VALIDATION/validation_runs/drg_subset_1_r/real_data_filtered_v0_VOLUMES.csv'
+    df = pd.read_csv(file_path)
+
+    # Load the volume data for the specific volume_id
+    volume_data = df[df['VOLUME_ID'] == volume_id]
+    max_z = volume_data['z'].max()
+
+    # Load the CSV containing the projection points
+    projection_file_path = '../VOLUME_SEGMENTATION/xz_cache/real_data_filtered_v0_ROIS_XZ.csv'
+    projection_data = pd.read_csv(projection_file_path)
+
+    # Get the min and max values from the current volume data
+    x_min, x_max = volume_data['x'].min(), volume_data['x'].max()
+    y_min, y_max = volume_data['y'].min(), volume_data['y'].max()
+    z_min, z_max = volume_data['z'].min(), volume_data['z'].max()
+
+    # Find the unique sorted y-values
+    y_values = sorted(volume_data['y'].unique())
+
+    # # Filter projection points to be within the x, y, z range of the current volume
+    filtered_projection_data = projection_data[
+        (projection_data['x'] >= x_min) & (projection_data['x'] <= x_max) &
+        (projection_data['y'] >= y_min) & (projection_data['y'] <= y_max) &
+        (projection_data['z'] >= z_min) & (projection_data['z'] <= z_max)
+    ]
+
+    # Apply a tolerance to select y-planes that are close to multiples of roi_interval
+    tolerance = 0.99
+    # Get the unique sorted y-values
+    y_values = np.unique(filtered_projection_data['y'])
+    # Determine the gaps between consecutive y-values
+    y_gaps = np.diff(y_values)
+    # Assume the most common y-gap as the constant interval (mode)
+    y_gap = np.median(y_gaps)  # Use median instead of mode for robustness
+    filtered_projection_data = filtered_projection_data[
+        np.abs(filtered_projection_data['y'] % (roi_interval * y_gap)) <= tolerance
+    ]
+
+    # Set up 3D plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.view_init(elev=30, azim=-20)
+
+    # Group points by y-plane (for the ROI)
+    grouped_data = filtered_projection_data.groupby('y')
+    
+    # Assign an ID to each ROI and color them according to user specification
+    roi_id = 0
+    for y_plane, group in grouped_data:
+        # Get the x, z coordinates for the current y-plane
+        points = group[['x', 'z']].values
+        
+        # Only create a convex hull if there are enough points (at least 3)
+        if len(points) >= 3:
+            hull = ConvexHull(points)
+            roi_id += 1  # Increment ROI ID for each new region
+            
+            # Check if this ROI ID should be colored green or red
+            color = 'darkblue'  # Default color
+            if green_ids and roi_id in green_ids:
+                color = 'green'
+            elif red_ids and roi_id in red_ids:
+                color = 'red'
+
+            # Plot the convex hull
+            for simplex in hull.simplices:
+                ax.plot(points[simplex, 0], [y_plane] * len(simplex), points[simplex, 1], color=color, linewidth=2)
+        else:
+             # If fewer than 3 points, plot them directly
+            roi_id += 1  # Increment ROI ID for each new region
+            
+            # Check if this ROI ID should be colored green or red
+            color = 'darkblue'
+            if green_ids and roi_id in green_ids:
+                color = 'green'
+            elif red_ids and roi_id in red_ids:
+                color = 'red'
+            
+            # Plot the individual points
+            ax.scatter(points[:, 0], [y_plane] * len(points), points[:, 1], color=color, s=10)
+
+    volume_data = volume_data[volume_data['z'] % roi_interval == 0]
+    z_unique = volume_data['z'].unique()
+    # ax.scatter(max_z_plane_data['x'], max_z_plane_data['y'], max_z_plane_data['z'], 
+    #            c='green', alpha=0.7, s=2)
+    # Extract x, y values from the max_z_plane_data
+    for z in z_unique:
+        z_plane_data = volume_data[volume_data['z'] == z]
+        xy_points = list(zip(z_plane_data['x'].values, z_plane_data['y'].values))
+
+        # Find the centroid of the points in max_z_plane
+        centroid = find_centroid(xy_points)
+
+        # Sort the points by angle relative to the centroid
+        sorted_points = sort_points_by_angle(xy_points, centroid)
+
+        # Separate the sorted x and y values
+        x_vals = [p[0] for p in sorted_points]
+        y_vals = [p[1] for p in sorted_points]
+
+        # Plot a continuous line for the max z-plane using sorted points
+        ax.plot(x_vals, y_vals, [z] * len(x_vals), color='green', alpha=0.7, linewidth=2)
 
     # Set labels and show plot
     ax.set_title('Volumetric Segmentation via XY and XZ ROI Intersection')
