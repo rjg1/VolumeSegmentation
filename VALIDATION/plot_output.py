@@ -75,7 +75,7 @@ def visualize_points(df, colors, title):
     ax.set_xlim3d(min_val,max_val)
     ax.set_ylim3d(min_val,max_val)
     ax.set_zlim3d(min_val,max_val)
-    # ax.set_zlim3d(0,150)
+    ax.set_zlim3d(0,80)
     ax.set_title(title)
     ax.grid(False)
     plt.show()
