@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import argparse
 import random
 import os
+from scipy.spatial import cKDTree
 
 PLOT_TITLE = "Sample plane generation"
 CSV_FILENAME = 'real_data_filtered_algo_VOLUMES_g.csv'  # Input volume csv
@@ -22,7 +23,7 @@ def main():
 
     # Define a plane at an arbitrary z-level and angle
     center = sampled_df[['x', 'y', 'z']].mean().to_numpy()
-    normal, d = define_plane(center, 5)
+    normal, d = define_plane(center, [('X', 45), ('z',45),('y',20)])
 
     # Get points near this plane
     df_near, pts_near = get_points_near_plane(sampled_df, normal, d, threshold=1)
@@ -33,15 +34,47 @@ def main():
     visualize_points(sampled_df, colors, PLOT_TITLE, projected_pts, normal, center)
 
 
-def define_plane(center, theta1_deg):
+def get_rot_matrix(rotation):
+    axis, degrees = rotation
+    radians = np.deg2rad(degrees)
+
+    axis = axis.lower()
+
+    match axis:
+        case 'x':
+            return  np.array([
+                            [1, 0, 0],
+                            [0, np.cos(radians), -np.sin(radians)],
+                            [0, np.sin(radians), np.cos(radians)]
+                        ])
+        case 'y':
+            return  np.array([
+                            [np.cos(radians), 0, np.sin(radians)],
+                            [0, 1, 0],
+                            [-np.sin(radians), 0, np.cos(radians)]
+                        ])
+        case 'z':
+            return  np.array(
+                            [[np.cos(radians), -np.sin(radians), 0],
+                            [np.sin(radians), np.cos(radians), 0],
+                            [0, 0, 1]
+                        ])
+        case _:
+            return None
+
+def define_plane(center, rotations):
     """
     Define a plane tilted by theta1 degrees in the y–z plane,
     passing through a given center point.
     """
-    theta1_rad = np.deg2rad(theta1_deg)
-
-    # Normal vector tilted from horizontal in y–z - derived from 3D rotational matrix (roll)
-    normal = np.array([0, -np.sin(theta1_rad), np.cos(theta1_rad)])
+    # Perpendicular to flat x-y plane
+    normal = np.array([0,0,1]) # Perpendicular to flat x-y plane
+    
+    # Iterate through all rotations sequentially and apply them
+    for rotation in rotations:
+        rotation_matrix = get_rot_matrix(rotation)
+        if rotation is not None:
+            normal = np.matmul(normal, rotation_matrix)
 
     # Plane equation: n . (x, y, z) = d
     d = np.dot(normal, center)
@@ -171,7 +204,6 @@ def visualize_points(df, colors, title, projected_pts, normal=None, center=None)
         # So we need to subset colors to just those points
 
         # Find mask of close points (from projected_pts) against original df
-        from scipy.spatial import cKDTree
         tree = cKDTree(df[['x', 'y', 'z']].to_numpy())
         _, idxs = tree.query(projected_pts, k=1)
         projected_colors = colors[idxs]
@@ -181,7 +213,7 @@ def visualize_points(df, colors, title, projected_pts, normal=None, center=None)
         ax2.set_ylim(ylim)
         ax2.set_aspect('equal')
 
-    # set_axes_equal_3d(ax1)
+    set_axes_equal_3d(ax1)
 
     plt.tight_layout()
     plt.show()
