@@ -22,7 +22,7 @@ def main():
 
     # Define a plane at an arbitrary z-level and angle
     center = sampled_df[['x', 'y', 'z']].mean().to_numpy()
-    normal, d = define_plane(center, 5)
+    normal, d = define_plane(center, 2)
 
     # Get points near this plane
     df_near, pts_near = get_points_near_plane(sampled_df, normal, d, threshold=1)
