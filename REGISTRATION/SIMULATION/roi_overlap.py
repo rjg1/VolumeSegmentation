@@ -11,8 +11,8 @@ from scipy.optimize import linear_sum_assignment
 
 NUM_ELLIPSES = 15
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
-INTENSITY_DELTA = 0.1 # Intensity delta between two ROIs for the match to be considered
-ANGLE_DELTA_DEG = 5 # Angle to rotate between tests
+INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
+ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
 ANGLE_ROTATE_MAX = 45 # Max angle to rotate ROIs when comparing
 # Base data dimensions
 NUM_POINTS = 100
@@ -20,8 +20,8 @@ RADIUS_X = 4
 RADIUS_Y = 2
 # Transformations for second set of data
 TRANSFORM_ROTATION = 30
-X_SHIFT = 5
-Y_SHIFT = -3
+X_SHIFT = 10
+Y_SHIFT = -7
 
 # Function to create an ellipse as a polygon
 def ellipse_polygon(center_x, center_y, radius_x, radius_y, angle_deg=0, num_points=100):
@@ -110,7 +110,7 @@ def align_polygons(set1, set2, intensity1, intensity2):
     for i in anchor_matches:
         for j, intensity2 in enumerate(intensity2_norm):
             intensity1 = intensity1_norm[i]
-            if abs(intensity1 - intensity2) <= INTENSITY_DELTA:
+            if abs(intensity1 - intensity2) <= (INTENSITY_DELTA_PERC * intensity1):
                 anchor_matches[i].append(j)
     # For each viable ROI anchor match, determine pairings of all ROIs based off distance
     anchor_pairings = {(i,j) : {} for i in anchor_matches for j in anchor_matches[i]}
@@ -138,7 +138,7 @@ def align_polygons(set1, set2, intensity1, intensity2):
         matches = match_by_centroid_distance(set1, aligned_set2)
         # If these matches have been evaluated already, ignore them
         if matches in checked_matches:
-            print(f"Match assignments for ROIs has been evaluated already")
+            print(f"Match assignments for ROIs have been evaluated already")
             continue
         else:
             checked_matches.append(matches)
