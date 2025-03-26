@@ -23,10 +23,10 @@ def main():
 
     # Define a plane at an arbitrary z-level and angle
     center = sampled_df[['x', 'y', 'z']].mean().to_numpy()
-    normal, d = define_plane(center, [('X', 45), ('z',45),('y',20)])
+    normal, d = define_plane(center, [('X', 2)])
 
     # Get points near this plane
-    df_near, pts_near = get_points_near_plane(sampled_df, normal, d, threshold=1)
+    df_near, pts_near = get_points_near_plane(sampled_df, normal, d, threshold=2)
     projected_pts = project_points_onto_plane(pts_near, normal, center)
     print(projected_pts)
 
@@ -213,7 +213,7 @@ def visualize_points(df, colors, title, projected_pts, normal=None, center=None)
         ax2.set_ylim(ylim)
         ax2.set_aspect('equal')
 
-    set_axes_equal_3d(ax1)
+    # set_axes_equal_3d(ax1)
 
     plt.tight_layout()
     plt.show()

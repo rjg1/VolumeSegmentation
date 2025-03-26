@@ -6,22 +6,27 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
-from shapely.affinity import translate, rotate
+from shapely.affinity import scale, translate, rotate
 from scipy.optimize import linear_sum_assignment
 
-NUM_ELLIPSES = 15
+NUM_ELLIPSES = 5
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
 ANGLE_ROTATE_MAX = 45 # Max angle to rotate ROIs when comparing
 # Base data dimensions
-NUM_POINTS = 100
+NUM_POINTS = 200
 RADIUS_X = 4
 RADIUS_Y = 2
 # Transformations for second set of data
 TRANSFORM_ROTATION = 30
 X_SHIFT = 10
 Y_SHIFT = -7
+# Image dimensions
+X_MIN = 0
+X_MAX = 100
+Y_MIN = 0
+Y_MAX = 100
 
 # Function to create an ellipse as a polygon
 def ellipse_polygon(center_x, center_y, radius_x, radius_y, angle_deg=0, num_points=100):
@@ -47,7 +52,9 @@ def main():
         cy = random.uniform(20, 80)
         angle = random.uniform(0, 360)
         intensity = random.uniform(0, 1)
-        ellipse = ellipse_polygon(center_x=cx, center_y=cy, radius_x=RADIUS_X, radius_y=RADIUS_Y, angle_deg=angle)
+        rad_x = random.uniform(2,5)
+        rad_y = random.uniform(2,5)
+        ellipse = ellipse_polygon(center_x=cx, center_y=cy, radius_x=rad_x, radius_y=rad_y, angle_deg=angle)
         ellipses.append(ellipse)
         ellipse_intensities.append(intensity)
     for i in range(len(ellipses)):
@@ -57,7 +64,7 @@ def main():
         intensity_modifier = random.uniform(90,100) # Slightly modify intensity
         transformed_intensities.append(ellipse_intensities[i] * (intensity_modifier / 100))
 
-    # Plot initial setup of points
+    # # Plot initial setup of points
     # Normalize intensities for colormap
     norm = mcolors.Normalize(vmin=0, vmax=1)
     cmap = cm.Greys_r
@@ -92,6 +99,38 @@ def main():
     matches=best_matches,
     title=f"Aligned Polygons @ {best_angle}°, Avg IoU = {max_avg_IoU:.2%}"
 )
+
+    # Define subwindow in input space
+    window_center = (60, 30)
+    window_width = 20
+    window_height = 20
+
+    # Define target display size (e.g., normalized space or canvas)
+    target_width = 100
+    target_height = 100
+
+    # Get zoomed polygons
+    zoomed_polys = zoom_polygons_to_window(
+        transformed_ellipses,
+        window_center=window_center,
+        window_width=window_width,
+        window_height=window_height,
+        target_width=target_width,
+        target_height=target_height
+    )
+
+    fig, ax = plt.subplots()
+    for poly in zoomed_polys:
+        x, y = poly.exterior.xy
+        ax.fill(x, y, alpha=0.5, edgecolor='black')
+
+    ax.set_xlim(0, target_width)
+    ax.set_ylim(0, target_height)
+    ax.set_aspect('equal')
+    ax.set_title("Zoomed Polygon View")
+    plt.grid(True)
+    plt.show()
+
 
 def align_polygons(set1, set2, intensity1, intensity2):
     # Initialize return variables
@@ -309,6 +348,24 @@ def apply_transformations(polygon, dx=0, dy=0, rotation_deg=0):
     return Polygon(rotated)
 
 
+
+def zoom_polygons_to_window(polygons, window_center, window_width, window_height, target_width, target_height):
+    x0, y0 = window_center
+
+    # Step 1: Move window_center to origin
+    translated = [translate(poly, xoff=-x0, yoff=-y0) for poly in polygons]
+
+    # Step 2: Scale relative to origin
+    xfact = target_width / window_width
+    yfact = target_height / window_height
+    scaled = [scale(poly, xfact=xfact, yfact=yfact, origin=(0, 0)) for poly in translated]
+
+    # Step 3: Shift result into view at (0,0) — move lower-left corner to (0,0)
+    xmin = -window_width / 2 * xfact
+    ymin = -window_height / 2 * yfact
+    shifted = [translate(poly, xoff=-xmin, yoff=-ymin) for poly in scaled]
+
+    return shifted
 
 if __name__ == "__main__":
     main()
