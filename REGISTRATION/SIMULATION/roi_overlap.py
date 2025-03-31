@@ -9,11 +9,11 @@ from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
 from shapely.affinity import scale, translate, rotate
 from scipy.optimize import linear_sum_assignment
 
-NUM_ELLIPSES = 5
+NUM_ELLIPSES = 15
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
-ANGLE_ROTATE_MAX = 45 # Max angle to rotate ROIs when comparing
+ANGLE_ROTATE_MAX = 50 # Max angle to rotate ROIs when comparing
 # Base data dimensions
 NUM_POINTS = 200
 RADIUS_X = 4
@@ -22,6 +22,10 @@ RADIUS_Y = 2
 TRANSFORM_ROTATION = 30
 X_SHIFT = 10
 Y_SHIFT = -7
+ZOOM_X = 3 # 3x zoom
+ZOOM_Y = 3 # 3x zoom
+X_SUBWINDOW = 60 # x coordinate of zoomed window centre point
+Y_SUBWINDOW = 30 # y coodrdinate of zoomed window centre point
 # Image dimensions
 X_MIN = 0
 X_MAX = 100
@@ -46,6 +50,16 @@ def main():
     ellipse_intensities = []
     transformed_ellipses = []
     transformed_intensities = [] 
+
+    # Define subwindow in input space
+    window_center = (X_SUBWINDOW, Y_SUBWINDOW)
+    window_width = X_MAX / ZOOM_X
+    window_height = Y_MAX / ZOOM_Y
+
+    # Define target display size
+    base_width = X_MAX
+    base_height = Y_MAX
+
     # Create a number of randomly placed ellipses
     for _ in range(NUM_ELLIPSES):
         cx = random.uniform(20, 80)
@@ -83,13 +97,76 @@ def main():
         color = cmap(norm(intensity))
         ax.fill(tx, ty, facecolor=color, edgecolor='black', alpha=0.7, linestyle='--')
 
+    ax.set_xlim(0, base_width)
+    ax.set_ylim(0, base_height)
     ax.set_aspect('equal')
     ax.set_title("Original vs Transformed")
     plt.grid(True)
     plt.show()
 
+#     # Align polygons
+#     max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2 = align_polygons(ellipses, transformed_ellipses, ellipse_intensities, transformed_intensities)
+#     print(f"Max_avg_IoU: {max_avg_IoU}, Best Pair: {best_pair}, Best Angle: {best_angle}")
+#     # Show alignment
+#     rotated_poly_set2 = [apply_transformations(poly, rotation_deg=best_angle) for poly in aligned_set2]
+#     plot_aligned_polygons(
+#     set1=ellipses,
+#     set2=rotated_poly_set2,
+#     matches=best_matches,
+#     title=f"Aligned Polygons @ {best_angle}°, Avg IoU = {max_avg_IoU:.2%}"
+# )
+
+
+
+    # Apply zoom to generated dataset
+    zoomed_polys = zoom_polygons_to_window(
+        transformed_ellipses,
+        window_center=window_center,
+        window_width=window_width,
+        window_height=window_height,
+        base_width=base_width,
+        base_height=base_height
+    )
+
+    fig, ax = plt.subplots()
+    for poly in zoomed_polys:
+        x, y = poly.exterior.xy
+        ax.fill(x, y, alpha=0.5, edgecolor='black')
+
+    ax.set_xlim(0, base_width)
+    ax.set_ylim(0, base_height)
+    ax.set_aspect('equal')
+    ax.set_title("Zoomed Polygon View")
+    plt.grid(True)
+    plt.show()
+
+    # Extract polygons within subwindow (re-polygonizing edge polygons)
+    extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, window_center, base_width, base_height)
+    print(zoomed_polys)
+
+    # Remove zoom from generated dataset
+    unzoomed_polys = unzoom_polygons_from_window(
+        extracted_polys,
+        window_center=window_center,
+        window_width=window_width,
+        window_height=window_height,
+        base_width=base_width,
+        base_height=base_height,
+    )
+
+    fig, ax = plt.subplots()
+    for poly in unzoomed_polys:
+        x, y = poly.exterior.xy
+        ax.fill(x, y, alpha=0.5, edgecolor='black')
+    ax.set_aspect('equal')
+    ax.set_xlim(0, base_width)
+    ax.set_ylim(0, base_height)
+    ax.set_title("Zoomed Polygon View")
+    plt.grid(True)
+    plt.show()
+
     # Align polygons
-    max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2 = align_polygons(ellipses, transformed_ellipses, ellipse_intensities, transformed_intensities)
+    max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2 = align_polygons(ellipses, unzoomed_polys, ellipse_intensities, extracted_intensities)
     print(f"Max_avg_IoU: {max_avg_IoU}, Best Pair: {best_pair}, Best Angle: {best_angle}")
     # Show alignment
     rotated_poly_set2 = [apply_transformations(poly, rotation_deg=best_angle) for poly in aligned_set2]
@@ -100,44 +177,14 @@ def main():
     title=f"Aligned Polygons @ {best_angle}°, Avg IoU = {max_avg_IoU:.2%}"
 )
 
-    # Define subwindow in input space
-    window_center = (60, 30)
-    window_width = 20
-    window_height = 20
 
-    # Define target display size (e.g., normalized space or canvas)
-    target_width = 100
-    target_height = 100
-
-    # Get zoomed polygons
-    zoomed_polys = zoom_polygons_to_window(
-        transformed_ellipses,
-        window_center=window_center,
-        window_width=window_width,
-        window_height=window_height,
-        target_width=target_width,
-        target_height=target_height
-    )
-
-    fig, ax = plt.subplots()
-    for poly in zoomed_polys:
-        x, y = poly.exterior.xy
-        ax.fill(x, y, alpha=0.5, edgecolor='black')
-
-    ax.set_xlim(0, target_width)
-    ax.set_ylim(0, target_height)
-    ax.set_aspect('equal')
-    ax.set_title("Zoomed Polygon View")
-    plt.grid(True)
-    plt.show()
-
-
-def align_polygons(set1, set2, intensity1, intensity2):
+def align_polygons(set1, set2, intensity1, intensity2, minx=X_MIN, maxx = X_MAX, miny = Y_MIN, maxy = Y_MAX):
     # Initialize return variables
     max_avg_IoU = 0 # Best percent match
     best_pair = None
     best_angle = None
     best_matches = []
+    # TODO Work out area to include of original set based on zoom of second set
     # Normalize both intensity lists - TODO may need outlier removal in real data
     intensity1_norm = normalize(intensity1)
     intensity2_norm = normalize(intensity2)
@@ -202,45 +249,65 @@ def align_polygons(set1, set2, intensity1, intensity2):
     # Return best pairing and max IoU
     return max_avg_IoU, best_pair, best_angle, best_matches, anchor_pairings[best_pair]['aligned_set2']
     
+# Takes in a list of polygons and returns only those within an area. Polygons partially inside area are
+# re-polygonized
+def extract_polygons(zoomed_polys, transformed_intensities, window_center, base_width, base_height):
+    extracted_polys = []
+    extracted_intensities = []
+
+    for i in range(len(zoomed_polys)):
+        poly = zoomed_polys[i]
+        pxmin, pymin, pxmax, pymax = poly.bounds
+        if pxmin >= 0 and pymin >= 0 and pxmax <= base_width and pymax <= base_height:  # polygon fully fits already
+            extracted_polys.append(poly)
+            extracted_intensities.append(transformed_intensities[i])
+        else:
+            # get points which lie in these bounds
+            coords_in_bounds = []
+            for coord in list(poly.exterior.coords):
+                if coord[0] >= 0 and coord[0] <= base_width and coord[1] >= 0 and coord[1] <= base_height:
+                    coords_in_bounds.append(coord)
+                    
+            if len(coords_in_bounds) > 3:
+                extracted_polys.append(Polygon(coords_in_bounds))
+                extracted_intensities.append(transformed_intensities[i])
+
+    return extracted_polys, extracted_intensities
+
 
 def plot_aligned_polygons(set1, set2, matches, title="Polygon Alignment"):
     fig, ax = plt.subplots(figsize=(10, 8))
-    patches = []
-    colors = []
-
-    minx, miny, maxx, maxy = float('inf'), float('inf'), float('-inf'), float('-inf')
+    blue_patches, blue_colors = [], []
+    red_patches, red_colors = [], []
+    purple_patches, purple_colors = [], []
 
     for i1, i2 in matches:
         poly1 = set1[i1]
         poly2 = set2[i2]
 
-        # Update bounds
-        for poly in [poly1, poly2]:
-            bounds = poly.bounds
-            minx, miny = min(minx, bounds[0]), min(miny, bounds[1])
-            maxx, maxy = max(maxx, bounds[2]), max(maxy, bounds[3])
+        # Blue
+        blue_patches.append(MplPolygon(list(poly1.exterior.coords), closed=True))
+        blue_colors.append((0.2, 0.4, 1.0, 0.4))
 
-        # Original in blue
-        patches.append(MplPolygon(list(poly1.exterior.coords), closed=True))
-        colors.append((0.2, 0.4, 1.0, 0.4))  # blue
+        # Red
+        red_patches.append(MplPolygon(list(poly2.exterior.coords), closed=True))
+        red_colors.append((1.0, 0.2, 0.2, 0.4))
 
-        # Transformed in red
-        patches.append(MplPolygon(list(poly2.exterior.coords), closed=True))
-        colors.append((1.0, 0.2, 0.2, 0.4))  # red
-
-        # Intersection in purple
+        # Purple intersection
         inter = poly1.intersection(poly2)
-        if inter.is_empty:
-            continue
-        if isinstance(inter, Polygon):
-            patches.append(MplPolygon(list(inter.exterior.coords), closed=True))
-            colors.append((0.5, 0.2, 0.8, 0.5))  # purple
-        elif isinstance(inter, (MultiPolygon, GeometryCollection)):
-            for geom in inter.geoms:
-                if isinstance(geom, Polygon):
-                    patches.append(MplPolygon(list(geom.exterior.coords), closed=True))
-                    colors.append((0.5, 0.2, 0.8, 0.5))  # purple
+        if not inter.is_empty:
+            if isinstance(inter, Polygon):
+                purple_patches.append(MplPolygon(list(inter.exterior.coords), closed=True))
+                purple_colors.append((0.5, 0.2, 0.8, 0.5))
+            elif isinstance(inter, (MultiPolygon, GeometryCollection)):
+                for geom in inter.geoms:
+                    if isinstance(geom, Polygon):
+                        purple_patches.append(MplPolygon(list(geom.exterior.coords), closed=True))
+                        purple_colors.append((0.5, 0.2, 0.8, 0.5))
 
+    # Combine in global draw order: blue → red → purple
+    patches = blue_patches + red_patches + purple_patches
+    colors = blue_colors + red_colors + purple_colors
     if not patches:
         print("No matches or nothing to draw.")
         return
@@ -248,8 +315,8 @@ def plot_aligned_polygons(set1, set2, matches, title="Polygon Alignment"):
     p = PatchCollection(patches, facecolors=colors, edgecolors='black', linewidths=1)
     ax.add_collection(p)
 
-    ax.set_xlim(minx - 5, maxx + 5)
-    ax.set_ylim(miny - 5, maxy + 5)
+    ax.set_xlim(X_MIN, X_MAX)
+    ax.set_ylim(Y_MIN, Y_MAX)
     ax.set_aspect('equal')
     ax.set_title(title)
     ax.grid(True)
@@ -260,7 +327,8 @@ def compute_average_iou(set1, set2, matches):
     ious = []
     for i1, i2 in matches:
         if i1 == -1 or i2 == -1: # Check for case where ROI is unmatched
-            ious.append(0)
+            # ious.append(0) # punish unmatched rois
+            continue # ignore unmatched rois
         else:
             poly1 = set1[i1]
             poly2 = set2[i2]
@@ -330,81 +398,81 @@ def normalize(intensities):
     max_val = max(intensities)
     return [(i - min_val) / (max_val - min_val) for i in intensities]
 
-def apply_transformations(polygon, dx=0, dy=0, rotation_deg=0):
+def apply_transformations(polygon, dx=0, dy=0, rotation_deg=0, rotation_origin=None):
     coords = np.array(polygon.exterior.coords[:-1])  # exclude duplicate last point
-    centroid = coords.mean(axis=0)  # centroid pre-transform
 
-    # Rotate around original centroid
+    # Set rotation origin
+    if rotation_origin is None:
+        origin = coords.mean(axis=0)  # fallback to centroid
+    else:
+        origin = np.array(rotation_origin)
+
+    # Rotate around the specified origin
     theta = np.radians(rotation_deg)
-    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],
-                                [np.sin(theta),  np.cos(theta)]])
-    
-    coords_centered = coords - centroid
-    rotated = coords_centered @ rotation_matrix.T + centroid
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta),  np.cos(theta)]
+    ])
 
-    # Then translate the rotated polygon
+    coords_centered = coords - origin
+    rotated = coords_centered @ rotation_matrix.T + origin
+
+    # Translate the rotated polygon
     rotated += np.array([dx, dy])
 
     return Polygon(rotated)
 
 
-
-def zoom_polygons_to_window(polygons, window_center, window_width, window_height, target_width, target_height):
+def zoom_polygons_to_window(polygons, window_center, window_width, window_height, base_width, base_height):
     x0, y0 = window_center
 
-    # Step 1: Move window_center to origin
+    # Move window_center to origin
     translated = [translate(poly, xoff=-x0, yoff=-y0) for poly in polygons]
 
-    # Step 2: Scale relative to origin
-    xfact = target_width / window_width
-    yfact = target_height / window_height
+    #  Scale relative to origin
+    xfact = base_width / window_width
+    yfact = base_height / window_height
+
     scaled = [scale(poly, xfact=xfact, yfact=yfact, origin=(0, 0)) for poly in translated]
 
-    # Step 3: Shift result into view at (0,0) — move lower-left corner to (0,0)
+    # Shift result into view at (0,0) — move lower-left corner to (0,0)
     xmin = -window_width / 2 * xfact
     ymin = -window_height / 2 * yfact
     shifted = [translate(poly, xoff=-xmin, yoff=-ymin) for poly in scaled]
 
     return shifted
 
+def unzoom_polygons_from_window(polygons, window_center, window_width, window_height, base_width, base_height):
+    """
+    Reverses zoom applied by zoom_polygons_to_window.
+
+    Parameters:
+        polygons: Transformed polygons
+        window_center: (x, y) center of the original zoom window
+        window_width, window_height: Size of the original data window
+        base_width, base_height: Size of the target display space used for zooming
+
+    Returns:
+        List of polygons restored to original data space
+    """
+    x0, y0 = window_center
+
+    # Undo final translation applied after scaling
+    xfact = base_width / window_width
+    yfact = base_height / window_height
+
+    xmin = -window_width / 2 * xfact
+    ymin = -window_height / 2 * yfact
+
+    unshifted = [translate(poly, xoff=xmin, yoff=ymin) for poly in polygons]
+
+    # Inverse scale
+    inv_scaled = [scale(poly, xfact=1/xfact, yfact=1/yfact, origin=(0, 0)) for poly in unshifted]
+
+    # Translate origin back to window center
+    restored = [translate(poly, xoff=x0, yoff=y0) for poly in inv_scaled]
+
+    return restored
+
 if __name__ == "__main__":
     main()
-
-
-
-
-# # Create two elliptical polygons
-# ellipse1 = ellipse_polygon(center_x=0, center_y=0, radius_x=4, radius_y=2, angle_deg=0)
-# ellipse2 = ellipse_polygon(center_x=2, center_y=0.5, radius_x=4, radius_y=2, angle_deg=30)
-
-# # Compute intersection and IoU
-# intersection = ellipse1.intersection(ellipse2)
-# union = ellipse1.union(ellipse2)
-
-# iou = intersection.area / union.area * 100
-
-# print(f"Ellipse 1 Area: {ellipse1.area:.2f}")
-# print(f"Ellipse 2 Area: {ellipse2.area:.2f}")
-# print(f"Intersection Area: {intersection.area:.2f}")
-# print(f"Union Area: {union.area:.2f}")
-# print(f"IoU: {iou:.2f}%")
-
-# # Plotting
-# fig, ax = plt.subplots(figsize=(8, 6))
-# x1, y1 = ellipse1.exterior.xy
-# x2, y2 = ellipse2.exterior.xy
-
-# # Draw ellipses
-# ax.fill(x1, y1, alpha=0.5, fc='lightblue', ec='black', label='Ellipse 1')
-# ax.fill(x2, y2, alpha=0.5, fc='salmon', ec='black', label='Ellipse 2')
-
-# # Draw intersection if it exists
-# if not intersection.is_empty:
-#     x_int, y_int = intersection.exterior.xy
-#     ax.fill(x_int, y_int, alpha=0.6, fc='purple', label='Intersection')
-
-# ax.set_aspect('equal')
-# ax.legend()
-# ax.set_title(f"Elliptical Polygon Overlap\nIoU = {iou:.2f}%")
-# ax.grid(True)
-# plt.show()
