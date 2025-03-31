@@ -141,8 +141,7 @@ def main():
     plt.show()
 
     # Extract polygons within subwindow (re-polygonizing edge polygons)
-    extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, window_center, base_width, base_height)
-    print(zoomed_polys)
+    extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height)
 
     # Remove zoom from generated dataset
     unzoomed_polys = unzoom_polygons_from_window(
@@ -178,13 +177,12 @@ def main():
 )
 
 
-def align_polygons(set1, set2, intensity1, intensity2, minx=X_MIN, maxx = X_MAX, miny = Y_MIN, maxy = Y_MAX):
+def align_polygons(set1, set2, intensity1, intensity2):
     # Initialize return variables
     max_avg_IoU = 0 # Best percent match
     best_pair = None
     best_angle = None
     best_matches = []
-    # TODO Work out area to include of original set based on zoom of second set
     # Normalize both intensity lists - TODO may need outlier removal in real data
     intensity1_norm = normalize(intensity1)
     intensity2_norm = normalize(intensity2)
@@ -251,7 +249,7 @@ def align_polygons(set1, set2, intensity1, intensity2, minx=X_MIN, maxx = X_MAX,
     
 # Takes in a list of polygons and returns only those within an area. Polygons partially inside area are
 # re-polygonized
-def extract_polygons(zoomed_polys, transformed_intensities, window_center, base_width, base_height):
+def extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height):
     extracted_polys = []
     extracted_intensities = []
 
