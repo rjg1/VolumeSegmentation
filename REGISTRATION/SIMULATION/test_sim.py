@@ -154,46 +154,37 @@ plt.show()
 ###### FINAL TRANSLATION ##########
 from scipy.spatial.transform import Rotation as R
 
-# Get 3 points: anchor + 2 alignment matches
+# --- Step 1: Get anchor points ---
 anchor_id_a = plane_a.anchor_id
 anchor_id_b = plane_b.anchor_id
 p0a = plane_a._projected_dict[anchor_id_a]
 p0b = plane_b._projected_dict[anchor_id_b]
 
-# Get 2 matched alignment ROIs
+# --- Step 2: Collect matched vectors (excluding anchors if present) ---
 alignment_matches = [(i, j) for i, j in match_data["matches"] if i != anchor_id_a and j != anchor_id_b]
-(id_a1, id_b1), (id_a2, id_b2) = alignment_matches[:2]
 
-p1a = plane_a._projected_dict[id_a1]
-p2a = plane_a._projected_dict[id_a2]
-p1b = plane_b._projected_dict[id_b1]
-p2b = plane_b._projected_dict[id_b2]
+Va = np.stack([plane_a._projected_dict[i] - p0a for i, j in alignment_matches])  # Nx3
+Vb = np.stack([plane_b._projected_dict[j] - p0b for i, j in alignment_matches])  # Nx3
 
-# Step 1: Translate Plane B so anchor aligns
-translation = p0a - p0b
-
-# Step 2: Build vector sets from anchor
-Va = np.stack([p1a - p0a, p2a - p0a], axis=0)  # 2x3
-Vb = np.stack([p1b - p0b, p2b - p0b], axis=0)  # 2x3
-
-# Step 3: Use Kabsch algorithm to get optimal rotation
-# This finds R such that R @ Vb.T ≈ Va.T
+# --- Step 3: Compute optimal rotation matrix using Kabsch algorithm ---
 H = Vb.T @ Va
 U, _, Vt = np.linalg.svd(H)
 R_align = Vt.T @ U.T
 
-# Ensure right-handed (no reflection)
+# Ensure it's a proper rotation (no reflection)
 if np.linalg.det(R_align) < 0:
     Vt[2, :] *= -1
     R_align = Vt.T @ U.T
 
-# Step 4: Apply transformation to all Plane B points
+# --- Step 4: Apply alignment (translation + rotation + scale) ---
 aligned_pts_b = []
+scale = match_data["scale_factor"]
+
 for pt in plane_b.projected_points:
-    shifted = pt + translation                   # Step 1: Translate anchor
-    rotated = R_align @ (shifted - p0a)          # Step 2: Rotate about anchor
-    scaled = rotated * match_data["scale_factor"]  # Step 3: Scale using known factor
-    final = p0a + scaled                         # Step 4: Translate back
+    local_vec = pt - p0b                 # move into local frame
+    rotated = R_align @ local_vec        # rotate into Plane A's orientation
+    scaled = rotated * scale             # scale vectors to match magnitudes
+    final = p0a + scaled                 # move into Plane A's frame
     aligned_pts_b.append(final)
 
 aligned_pts_b = np.array(aligned_pts_b)
