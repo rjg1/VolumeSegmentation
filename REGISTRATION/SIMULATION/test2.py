@@ -39,8 +39,6 @@ print("===")
 print(mags_3d)
 print(mags_2d)
 
-rel_angles = plane.get_relative_angles()
-print(rel_angles)
 
 # --- Generate Surface for Plane ---
 extent = 10
