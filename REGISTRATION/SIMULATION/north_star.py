@@ -198,15 +198,25 @@ def align_polygons(z_planes, new_plane, z_guess = None):
     # For each viable ROI anchor match, determine pairings of all ROIs based off distance
     anchor_pairings = {(z,id1,id2) : {} for z,id1 in anchor_matches for id2 in anchor_matches[(z,id1)]}
 
-    # For new plane, find its anchor ROIs, alignment ROIs, their angles and magnitudes
+    # For new plane, find its anchor ROIs, alignment ROIs, their angles and magnitudes TODO check plane class with 2d data
 
-    # For every anchor ROI in the z-stack, calculate the relative angles and magnitude between it and all combinations of 2 alignment ROIs which may form a plane
-    # Find all possible combinations of alignment ROIs
-    # Make planes and find points sufficiently close
-    # Exclude repeat planes from being made when points are projected
-    # Note their angle and magnitude relative to the new plane. Working with centroid points now
+    # Find all possible combinations of 2 alignment ROIs with each anchor ROI
+    #   For each, make a plane (plane class)
+    #   Make sure angles between anchor/alignment ROIs isn't too steep in XZ
+    #   Also restrict the search range in Z to a +- threshold
+    #   Make planes and find points sufficiently close to also project onto planes
+    #   Exclude repeat planes from being made when points are projected (check for plane equivalence - some kind of fuzzy check? two planes might be very close in this region)
+
+    # For the new plane and each 3D plane in the plane list, compare the match in terms of angle and magnitude, noting the best performers
+
+    # All performers over a certain threshold will move on to the IoU check stage
+
+    # Generate a set of transformations for each point in the new 2D plane to project them into the 3D plane, such that the angular offsets are also preserved, and magnitudes are
+    # scaled relatively 
     
-    # For each plane, compare the 
+    # Once all points are transformed, find the IoU of all points projected onto the 3D plane
+
+    # Do this for all of the aforementioned best performers, and take the maximum IoU.
 
     print(anchor_pairings)
 
