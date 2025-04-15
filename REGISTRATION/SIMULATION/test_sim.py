@@ -119,7 +119,7 @@ plt.show()
 # Plot 3: Final overlay in 3D with all ROIs
 fig3 = plt.figure()
 ax3 = fig3.add_subplot(111, projection='3d')
-ax3.set_title("3️⃣ Final Aligned Points in 3D")
+ax3.set_title("3 Final Aligned Points in 3D")
 
 # Plane A anchor and ROIs
 ax3.scatter(*anchor_a, color='red', s=100)
@@ -148,5 +148,86 @@ ax3.set_xlabel("X")
 ax3.set_ylabel("Y")
 ax3.set_zlabel("Z")
 ax3.grid(True)
+plt.tight_layout()
+plt.show()
+
+###### FINAL TRANSLATION ##########
+from scipy.spatial.transform import Rotation as R
+
+# Get 3 points: anchor + 2 alignment matches
+anchor_id_a = plane_a.anchor_id
+anchor_id_b = plane_b.anchor_id
+p0a = plane_a._projected_dict[anchor_id_a]
+p0b = plane_b._projected_dict[anchor_id_b]
+
+# Get 2 matched alignment ROIs
+alignment_matches = [(i, j) for i, j in match_data["matches"] if i != anchor_id_a and j != anchor_id_b]
+(id_a1, id_b1), (id_a2, id_b2) = alignment_matches[:2]
+
+p1a = plane_a._projected_dict[id_a1]
+p2a = plane_a._projected_dict[id_a2]
+p1b = plane_b._projected_dict[id_b1]
+p2b = plane_b._projected_dict[id_b2]
+
+# Step 1: Translate Plane B so anchor aligns
+translation = p0a - p0b
+
+# Step 2: Build vector sets from anchor
+Va = np.stack([p1a - p0a, p2a - p0a], axis=0)  # 2x3
+Vb = np.stack([p1b - p0b, p2b - p0b], axis=0)  # 2x3
+
+# Step 3: Use Kabsch algorithm to get optimal rotation
+# This finds R such that R @ Vb.T ≈ Va.T
+H = Vb.T @ Va
+U, _, Vt = np.linalg.svd(H)
+R_align = Vt.T @ U.T
+
+# Ensure right-handed (no reflection)
+if np.linalg.det(R_align) < 0:
+    Vt[2, :] *= -1
+    R_align = Vt.T @ U.T
+
+# Step 4: Apply transformation to all Plane B points
+aligned_pts_b = []
+for pt in plane_b.projected_points:
+    shifted = pt + translation                   # Step 1: Translate anchor
+    rotated = R_align @ (shifted - p0a)          # Step 2: Rotate about anchor
+    scaled = rotated * match_data["scale_factor"]  # Step 3: Scale using known factor
+    final = p0a + scaled                         # Step 4: Translate back
+    aligned_pts_b.append(final)
+
+aligned_pts_b = np.array(aligned_pts_b)
+aligned_ids_b = plane_b.projected_ids
+
+# Step 5: Plot result
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.set_title("Final 3D Alignment (Direct Point Matching)")
+
+# Plane A points
+for id_, pt in plane_a._projected_dict.items():
+    ax.scatter(*pt, color='blue')
+    ax.text(*pt, f"A{id_}", color='blue', fontsize=8)
+
+# Transformed B points
+for pt, id_ in zip(aligned_pts_b, aligned_ids_b):
+    ax.scatter(*pt, color='green', marker='x')
+    ax.text(*pt, f"B{id_}", color='green', fontsize=8)
+
+# Draw matched lines
+for i, j in match_data["matches"]:
+    if i in plane_a._projected_dict and j in aligned_ids_b:
+        pt_a = plane_a._projected_dict[i]
+        pt_b = aligned_pts_b[aligned_ids_b.index(j)]
+        ax.plot([pt_a[0], pt_b[0]], [pt_a[1], pt_b[1]], [pt_a[2], pt_b[2]], 'k--', alpha=0.5)
+
+ax.set_xlim(-0.5, 2.5)
+ax.set_ylim(-0.5, 2.5)
+ax.set_zlim(-1, 1)
+
+ax.set_xlabel("X")
+ax.set_ylabel("Y")
+ax.set_zlabel("Z")
+ax.grid(True)
 plt.tight_layout()
 plt.show()

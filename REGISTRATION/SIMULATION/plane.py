@@ -106,13 +106,10 @@ class Plane:
             angles_a_deg = angles_a
             angles_b_deg = angles_b
 
-        print(angles_a_deg)
-        print(angles_b_deg)
-
         # Exclude anchor ROIs
         ids_a = ids_a[1:]
         ids_b = ids_b[1:]
-        print(ids_a, ids_b)
+
         # Normalize and rotate Plane B
         angles_b_rot = [(a + offset_deg) % 360 for a in angles_b_deg]
 
@@ -153,7 +150,6 @@ class Plane:
                             used_b.add(j) # mark as matched
                             break  # only one match per roi pair
 
-        print(angular_diffs)
         return matches, angular_diffs, magnitude_diffs
 
 
@@ -192,7 +188,6 @@ class Plane:
         angle_mse = np.mean(np.square(angular_diffs)) if angular_diffs else float('inf')
 
         if angle_mse >= angle_mse_threshold:
-            print(f"Angle MSE: {angle_mse}, Threshold: {angle_mse_threshold}")
             return {
                 "match": False,
                 "reason": "Failed angle MSE threshold",
