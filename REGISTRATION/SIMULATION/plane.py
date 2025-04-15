@@ -28,7 +28,6 @@ class Plane:
         self.get_relative_angles()
 
         # TODO some equality checking to ensure duplicate planes aren't created
-        # TODO some means to prevent planes at certain angles from being created
 
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
@@ -192,7 +191,6 @@ class Plane:
                 "magnitude_diffs": abs_diffs,
                 "angle_mse": angle_mse,
                 "magnitude_mse": magnitude_mse,
-                "scale_factor": scale
             }
         
         # Compute best-fit scale for magnitudes and MSE
