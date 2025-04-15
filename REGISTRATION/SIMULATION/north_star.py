@@ -7,6 +7,8 @@ from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
 from shapely.affinity import scale, translate, rotate
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.optimize import linear_sum_assignment
 
 NUM_ELLIPSES = 10
@@ -14,8 +16,9 @@ INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be consid
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
 ANGLE_ROTATE_MAX = 50 # Max angle to rotate ROIs when comparing
-ZOOM_DELTA = 2 # +- zoom range to search TODO - currently assuming it is zoomed in, not really support for zoomed out
-ZOOM_INTERVAL = 0.5 # Intervals to search in zoom range
+Z_RANGE = 10 # +- z_gap to search
+Z_GUESS = 1 # Expected z-level to begin search
+XZ_ANGLE_MAX = 30 # Max angle difference between two centroid-difference vectors in the XZ plane
 # Base data dimensions
 NUM_POINTS = 200
 RADIUS_X = 4
@@ -25,8 +28,8 @@ TRANSFORM_ROTATION = 30
 X_SHIFT = 10
 Y_SHIFT = -7
 ZOOM = 3 # 3x zoom
-X_SUBWINDOW = 60 # x coordinate of zoomed window centre point
-Y_SUBWINDOW = 30 # y coodrdinate of zoomed window centre point
+X_SUBWINDOW = 40 # x coordinate of zoomed window centre point
+Y_SUBWINDOW = 60 # y coodrdinate of zoomed window centre point
 # Image dimensions
 X_MIN = 0
 X_MAX = 100
@@ -72,48 +75,47 @@ def main():
         ellipse_intensities.append(intensity)
     for i in range(len(ellipses)):
         ellipse = ellipses[i]
-        transformed = apply_transformations(ellipse, dx=X_SHIFT, dy=Y_SHIFT, rotation_deg=TRANSFORM_ROTATION)
+        transformed = apply_transformations(ellipse, dx=0, dy=0, rotation_deg=TRANSFORM_ROTATION, rotation_origin=(0,0))
         transformed_ellipses.append(transformed)
         intensity_modifier = random.uniform(90,100) # Slightly modify intensity
         transformed_intensities.append(ellipse_intensities[i] * (intensity_modifier / 100))
 
+    # Make dict of {z: {id: [(x,y)]}} for each z-plane 
+    z_planes = {0:{}}
+    for id, poly in enumerate(ellipses):
+        if not z_planes[0].get(id, None):
+            z_planes[0][id] = {}
+            z_planes[0][id]['coords'] = []
+        z_planes[0][id]['intensity'] = ellipse_intensities[id]
+        for coord in list(poly.exterior.coords):
+            z_planes[0][id]['coords'].append(coord)
+    z_planes = dict(sorted(z_planes.items())) # Sort in ascending z, allowing volumes to be built from the ground up
+
     # # Plot initial setup of points
-    # Normalize intensities for colormap
-    norm = mcolors.Normalize(vmin=0, vmax=1)
-    cmap = cm.Greys_r
+    # # Normalize intensities for colormap
+    # norm = mcolors.Normalize(vmin=0, vmax=1)
+    # cmap = cm.Greys_r
 
-    fig, ax = plt.subplots()
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
 
-    # Plot original ellipses
-    for ellipse, intensity in zip(ellipses, ellipse_intensities):
-        ox, oy = ellipse.exterior.xy
-        color = cmap(norm(intensity))
-        ax.fill(ox, oy, facecolor=color, edgecolor='black', alpha=0.5)
+    # # Plot only original ellipses on plane z=0
+    # for ellipse, intensity in zip(ellipses, ellipse_intensities):
+    #     ox, oy = ellipse.exterior.xy
+    #     oz = np.zeros_like(ox)  # z=0 plane
+    #     verts = [list(zip(ox, oy, oz))]  # List of 3D vertices for the polygon
+    #     face_color = cmap(norm(intensity))
+    #     poly = Poly3DCollection(verts, facecolors=face_color, edgecolors='black', alpha=0.6)
+    #     ax.add_collection3d(poly)
 
-    # Plot transformed ellipses
-    for ellipse, intensity in zip(transformed_ellipses, transformed_intensities):
-        tx, ty = ellipse.exterior.xy
-        color = cmap(norm(intensity))
-        ax.fill(tx, ty, facecolor=color, edgecolor='black', alpha=0.7, linestyle='--')
-
-    ax.set_xlim(0, base_width)
-    ax.set_ylim(0, base_height)
-    ax.set_aspect('equal')
-    ax.set_title("Original vs Transformed")
-    plt.grid(True)
-    plt.show()
-
-#     # Align polygons
-#     max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2, best_zoom = align_polygons(ellipses, transformed_ellipses, ellipse_intensities, transformed_intensities)
-#     print(f"Max_avg_IoU: {max_avg_IoU}, Best Pair: {best_pair}, Best Angle: {best_angle}")
-#     # Show alignment
-#     rotated_poly_set2 = [apply_transformations(poly, rotation_deg=best_angle) for poly in aligned_set2]
-#     plot_aligned_polygons(
-#     set1=ellipses,
-#     set2=rotated_poly_set2,
-#     matches=best_matches,
-#     title=f"Aligned Polygons @ {best_angle}°, Avg IoU = {max_avg_IoU:.2%}"
-# )
+    # ax.set_xlim(0, base_width)
+    # ax.set_ylim(0, base_height)
+    # ax.set_zlim(0, 1)
+    # ax.set_xlabel('X')
+    # ax.set_ylabel('Y')
+    # ax.set_zlabel('Z')
+    # ax.set_title("Generated ellipses on a z-plane")
+    # plt.show()
 
     # Apply zoom to generated dataset
     zoomed_polys = zoom_polygons_to_window(
@@ -125,164 +127,100 @@ def main():
         yfact=ZOOM
     )
 
-    fig, ax = plt.subplots()
-    for poly in zoomed_polys:
-        x, y = poly.exterior.xy
-        ax.fill(x, y, alpha=0.5, edgecolor='black')
-
-    ax.set_xlim(0, base_width)
-    ax.set_ylim(0, base_height)
-    ax.set_aspect('equal')
-    ax.set_title("Zoomed Polygon View")
-    plt.grid(True)
-    plt.show()
-
     # Extract polygons within subwindow (re-polygonizing edge polygons)
     extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height)
 
-    # Remove zoom from generated dataset
-    unzoomed_polys = unzoom_polygons_from_window(
-        extracted_polys,
-        window_center=window_center,
-        base_width=X_MAX,
-        base_height=Y_MAX,
-        xfact=ZOOM,
-        yfact=ZOOM
-    )
+    # fig, ax = plt.subplots()
+    # for poly in extracted_polys:
+    #     x, y = poly.exterior.xy
+    #     ax.fill(x, y, alpha=0.5, edgecolor='black')
+    # ax.set_aspect('equal')
+    # ax.set_xlim(0, base_width)
+    # ax.set_ylim(0, base_height)
+    # ax.set_title("Zoomed Polygon View")
+    # plt.grid(True)
+    # plt.show()
 
-    fig, ax = plt.subplots()
-    for poly in unzoomed_polys:
-        x, y = poly.exterior.xy
-        ax.fill(x, y, alpha=0.5, edgecolor='black')
-    ax.set_aspect('equal')
-    ax.set_xlim(0, base_width)
-    ax.set_ylim(0, base_height)
-    ax.set_title("Zoomed Polygon View")
-    plt.grid(True)
-    plt.show()
+    # Modify new plane data to fit initial dataset
+    new_plane = {}
+    for id, poly in enumerate(zoomed_polys):
+        if not new_plane.get(id, None):
+            new_plane[id] = {}
+            new_plane[id]['coords'] = []
+        new_plane[id]['intensity'] = ellipse_intensities[id]
+        for coord in list(poly.exterior.coords):
+            new_plane[id]['coords'].append(coord)
 
     # Align polygons
-    # Generate a zoom guess
-    min_zoom = ZOOM - ZOOM_DELTA
-    max_zoom = ZOOM + ZOOM_DELTA
-    zoom_options = [round(min_zoom + i * ZOOM_INTERVAL, 2) for i in range(int((max_zoom - min_zoom) / ZOOM_INTERVAL) + 1)]
-    zoom_guess = random.choice(zoom_options)
-    print(f"Guess zoom at: {zoom_guess}")
-    max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2, best_zoom = align_polygons(ellipses, 
-                                                                                               extracted_polys, 
-                                                                                               ellipse_intensities, 
-                                                                                               extracted_intensities, 
-                                                                                               zoom_guess = zoom_guess)
-    # max_avg_IoU, best_pair, best_angle, best_matches, aligned_set2, best_zoom = align_polygons(ellipses, 
-    #                                                                                         unzoomed_polys, 
-    #                                                                                         ellipse_intensities, 
-    #                                                                                         extracted_intensities, 
-    #                                                                                         zoom_guess = None)
-    print(f"Max_avg_IoU: {max_avg_IoU}, Best Pair: {best_pair}, Best Angle: {best_angle}, Best zoom: {best_zoom}")
-    # Show alignment
-    rotated_poly_set2 = [apply_transformations(poly, rotation_deg=best_angle) for poly in aligned_set2]
-    plot_aligned_polygons(
-    set1=ellipses,
-    set2=rotated_poly_set2,
-    matches=best_matches,
-    title=f"Aligned Polygons @ {best_angle}°, Avg IoU = {max_avg_IoU:.2%}"
-)
+    align_polygons(z_planes, new_plane, z_guess=1)
 
 
-def align_polygons(set1, set2, intensity1, intensity2, zoom_guess = None):
+def align_polygons(z_planes, new_plane, z_guess = None):
     # Initialize return variables
     max_avg_IoU = 0 # Best percent match
     best_pair = None
     best_angle = None
-    best_zoom = ZOOM
+    best_z = None
+    yaw = None
+    pitch = None
     best_matches = []
-    # Zoom values to be tested # TODO Fix zooming in a bit more, fractional is a bit weird here (maybe call function as well)
-    if zoom_guess is not None:
-        zoom_values = np.arange(
-                max(zoom_guess - ZOOM_DELTA, ZOOM_INTERVAL),
-                zoom_guess + ZOOM_DELTA + 0.001,
-                ZOOM_INTERVAL
-            )
-    else:
-        zoom_values = [ZOOM]
+
     # Normalize both intensity lists - TODO may need outlier removal in real data
-    intensity1_norm = normalize(intensity1)
-    intensity2_norm = normalize(intensity2)
-    # Determine matching candidates as ROIs with intensity above the designated threshold
-    potential_anchors = [i for i, intensity in enumerate(intensity1_norm) if intensity > INTENSITY_SELECTION_THRESHOLD]
+    # Normalize each plane in the passed in dataset
+    for z in z_planes:
+        id_list = list(z_planes[z].keys())
+        intensity_list = [z_planes[z][id]["intensity"] for id in id_list]
+        normalized = normalize(intensity_list)
+
+        for id, norm_val in zip(id_list, normalized):
+            z_planes[z][id]["intensity"] = norm_val
+        
+    # Normalize new plane intensities
+    id_list = list(new_plane.keys())
+    intensity_list = [new_plane[id]["intensity"] for id in id_list]
+    normalized = normalize(intensity_list)
+    
+    for id, norm_val in zip(id_list, normalized):
+        new_plane[id]["intensity"] = norm_val
+
+    # Determine matching candidates as ROIs with intensity above the designated threshold TODO Optimize for z-restriction/z-guess
+    potential_anchors = [(z, id) for z in z_planes for id in z_planes[z] if z_planes[z][id]["intensity"] > INTENSITY_SELECTION_THRESHOLD]
     # For each ROI candidate, determine viable ROIs in other set it can be matched with (within threshold)
     # Make dictionary to hold matching Ids
-    anchor_matches = {i:[] for i in potential_anchors}
-    for i in anchor_matches:
-        for j, intensity2 in enumerate(intensity2_norm):
-            intensity1 = intensity1_norm[i]
+    anchor_matches = {(z,id):[] for z,id in potential_anchors}
+    for anchor in anchor_matches:
+        z, id =  anchor
+        for id2 in new_plane:
+            intensity1 = z_planes[z][id]["intensity"]
+            intensity2 = new_plane[id2]["intensity"]
             if abs(intensity1 - intensity2) <= (INTENSITY_DELTA_PERC * intensity1):
-                anchor_matches[i].append(j)
+                anchor_matches[(z,id)].append(id2)
     # For each viable ROI anchor match, determine pairings of all ROIs based off distance
-    anchor_pairings = {(i,j) : {} for i in anchor_matches for j in anchor_matches[i]}
+    anchor_pairings = {(z,id1,id2) : {} for z,id1 in anchor_matches for id2 in anchor_matches[(z,id1)]}
 
-    for pair in anchor_pairings:
-        # Apply all zoom levels for this anchor pairing, then work out shift
-        for zoom in zoom_values:
-            anchor_pairings[pair][zoom] = {}
-            shift_vectors = [] # Store which shifts have already occurred at this zoom level
-            checked_matches = [] # Stores which assignments have already occurred at this zoom level
-            aligned_set2 = [] # List of polygons which are aligned to the anchor set 1 polygon
-            if zoom_guess is not None:
-                set2_unzoomed = unzoom_polygons_from_window(set2, (X_SUBWINDOW, Y_SUBWINDOW), X_MAX, Y_MAX, zoom, zoom)
-            else:
-                set2_unzoomed = set2
+    # For new plane, find its anchor ROIs, alignment ROIs, their angles and magnitudes
 
-            set1_id, set2_id = pair
+    # For every anchor ROI in the z-stack, calculate the relative angles and magnitude between it and all combinations of 2 alignment ROIs which may form a plane
+    # Find all possible combinations of alignment ROIs
+    # Make planes and find points sufficiently close
+    # Exclude repeat planes from being made when points are projected
+    # Note their angle and magnitude relative to the new plane. Working with centroid points now
+    
+    # For each plane, compare the 
 
+    print(anchor_pairings)
 
-            shift_vector = np.array(set1[set1_id].centroid.coords[0]) - np.array(set2_unzoomed[set2_id].centroid.coords[0])
-            # Test to see if this anchor shift has already occurred
-            if is_shift_duplicate(shift_vector, shift_vectors):
-                print(f"Pairing {pair} has already been tested using shift vector {shift_vector}")
-                continue
-            else:
-                shift_vectors.append(shift_vector)
-            # Transform x/y coords of set2 ellipses such that the pairing are overlaid
-            for poly in set2_unzoomed:
-                aligned = translate(poly, xoff=shift_vector[0], yoff=shift_vector[1])
-                aligned_set2.append(aligned)
-            # Store polygons for rotation later
-            anchor_pairings[pair][zoom]['aligned_set2'] = aligned_set2
-            # Match polygons in set1 and aligned set 2 based off centroid distance
-            matches = match_by_centroid_distance(set1, aligned_set2)
-            # If these matches have been evaluated already, ignore them
-            if matches in checked_matches:
-                print(f"Match assignments for ROIs have been evaluated already")
-                continue
-            else:
-                checked_matches.append(matches)
-            anchor_pairings[pair][zoom]['matches'] = matches
-            # print(matches)
-
-            # For each pairing, generate a set of rotated polygons, each rotated at +- ANGLE_DELTA_DEG up to ANGLE_ROTATE_MAX and determine % degree overlap
-            for angle in range(0, ANGLE_ROTATE_MAX + 1, ANGLE_DELTA_DEG):
-                for direction in [-1, 1]: # Iterate over positive and negative angles
-                    signed_angle = angle * direction
-                    # Create a new set of polygons rotated at the desired angle
-                    rotated_poly_set2 = [apply_transformations(poly, rotation_deg=signed_angle) for poly in anchor_pairings[pair][zoom]['aligned_set2']]
-                    # Calculate average IoU across this match
-                    avg_iou = compute_average_iou(set1, rotated_poly_set2, anchor_pairings[pair][zoom]['matches'])
-                    if 'iou' not in anchor_pairings[pair][zoom]:
-                        anchor_pairings[pair][zoom]['iou'] = {}
-                    anchor_pairings[pair][zoom]['iou'][signed_angle] = avg_iou
-                    # Debug
-                    # print(f"Aligning {pair} at Zoom: {zoom} with {signed_angle} degrees shift. Avg IoU: {avg_iou}")
-                    if avg_iou > max_avg_IoU:
-                        max_avg_IoU = avg_iou
-                        best_pair = pair
-                        best_angle = signed_angle
-                        best_matches = matches
-                        best_zoom = zoom
+    return
 
     # Return best pairing and max IoU
     return max_avg_IoU, best_pair, best_angle, best_matches, anchor_pairings[best_pair][best_zoom]['aligned_set2'], best_zoom
-    
+
+
+def compute_centroid(coords):
+    coords = np.array(coords)
+    return np.mean(coords, axis=0)
+
+
 # Takes in a list of polygons and returns only those within an area. Polygons partially inside area are
 # re-polygonized
 def extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height):
@@ -494,11 +432,6 @@ def unzoom_polygons_from_window(polygons, window_center, base_width, base_height
         return polygons
     
     x0, y0 = window_center
-
-    if xfact <= 0:
-        xfact = ZOOM_INTERVAL
-    if yfact <= 0:
-        yfact = ZOOM_INTERVAL
 
     window_width = base_width / xfact
     window_height = base_height / yfact
