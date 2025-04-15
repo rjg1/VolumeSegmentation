@@ -23,9 +23,7 @@ class Plane:
         # Initialize angles and magnitude lists
         self.angles = []
         self.magnitudes = []
-        self.relative_angles = []
         self.angles_and_magnitudes()
-        self.get_relative_angles()
 
         # TODO some equality checking to ensure duplicate planes aren't created
 
@@ -42,7 +40,7 @@ class Plane:
     # Builds a list of angles into a set of bins [0,...359] for each degree.
     # Gaussian blurs points into nearby bins for partial matches assuming angles are off
 
-    def _build_angular_signal(angle_list, resolution=360, blur_sigma=2.0, radians = True):
+    def _build_angular_signal(self, angle_list, resolution=360, blur_sigma=2.0, radians = True):
         """
         Converts a list of angles (in degrees) into a circular signal vector.
 
@@ -62,7 +60,7 @@ class Plane:
             signal[idx] += 1 # Add a match to that angle
         return gaussian_filter1d(signal, sigma=blur_sigma, mode='wrap') # Blur values between buckets
 
-    def _match_circular_signals(signal_a, signal_b):
+    def _match_circular_signals(self, signal_a, signal_b):
         """
         Performs circular cross-correlation to find the best alignment.
 
@@ -83,8 +81,7 @@ class Plane:
         max_score = circular_corr[best_offset] # get best score
         return best_offset, max_score, circular_corr
     
-    def _fuzzy_bin_match(
-        angles_a, mags_a, angles_b, mags_b,
+    def _fuzzy_bin_match(self, angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, 
         offset_deg, resolution=360, window=2, radians = True
     ):
         """
@@ -109,6 +106,13 @@ class Plane:
             angles_a_deg = angles_a
             angles_b_deg = angles_b
 
+        print(angles_a_deg)
+        print(angles_b_deg)
+
+        # Exclude anchor ROIs
+        ids_a = ids_a[1:]
+        ids_b = ids_b[1:]
+        print(ids_a, ids_b)
         # Normalize and rotate Plane B
         angles_b_rot = [(a + offset_deg) % 360 for a in angles_b_deg]
 
@@ -133,7 +137,7 @@ class Plane:
 
         for angle_a in bucket_a: # iterate through all angles in plane A
             for delta in range(-window, window + 1): # match over a certain offset window
-                angle_b = (angle_b + delta) % resolution # wrap offset window around 360 degrees if necessary
+                angle_b = (angle_a + delta) % resolution # wrap offset window around 360 degrees if necessary
                 for i in bucket_a[angle_a]: # for all ROIs at this offset (assumed 1 in most cases)
                     for j in bucket_b.get(angle_b, []): # for all ROIs at the corresponding offset (assumed 0-1) 
                         if i not in used_a and j not in used_b: # match immediately and break if execution reaches here
@@ -141,7 +145,7 @@ class Plane:
                             angle_diff = min(angle_diff, 360 - angle_diff) # take the minimum of the two directions in angle
                             mag_diff = abs(mags_a[i] - mags_b[j]) # get the absolute magnitude diff
 
-                            matches.append((i, j))
+                            matches.append((ids_a[i], ids_b[j])) # append roi ids for matches
                             angular_diffs.append(angle_diff)
                             magnitude_diffs.append(mag_diff)
 
@@ -149,13 +153,16 @@ class Plane:
                             used_b.add(j) # mark as matched
                             break  # only one match per roi pair
 
+        print(angular_diffs)
         return matches, angular_diffs, magnitude_diffs
 
 
     # Full pipeline for matching planes
-    def match_planes(self, plane_b, blur_sigma = 2, angle_tolerance = 3, min_matches = 2, angle_mse_threshold = 1.0, magnitude_mse_threshold = 1.0):
+    def match_planes(self, plane_b, blur_sigma = 2, angle_tolerance = 2, min_matches = 2, angle_mse_threshold = 1.0, magnitude_mse_threshold = 1.0):
         angles_a, mags_a = self.angles_and_magnitudes()
         angles_b, mags_b = plane_b.angles_and_magnitudes()
+
+        ids_a, ids_b = self.projected_ids, plane_b.projected_ids
 
         # Calculate best rotational offset
         signal_a = self._build_angular_signal(angles_a, resolution=360, blur_sigma=blur_sigma)
@@ -163,7 +170,11 @@ class Plane:
         offset, score, correlation = self._match_circular_signals(signal_a, signal_b)
         
         # Find angle matches and compute angular error + magnitudal error
-        matches, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, offset, window = angle_tolerance)
+        matches, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset, window = angle_tolerance)
+
+        # Map roi ids to an index in the magnitudes array
+        id_to_idx_a = {roi_id: idx-1 for idx, roi_id in enumerate(ids_a)}
+        id_to_idx_b = {roi_id: idx-1 for idx, roi_id in enumerate(ids_b)}
 
         # Check minimum match count
         if len(matches) < min_matches:
@@ -180,7 +191,8 @@ class Plane:
         # Compute angle MSE
         angle_mse = np.mean(np.square(angular_diffs)) if angular_diffs else float('inf')
 
-        if angle_mse <= angle_mse_threshold:
+        if angle_mse >= angle_mse_threshold:
+            print(f"Angle MSE: {angle_mse}, Threshold: {angle_mse_threshold}")
             return {
                 "match": False,
                 "reason": "Failed angle MSE threshold",
@@ -188,15 +200,14 @@ class Plane:
                 "score": score,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
-                "magnitude_diffs": abs_diffs,
-                "angle_mse": angle_mse,
-                "magnitude_mse": magnitude_mse,
+                "magnitude_diffs": magnitude_diffs,
+                "angle_mse": angle_mse
             }
         
         # Compute best-fit scale for magnitudes and MSE
         # Extract the magnitudes of all matched vectors
-        matched_a = np.array([mags_a[i] for i, j in matches])
-        matched_b = np.array([mags_b[j] for i, j in matches])
+        matched_a = np.array([mags_a[id_to_idx_a[i]] for i, j in matches])
+        matched_b = np.array([mags_b[id_to_idx_b[j]] for i, j in matches])
         # Solve the linear least squares problem with the closed form solution
         numerator = np.sum(matched_a * matched_b) # Sum of the product of all elements index wise
         denominator = np.sum(matched_b ** 2)
@@ -224,20 +235,18 @@ class Plane:
 
 
     def angles_and_magnitudes(self):
-        angles = []
-        magnitudes = []
-
-        # Compute anchor point in plane
         anchor_proj = self._project_point(self.anchor_point)
-
-        # Get first alignment vector for u-axis
         align_proj = self._project_point(self.alignment_points[0])
         u = (align_proj - anchor_proj)
         u = u / np.linalg.norm(u)
         v = np.cross(self.normal, u)
 
+        angle_mag_data = []
+        anchor_entry = None
+
         for i, pt in zip(self.projected_ids, self.projected_points):
             if i == self.anchor_id:
+                anchor_entry = (i, pt)  # Save anchor separately
                 continue
             vec = pt - anchor_proj
             x = np.dot(vec, u)
@@ -246,43 +255,59 @@ class Plane:
             if np.isclose(angle, 2 * np.pi):
                 angle = 0.0
             magnitude = np.linalg.norm(vec)
-            angles.append(angle)
-            magnitudes.append(magnitude)
+            angle_mag_data.append((angle, magnitude, i, pt))
 
-        sorted_indices = np.argsort(angles)
-        angles = [angles[i] for i in sorted_indices]
-        magnitudes = [magnitudes[i] for i in sorted_indices]
+        # Sort angle/magnitude data
+        angle_mag_data.sort(key=lambda x: x[0])
 
-        self.angles = angles
-        self.magnitudes = magnitudes
+        # Reassign sorted data
+        self.angles = [a for a, _, _, _ in angle_mag_data]
+        self.magnitudes = [m for _, m, _, _ in angle_mag_data]
+        sorted_ids = [i for _, _, i, _ in angle_mag_data]
+        sorted_pts = [pt for _, _, _, pt in angle_mag_data]
 
-        return angles, magnitudes
+        # Reinsert anchor point at the front
+        if anchor_entry:
+            sorted_ids.insert(0, anchor_entry[0])
+            sorted_pts.insert(0, anchor_entry[1])
+
+        self.projected_ids = sorted_ids
+        self.projected_points = np.array(sorted_pts)
+
+        return self.angles, self.magnitudes
+
     
     def angles_and_magnitudes_from_2d(self):
         projected_2d = self.get_local_2d_coordinates()
-        angles = []
-        magnitudes = []
-        ids = []
+
+        angle_mag_data = []
+        anchor_entry = None
 
         for id_, (x, y) in projected_2d.items():
             if id_ == self.anchor_id:
+                anchor_entry = (id_, (x, y))
                 continue
-            angle = np.arctan2(y, x) % (2 * np.pi) 
-            if np.isclose(angle, 2 *np.pi):
+            angle = np.arctan2(y, x) % (2 * np.pi)
+            if np.isclose(angle, 2 * np.pi):
                 angle = 0.0
-            magnitude = np.sqrt(x**2 + y**2)
-            angles.append(angle)
-            magnitudes.append(magnitude)
-            ids.append(id_)
+            magnitude = np.hypot(x, y)
+            angle_mag_data.append((angle, magnitude, id_))
 
-        sorted_indices = np.argsort(angles)
-        angles = [angles[i] for i in sorted_indices]
-        magnitudes = [magnitudes[i] for i in sorted_indices]
+        # Sort by angle
+        angle_mag_data.sort(key=lambda tup: tup[0])
 
-        self.angles = angles
-        self.magnitudes = magnitudes
+        self.angles = [a for a, _, _ in angle_mag_data]
+        self.magnitudes = [m for _, m, _ in angle_mag_data]
+        sorted_ids = [i for _, _, i in angle_mag_data]
 
-        return angles, magnitudes
+        # Reinsert anchor at front
+        if anchor_entry:
+            sorted_ids.insert(0, anchor_entry[0])
+            self.projected_2d[anchor_entry[0]] = anchor_entry[1]
+
+        self.projected_ids = sorted_ids
+
+        return self.angles, self.magnitudes
 
     def _plane_from_points(self, p1, p2, p3):
         v1 = np.array(p2) - np.array(p1)
@@ -311,9 +336,7 @@ class Plane:
 
         # Update synced attributes
         self.projected_ids = list(self._projected_dict.keys())
-        print(self.projected_ids)
         self.projected_points = np.array([self._projected_dict[i] for i in self.projected_ids])
-        print(self.projected_points)
         return self.projected_points, self.projected_ids
 
     def get_local_2d_coordinates(self):
