@@ -153,9 +153,9 @@ class Plane:
 
 
     # Full pipeline for matching planes
-    def match_planes(self, angles_b, mags_b, blur_sigma = 2, angle_tolerance = 3, min_matches = 2, angle_mse_threshold = 1.0, magnitude_mse_threshold = 1.0):
-        mags_a = self.magnitudes
-        angles_a = self.angles
+    def match_planes(self, plane_b, blur_sigma = 2, angle_tolerance = 3, min_matches = 2, angle_mse_threshold = 1.0, magnitude_mse_threshold = 1.0):
+        angles_a, mags_a = self.angles_and_magnitudes()
+        angles_b, mags_b = plane_b.angles_and_magnitudes()
 
         # Calculate best rotational offset
         signal_a = self._build_angular_signal(angles_a, resolution=360, blur_sigma=blur_sigma)
