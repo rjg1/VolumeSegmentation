@@ -29,7 +29,7 @@ rotated_2d = [R2 @ p for p in subset_2d]
 rotated_3d = [np.array([x, y, 0]) for x, y in rotated_2d]
 
 # Scale uniformly
-scale = 1.25
+scale = 1.5
 scaled = [p * scale for p in rotated_3d]
 
 # Apply 3D tilt (around X)
@@ -39,6 +39,11 @@ Rx = np.array([[1, 0, 0],
                [0, np.sin(tilt),  np.cos(tilt)]])
 transformed = [Rx @ p for p in scaled]
 anchor_b = Rx @ (scale * np.array([0, 0, 0]))
+
+# Offset centres
+offset_vector = np.array([3.0, 2.0, 1.0])
+transformed = [p + offset_vector for p in transformed]
+anchor_b = anchor_b + offset_vector
 
 plane_b = Plane(
     anchor_id=0,
