@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from plane import Plane
+import pprint
 
 # Step 1: Create original plane A
 anchor_a = np.array([0, 0, 0])
@@ -54,7 +55,7 @@ plane_b = Plane(
 
 # Step 3: Match
 match_data = plane_a.match_planes(plane_b, angle_tolerance=1)
-print(match_data)
+pprint.pp(match_data)
 proj_a = plane_a.get_local_2d_coordinates()
 proj_b = plane_b.get_local_2d_coordinates()
 

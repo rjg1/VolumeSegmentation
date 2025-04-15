@@ -26,6 +26,7 @@ class Plane:
         self.angles_and_magnitudes()
 
         # TODO some equality checking to ensure duplicate planes aren't created
+        # TODO fix handling of ids that are non integer
 
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
