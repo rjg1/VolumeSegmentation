@@ -3,30 +3,32 @@ import numpy as np
 from scipy.signal import correlate
 from scipy.ndimage import gaussian_filter1d
 from collections import defaultdict
+from planepoint import PlanePoint
+
+PLANE_ANCHOR_ID = 0
 
 class Plane:
-    def __init__(self, anchor_id, alignment_ids, anchor_point, alignment_points):
-        self.anchor_id = anchor_id
-        self.alignment_ids = alignment_ids
-        self.anchor_point = np.array(anchor_point)
-        self.alignment_points = [np.array(p) for p in alignment_points]
+    def __init__(self, anchor_point, alignment_points):
+        self.anchor_point = anchor_point
+        self.alignment_points = alignment_points
 
-        if len(self.alignment_points) >= 2:
+        if len(self.alignment_points) >= 2: # Make a plane from the anchor point and 2 alignment points
             self.normal, self.d = self._plane_from_points(self.anchor_point, *self.alignment_points[:2])
         else:
             raise ValueError("At least two alignment points are required to define a plane.")
 
-        self.projected_points = []
-        self.projected_ids = []
-        self.project_points([self.anchor_point, *self.alignment_points], [anchor_id, *alignment_ids], threshold=0.1) # Track all vectors on plane
+        # Save all points input on this plane
+        self.plane_points = {PLANE_ANCHOR_ID : self.anchor_point} # internal point id : PlanePoint
+        self.plane_points.update({i + 1 : p for i, p in enumerate(self.alignment_points)})
 
         # Initialize angles and magnitude lists
         self.angles = []
         self.magnitudes = []
         self.angles_and_magnitudes()
 
-        # TODO some equality checking to ensure duplicate planes aren't created
-        # TODO fix handling of ids that are non integer
+        print(self.plane_points.keys())
+        # # TODO some equality checking to ensure duplicate planes aren't created
+        # # TODO fix handling of ids that are non integer
 
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
@@ -89,8 +91,8 @@ class Plane:
         Fast fuzzy bucket-based ROI matcher using binning and moving window.
 
         Parameters:
-        - angles_a_deg, mags_a: Plane A ROI angles (degrees) and magnitudes
-        - angles_b_deg, mags_b: Plane B ROI angles (degrees) and magnitudes
+        - angles_a, mags_a: Plane A ROI angles and magnitudes
+        - angles_b, mags_b: Plane B ROI angles and magnitudes
         - offset_deg: degrees to rotate Plane B
         - resolution: number of bins (e.g., 360 for 1° resolution)
         - window: angular window size in degrees to allow fuzzy matching
@@ -112,19 +114,19 @@ class Plane:
         ids_b = ids_b[1:]
 
         # Normalize and rotate Plane B
-        angles_b_rot = [(a + offset_deg) % 360 for a in angles_b_deg]
+        angles_b_rot = [(angle + offset_deg) % 360 for angle in angles_b_deg]
 
         # Bin ROIs
-        bucket_a = defaultdict(list)
+        bucket_a = defaultdict(list) # {angle : [<indices>]}
         bucket_b = defaultdict(list)
 
-        for i, angle in enumerate(angles_a_deg):
+        for i, (pida, angle) in enumerate(zip(ids_a, angles_a_deg)):
             idx = int(round(angle * resolution / 360)) % resolution
-            bucket_a[idx].append(i)
+            bucket_a[idx].append((i, pida))
 
-        for j, angle in enumerate(angles_b_rot):
+        for j, (pidb, angle) in enumerate(zip(ids_b, angles_b_rot)):
             idx = int(round(angle * resolution / 360)) % resolution
-            bucket_b[idx].append(j)
+            bucket_b[idx].append((j, pidb))
 
         # Match using fuzzy window
         used_a = set()
@@ -136,14 +138,14 @@ class Plane:
         for angle_a in bucket_a: # iterate through all angles in plane A
             for delta in range(-window, window + 1): # match over a certain offset window
                 angle_b = (angle_a + delta) % resolution # wrap offset window around 360 degrees if necessary
-                for i in bucket_a[angle_a]: # for all ROIs at this offset (assumed 1 in most cases)
-                    for j in bucket_b.get(angle_b, []): # for all ROIs at the corresponding offset (assumed 0-1) 
+                for i, pida in bucket_a[angle_a]: # for all ROIs at this offset (assumed 1 in most cases)
+                    for j, pidb in bucket_b.get(angle_b, []): # for all ROIs at the corresponding offset (assumed 0-1) 
                         if i not in used_a and j not in used_b: # match immediately and break if execution reaches here
-                            angle_diff = abs(angles_a_deg[i] - angles_b_rot[j]) % 360 # calculate the angle diff
+                            angle_diff = abs(angles_a_deg[i] - angles_b_rot[j]) % 360 # calculate the angle diff - offszet by 1 as id 1 is first entry in angles list
                             angle_diff = min(angle_diff, 360 - angle_diff) # take the minimum of the two directions in angle
                             mag_diff = abs(mags_a[i] - mags_b[j]) # get the absolute magnitude diff
 
-                            matches.append((ids_a[i], ids_b[j])) # append roi ids for matches
+                            matches.append((pida, pidb)) # append roi ids for matches
                             angular_diffs.append(angle_diff)
                             magnitude_diffs.append(mag_diff)
 
@@ -159,7 +161,7 @@ class Plane:
         angles_a, mags_a = self.angles_and_magnitudes()
         angles_b, mags_b = plane_b.angles_and_magnitudes()
 
-        ids_a, ids_b = self.projected_ids, plane_b.projected_ids
+        ids_a, ids_b = list(self.plane_points.keys()), list(plane_b.plane_points.keys())
 
         # Calculate best rotational offset
         signal_a = self._build_angular_signal(angles_a, resolution=360, blur_sigma=blur_sigma)
@@ -169,16 +171,22 @@ class Plane:
         # Find angle matches and compute angular error + magnitudal error
         matches, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset, window = angle_tolerance)
 
-        # Map roi ids to an index in the magnitudes array
-        id_to_idx_a = {roi_id: idx-1 for idx, roi_id in enumerate(ids_a)}
-        id_to_idx_b = {roi_id: idx-1 for idx, roi_id in enumerate(ids_b)}
+        id_to_idx_a = {roi_id: idx for idx, roi_id in enumerate(ids_a[1:])}
+        id_to_idx_b = {roi_id: idx for idx, roi_id in enumerate(ids_b[1:])}
+
+        print(matches)
+
+        # Convert matches to original id matches
+        og_matches = []
+        for i, j in matches:
+            og_matches.append((self.plane_points[i].id, plane_b.plane_points[j].id))
 
         # Check minimum match count
         if len(matches) < min_matches:
             return {
                 "match": False,
-                "reason": f"Only {len(matches)} matches found, below minimum {min_matches}.",
-                "matches": matches,
+                "reason": f"{len(matches)} matches found, below minimum {min_matches}.",
+                "matches": og_matches,
                 "angular_diffs": angular_diffs,
                 "magnitude_diffs": magnitude_diffs,
                 "offset": offset,
@@ -194,7 +202,7 @@ class Plane:
                 "reason": "Failed angle MSE threshold",
                 "offset": offset,
                 "score": score,
-                "matches": matches,
+                "matches": og_matches,
                 "angular_diffs": angular_diffs,
                 "magnitude_diffs": magnitude_diffs,
                 "angle_mse": angle_mse
@@ -221,7 +229,7 @@ class Plane:
             "reason": "Passed angle and magnitude error thresholds" if match else "Failed magnitude MSE threshold",
             "offset": offset,
             "score": score,
-            "matches": matches,
+            "matches": og_matches,
             "angular_diffs": angular_diffs,
             "magnitude_diffs": abs_diffs,
             "angle_mse": angle_mse,
@@ -231,19 +239,18 @@ class Plane:
 
 
     def angles_and_magnitudes(self):
-        anchor_proj = self._project_point(self.anchor_point)
-        align_proj = self._project_point(self.alignment_points[0])
+        anchor_proj = self._project_point(self.anchor_point.position)
+        align_proj = self._project_point(self.alignment_points[0].position)
         u = (align_proj - anchor_proj)
         u = u / np.linalg.norm(u)
         v = np.cross(self.normal, u)
 
         angle_mag_data = []
-        anchor_entry = None
 
-        for i, pt in zip(self.projected_ids, self.projected_points):
-            if i == self.anchor_id:
-                anchor_entry = (i, pt)  # Save anchor separately
+        for i, ppt in self.plane_points.items():
+            if i == PLANE_ANCHOR_ID: # skip anchor point
                 continue
+            pt = ppt.position # extract position from PlanePoint
             vec = pt - anchor_proj
             x = np.dot(vec, u)
             y = np.dot(vec, v)
@@ -260,52 +267,20 @@ class Plane:
         self.angles = [a for a, _, _, _ in angle_mag_data]
         self.magnitudes = [m for _, m, _, _ in angle_mag_data]
         sorted_ids = [i for _, _, i, _ in angle_mag_data]
-        sorted_pts = [pt for _, _, _, pt in angle_mag_data]
+        # Get the PlanePoints for each id
+        sorted_ppts = [self.plane_points[i] for i in sorted_ids]
 
         # Reinsert anchor point at the front
-        if anchor_entry:
-            sorted_ids.insert(0, anchor_entry[0])
-            sorted_pts.insert(0, anchor_entry[1])
+        sorted_ids.insert(0, PLANE_ANCHOR_ID)
+        sorted_ppts.insert(0, self.anchor_point)
 
-        self.projected_ids = sorted_ids
-        self.projected_points = np.array(sorted_pts)
-
-        return self.angles, self.magnitudes
-
-    
-    def angles_and_magnitudes_from_2d(self):
-        projected_2d = self.get_local_2d_coordinates()
-
-        angle_mag_data = []
-        anchor_entry = None
-
-        for id_, (x, y) in projected_2d.items():
-            if id_ == self.anchor_id:
-                anchor_entry = (id_, (x, y))
-                continue
-            angle = np.arctan2(y, x) % (2 * np.pi)
-            if np.isclose(angle, 2 * np.pi):
-                angle = 0.0
-            magnitude = np.hypot(x, y)
-            angle_mag_data.append((angle, magnitude, id_))
-
-        # Sort by angle
-        angle_mag_data.sort(key=lambda tup: tup[0])
-
-        self.angles = [a for a, _, _ in angle_mag_data]
-        self.magnitudes = [m for _, m, _ in angle_mag_data]
-        sorted_ids = [i for _, _, i in angle_mag_data]
-
-        # Reinsert anchor at front
-        if anchor_entry:
-            sorted_ids.insert(0, anchor_entry[0])
-            self.projected_2d[anchor_entry[0]] = anchor_entry[1]
-
-        self.projected_ids = sorted_ids
+        # Remake sorted planepoints dict
+        self.plane_points = {sorted_ids[i] : sorted_ppts[i] for i in range(len(sorted_ids))}
 
         return self.angles, self.magnitudes
 
-    def _plane_from_points(self, p1, p2, p3):
+    def _plane_from_points(self, pp1, pp2, pp3):
+        p1, p2, p3 = pp1.position, pp2.position, pp3.position # Extract positions from planepoints
         v1 = np.array(p2) - np.array(p1)
         v2 = np.array(p3) - np.array(p1)
         normal = np.cross(v1, v2)
@@ -321,31 +296,28 @@ class Plane:
         distance = np.dot(self.normal, point) + self.d
         return point - distance * self.normal
 
-    def project_points(self, points, ids, threshold=1.0):
-        if not hasattr(self, "_projected_dict"):
-            self._projected_dict = {}
-
-        for pt, id_ in zip(points, ids):
-            if id_ not in self._projected_dict and self._distance_to_plane(pt) <= threshold:
+    # Expects a list of PlanePoint
+    def project_points(self, points, threshold=1.0):
+        idx = len(self.plane_points.keys()) # New index to add points
+        for ppt in points:
+            pt = ppt.position # Extract position from planepoint
+            if self._distance_to_plane(pt) <= threshold: # If it is close enough to the plane, project it
                 proj = self._project_point(pt)
-                self._projected_dict[id_] = proj
-
-        # Update synced attributes
-        self.projected_ids = list(self._projected_dict.keys())
-        self.projected_points = np.array([self._projected_dict[i] for i in self.projected_ids])
-        return self.projected_points, self.projected_ids
+                self.plane_points[idx] = PlanePoint(ppt.id, proj, traits=ppt.traits) # Update position vector to projected
+                idx += 1 # Increase index
 
     def get_local_2d_coordinates(self):
         if len(self.alignment_points) < 1:
             raise ValueError("Need at least 1 alignment point to define a frame.")
-        v1 = self.alignment_points[0] - self.anchor_point
+        v1 = self.alignment_points[0].position - self.anchor_point.position
         u = v1 / np.linalg.norm(v1)
         v = np.cross(self.normal, u)
 
         self.projected_2d = {}
-        for pt, id_ in zip(self.projected_points, self.projected_ids):
-            vec = pt - self.anchor_point
+        for idx, ppt in self.plane_points.items():
+            pt = ppt.position
+            vec = pt - self.anchor_point.position
             x = np.dot(vec, u)
             y = np.dot(vec, v)
-            self.projected_2d[id_] = (x, y)
+            self.projected_2d[idx] = (x, y)
         return self.projected_2d
