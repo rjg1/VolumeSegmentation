@@ -27,6 +27,8 @@ class Plane:
         self.magnitudes = []
         self.angles_and_magnitudes()
 
+        print([np.rad2deg(p) for p in self.angles])
+
         # # TODO some equality checking to ensure duplicate planes aren't created
         # # TODO fix handling of ids that are non integer
 
@@ -470,7 +472,7 @@ class Plane:
 
         return (x_final, y_final)
 
-    # Aligns points of Plane b in 3d
+    # Align points of B in 3D
     def get_aligned_3d_projection(self, plane_b, matches, scale_factor):
         # Extract anchors
         p0a = self.anchor_point.position
@@ -494,12 +496,10 @@ class Plane:
             Vt[2, :] *= -1
             R_align = Vt.T @ U.T
 
-        # Compute translation vector
-        # transformed_anchor_b = (R_align @ p0b) * scale_factor
-        # translation = p0a - transformed_anchor_b
-        translation = p0a - p0b
+        # Compute global translation: where Plane B's anchor should end up (to align to A)
+        translation = p0a
 
-        # Apply transform to all points in Plane B
+        # Apply transformation to each point on Plane B
         aligned_b_points = {}
         for id_b, ppt in plane_b.plane_points.items():
             pt = ppt.position
@@ -508,32 +508,29 @@ class Plane:
                 rotation_matrix=R_align,
                 scale=scale_factor,
                 translation=translation,
+                b_anchor_point=p0b,
                 project=False
             )
             aligned_b_points[id_b] = aligned
 
         return aligned_b_points, R_align, translation
-    
-    # def _apply_3d_transform(self, point, rotation_matrix, scale=1.0, translation=np.zeros(3), project = True):
-    #     # Project point onto this plane (if it is not already)
-    #     if project:
-    #         proj = self._project_point(point)
-    #     else:
-    #         proj = point
-    #     vec = proj - self.anchor_point.position              # Translate into local frame
-    #     rotated = rotation_matrix @ vec     # Apply rotation
-    #     scaled = rotated * scale            # Apply scaling
-    #     transformed_point = scaled + translation
-    #     return transformed_point
 
-    def _apply_3d_transform(self, point, rotation_matrix, scale=1.0, translation=np.zeros(3), project = True):
-        # Project point onto this plane (if it is not already)
+    def _apply_3d_transform(self, point, rotation_matrix, scale=1.0, translation=np.zeros(3), b_anchor_point=None, project=True):
+        # Optionally project the point onto the plane
         if project:
             proj = self._project_point(point)
         else:
             proj = point
-        
-        translated = proj + translation
-        rotated = rotation_matrix @ (translated - self.anchor_point.position)
+
+        if b_anchor_point is None:
+            raise ValueError("You must provide the anchor_point used as origin during transformation.")
+
+        # Convert point into local frame of anchor of plane B
+        vec = proj - b_anchor_point
+
+        # Rotate, scale, and translate into target frame
+        rotated = rotation_matrix @ vec
         scaled = rotated * scale
-        return scaled
+        transformed = scaled + translation
+
+        return transformed

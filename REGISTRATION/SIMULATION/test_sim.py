@@ -7,8 +7,10 @@ from planepoint import PlanePoint
 import random
 
 def main():
+    anchor_offset = np.array([-1, -0.5])
+    anchor_offset_3d = np.array([*anchor_offset, 0])
     # Step 1: Create original plane A
-    anchor_a = PlanePoint(0, (0, 0, 0), traits={"avg_radius" : {"threshold": 1.0, "metric": "mse", "value": 5.0}})
+    anchor_a = PlanePoint(0, (0 + anchor_offset[0], 0 + anchor_offset[1], 0), traits={"avg_radius" : {"threshold": 1.0, "metric": "mse", "value": 5.0}})
     a_traits = {"avg_radius" : [3, 4, 5, 6, 7]}
 
     alignment_positions_a = [(1, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0), (1, 2, 0)]
@@ -25,8 +27,12 @@ def main():
     # Step 2: Create rotated, scaled, subset-transformed version (Plane B)
     subset_indices = [0, 2, 3]
     b_traits = {"avg_radius" : [a_traits["avg_radius"][i] * random.uniform(0.8, 1.2) for i in subset_indices]}
-    subset_points = [np.array(alignment_positions_a[i]) for i in subset_indices]
+    subset_points = [
+    np.array(alignment_positions_a[i]) - anchor_offset_3d
+    for i in subset_indices
+]
 
+    
     # Rotate subset in 2D before any tilt
     subset_2d = [p[:2] for p in subset_points]
     theta_deg = 40
@@ -35,6 +41,7 @@ def main():
                 [np.sin(theta),  np.cos(theta)]])
     rotated_2d = [R2 @ p for p in subset_2d]
     rotated_3d = [np.array([x, y, 0]) for x, y in rotated_2d]
+    rotated_3d = [p + np.array([*anchor_offset, 0]) for p in rotated_3d]
 
     # Scale uniformly
     scale = 1.5
@@ -46,7 +53,7 @@ def main():
                 [0, np.cos(tilt), -np.sin(tilt)],
                 [0, np.sin(tilt),  np.cos(tilt)]])
     transformed_points = [Rx @ p for p in scaled]
-    anchor_b_pos = Rx @ (scale * np.array([0, 0, 0]))
+    anchor_b_pos = Rx @ (scale * np.array([0 + anchor_offset[0], 0 + anchor_offset[1], 0]))
 
     # Offset centres
     offset_vector = np.array([3.0, 2.0, 1.0])
