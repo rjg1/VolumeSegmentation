@@ -60,7 +60,7 @@ class Region:
         self.centroid = None
         self.avg_radius = None
         self.original_index = original_index
-        if points:
+        if points is not None and len(points) > 0:
             self.points = points
             # Update max and min points
             for point in points:
@@ -127,6 +127,27 @@ class Region:
                 self.ymin <= other_region.ymax and self.ymax >= other_region.ymin and \
                 self.zmin <= other_region.zmax and self.zmax >= other_region.zmin
 
+
+    def compute_uoi_with(self, other_region):
+        """
+        Computes the Union of Intersection (UoI) between this region and another.
+        This is done in 2D (x, y) by default.
+        Returns a float between 0 and 1, where 1 means perfect overlap.
+        """
+        # Extract 2D projections of boundary points (default x, y)
+        poly_a = Polygon([(x, y) for x, y, z in self.get_boundary_points()])
+        poly_b = Polygon([(x, y) for x, y, z in other_region.get_boundary_points()])
+
+        if not poly_a.is_valid or not poly_b.is_valid:
+            return 0.0
+
+        intersection = poly_a.intersection(poly_b)
+        union = poly_a.union(poly_b)
+
+        if union.area == 0:
+            return 0.0
+        return intersection.area / union.area
+        
 
 class BoundaryRegion(Region):
     # Generate a number of points within this region

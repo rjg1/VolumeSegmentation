@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import random
 from planepoint import PlanePoint
 from plane import Plane
+from region import Region, BoundaryRegion
+from registration_utils import compute_avg_uoi
 import pprint
 
 def generate_circle_3d(center, radius, num_points=50):
@@ -34,7 +36,6 @@ def main():
 
     # Step 2: Create transformed Plane B
     subset_indices = [0, 2, 3]
-    subset_ids_a = [alignment_points_a[i].id for i in subset_indices]
     subset_points = [np.array(alignment_positions_a[i]) - anchor_offset_3d for i in subset_indices]
 
     # Apply 2D rotation
@@ -64,7 +65,7 @@ def main():
                           traits={"avg_radius": {"threshold": 1.0, "metric": "mse", "value": 0.4}})
 
     # Plane B trait values
-    # b_traits = {"avg_radius": [a_traits["avg_radius"][i] * random.uniform(0.8, 1.2) for i in subset_indices]}
+    # b_traits = {"avg_radius": [a_traits["avg_radius"][i] * random.uniform(0.6, 1.4) for i in subset_indices]}
     b_traits = {"avg_radius": [a_traits["avg_radius"][i] for i in subset_indices]}
     transformed = [PlanePoint(i + 1, p) for i, p in enumerate(transformed_points)]
     for trait in b_traits:
@@ -174,6 +175,63 @@ def main():
 
     plt.tight_layout()
     plt.show()
+
+    # 2D example
+    proj_a, proj_b_aligned, transform_info = plane_a.get_aligned_2d_projection(
+        plane_b,
+        offset_deg=match_data["offset"],
+        scale_factor=match_data["scale_factor"]
+    )
+
+    circle_b_2d = {}
+    rotation_2d = transform_info["rotation_deg"]
+    scale_2d = transform_info["scale"]
+    translation_2d = transform_info["translation"]
+    for pid, pts in circle_points_b_scaled_tilted.items(): # apply operations to all pts in plane b
+        circle_b_2d [pid] = np.array(
+            plane_a.project_and_transform_points(pts, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
+            # np.array([plane_a._project_point_2d(pt) for pt in pts])
+        )
+
+    circle_a_2d = {}
+    for pid, pts in circle_points_a.items():
+        circle_a_2d[pid] = np.array([plane_a._project_point_2d(pt) for pt in pts])
+
+    print(transform_info)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.set_title("Aligned 2D Projections")
+
+    # Plot Plane A circles
+    for pid, pts in circle_a_2d.items():
+        x, y = pts[:, 0], pts[:, 1]
+        ax.plot(x, y, color='blue', label=f"A{pid}" if pid == 0 else None)
+        cx, cy = pts.mean(axis=0)
+        ax.scatter(cx, cy, color='blue', s=30)
+        ax.text(cx + 0.05, cy + 0.05, f"A{pid}", fontsize=8, color='blue')
+
+    # Plot Transformed Plane B circles
+    for pid, pts in circle_b_2d.items():
+        x, y = pts[:, 0], pts[:, 1]
+        ax.plot(x, y, color='green', label=f"B{pid}" if pid == 0 else None)
+        cx, cy = pts.mean(axis=0)
+        ax.scatter(cx, cy, color='green', s=30)
+        ax.text(cx + 0.05, cy + 0.05, f"B{pid}", fontsize=8, color='green')
+
+
+    ax.set_aspect('equal')
+    ax.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Compute IoU of each region
+
+    # Make region dicts
+    regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in circle_a_2d[pid]]) for pid, pts in circle_a_2d.items()}
+    regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in circle_b_2d[pid]]) for pid, pts in circle_b_2d.items()}
+
+    IoU = compute_avg_uoi(regions_a, regions_b, match_data["og_matches"], plot=True)
+    print(IoU)
 
 if __name__ == "__main__":
     main()

@@ -421,10 +421,10 @@ class Plane:
         return x, y
 
     def get_aligned_2d_projection(self, plane_b, offset_deg, scale_factor):
-        # SGet own 2D projection
+        # Get own 2D projection
         proj_a = self.get_local_2d_coordinates()
 
-        # Get B’s local 2D projection
+        # Get plane B local 2D projection
         proj_b = plane_b.get_local_2d_coordinates()
 
         # Step 3: Build transform
@@ -450,12 +450,15 @@ class Plane:
 
     # Projects a point onto the plane, projects it into 2d, applies transformations.
     # Can be used for any arbitrary point - used for all ROI points after matching before UoI calculation
-    def project_and_transform(self, point, rotation_deg=0, scale=1.0, translation=(0, 0)):
-        # Project to the plane
-        proj = self._project_point(point)
+    def _project_and_transform(self, point, plane_b, rotation_deg=0, scale=1.0, translation=(0, 0), project = True):
+        if project:
+            # Project to the plane
+            proj = plane_b._project_point(point)
+        else:
+            proj = point
 
-        # Project into 2D local coordinates
-        x, y = self._project_point_2d(proj)  # Uses internally computed u, v vectors
+        # Project into 2D local coordinates of its own plane
+        x, y = plane_b._project_point_2d(proj)  # Uses internally computed u, v vectors
 
         # Apply 2D rotation
         theta = np.radians(rotation_deg)
@@ -471,6 +474,10 @@ class Plane:
         y_final = y_scaled + translation[1]
 
         return (x_final, y_final)
+
+    # Transforms multiple points by projecting into a 2D plane and applying rotation/scale/translation
+    def project_and_transform_points(self, points, plane_b, rotation_deg=0, scale=1.0, translation=(0, 0), project = True):
+        return [self._project_and_transform(point, plane_b, rotation_deg=rotation_deg, scale=scale, translation=translation, project = project) for point in points]
 
     # Align points of B in 3D
     def get_aligned_3d_projection(self, plane_b, matches, scale_factor):
@@ -534,3 +541,7 @@ class Plane:
         transformed = scaled + translation
 
         return transformed
+    
+    # Transforms a list of points in 3D
+    def transform_points_3d(self, points, rotation_matrix, b_anchor_point, scale=1.0, translation = np.zeros(3), project = True):
+        return [self._apply_3d_transform(point, rotation_matrix, scale=scale, translation=translation, b_anchor_point=b_anchor_point, project=project) for point in points]
