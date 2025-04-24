@@ -10,6 +10,8 @@ from shapely.affinity import scale, translate, rotate
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.optimize import linear_sum_assignment
+from zstack import ZStack
+from plane import Plane
 
 NUM_ELLIPSES = 10
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
@@ -93,29 +95,33 @@ def main():
 
     # # Plot initial setup of points
     # # Normalize intensities for colormap
-    # norm = mcolors.Normalize(vmin=0, vmax=1)
-    # cmap = cm.Greys_r
+    norm = mcolors.Normalize(vmin=0, vmax=1)
+    cmap = cm.Greys_r
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
 
-    # # Plot only original ellipses on plane z=0
-    # for ellipse, intensity in zip(ellipses, ellipse_intensities):
-    #     ox, oy = ellipse.exterior.xy
-    #     oz = np.zeros_like(ox)  # z=0 plane
-    #     verts = [list(zip(ox, oy, oz))]  # List of 3D vertices for the polygon
-    #     face_color = cmap(norm(intensity))
-    #     poly = Poly3DCollection(verts, facecolors=face_color, edgecolors='black', alpha=0.6)
-    #     ax.add_collection3d(poly)
+    # Plot ellipses and annotate with IDs
+    for idx, (ellipse, intensity) in enumerate(zip(ellipses, ellipse_intensities)):
+        ox, oy = ellipse.exterior.xy
+        oz = np.zeros_like(ox)  # z=0 plane
+        verts = [list(zip(ox, oy, oz))]
+        face_color = cmap(norm(intensity))
+        poly = Poly3DCollection(verts, facecolors=face_color, edgecolors='black', alpha=0.6)
+        ax.add_collection3d(poly)
 
-    # ax.set_xlim(0, base_width)
-    # ax.set_ylim(0, base_height)
-    # ax.set_zlim(0, 1)
-    # ax.set_xlabel('X')
-    # ax.set_ylabel('Y')
-    # ax.set_zlabel('Z')
-    # ax.set_title("Generated ellipses on a z-plane")
-    # plt.show()
+        # Add ID label at the polygon's centroid
+        centroid = ellipse.centroid
+        ax.text(centroid.x, centroid.y, 0.02, f"{idx}", color='red', fontsize=8, ha='center', va='center')
+
+    ax.set_xlim(0, base_width)
+    ax.set_ylim(0, base_height)
+    ax.set_zlim(0, 1)
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title("Generated ellipses on a z-plane")
+    plt.show()
 
     # Apply zoom to generated dataset
     zoomed_polys = zoom_polygons_to_window(
@@ -130,26 +136,138 @@ def main():
     # Extract polygons within subwindow (re-polygonizing edge polygons)
     extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height)
 
-    # fig, ax = plt.subplots()
-    # for poly in extracted_polys:
-    #     x, y = poly.exterior.xy
-    #     ax.fill(x, y, alpha=0.5, edgecolor='black')
-    # ax.set_aspect('equal')
-    # ax.set_xlim(0, base_width)
-    # ax.set_ylim(0, base_height)
-    # ax.set_title("Zoomed Polygon View")
-    # plt.grid(True)
-    # plt.show()
+    fig, ax = plt.subplots()
+    for idx, poly in enumerate(extracted_polys):
+        x, y = poly.exterior.xy
+        ax.fill(x, y, alpha=0.5, edgecolor='black')
 
-    # Modify new plane data to fit initial dataset
-    new_plane = {}
-    for id, poly in enumerate(zoomed_polys):
+        # Label with ID near centroid
+        centroid = poly.centroid
+        ax.text(centroid.x, centroid.y, f"{idx}", fontsize=8, ha='center', va='center', color='red')
+
+    ax.set_aspect('equal')
+    ax.set_xlim(0, base_width)
+    ax.set_ylim(0, base_height)
+    ax.set_title("Zoomed Polygon View")
+    plt.grid(True)
+    plt.show()
+
+    # Modify new plane data to fit initial dataset - {z : {roi_id: {"coords" : [], "intensity": <int>} }}
+    new_plane = {0: {}}
+    for id, poly in enumerate(extracted_polys): #TODO change to extracted and see what changes
         if not new_plane.get(id, None):
-            new_plane[id] = {}
-            new_plane[id]['coords'] = []
-        new_plane[id]['intensity'] = ellipse_intensities[id]
+            new_plane[0][id] = {}
+            new_plane[0][id]['coords'] = []
+        new_plane[0][id]['intensity'] = extracted_intensities[id]
         for coord in list(poly.exterior.coords):
-            new_plane[id]['coords'].append(coord)
+            new_plane[0][id]['coords'].append(coord)
+
+    # Import into a z-stack object
+    z_stack_a = ZStack(z_planes) # original 3d data
+    z_stack_b = ZStack(new_plane) # new plane
+    # Generate z-plane
+
+    # TODO - check for existing planes / add z-guess
+
+    # noramlize intensities?
+    planes_a = z_stack_a.generate_planes(anchor_intensity_threshold=0.8, 
+                                         align_intensity_threshold=0.6, 
+                                         z_threshold=2, 
+                                         max_tilt_deg=40, 
+                                         projection_dist_thresh=0.5,
+                                         normalize_intensity=True,
+                                         xmin=0,
+                                         xmax=100,
+                                         ymin=0,
+                                         ymax=100,
+                                         margin=2)
+    planes_b = z_stack_b.generate_planes(anchor_intensity_threshold=0.8, 
+                                         align_intensity_threshold=0.01, 
+                                         z_threshold=2, 
+                                         max_tilt_deg=40, 
+                                         projection_dist_thresh=0.5,
+                                         normalize_intensity=True,
+                                         xmin=0,
+                                         xmax=100,
+                                         ymin=0,
+                                         ymax=100,
+                                         margin=2)
+    
+
+    angles_b = [np.rad2deg(a) for a in planes_b[0].angles]
+    print(angles_b)
+    planes_b[0].plot_plane_2d_projection()
+    planes_a[0].plot_plane_2d_projection()
+
+    # Make max value dictionary - max expected error values
+    max_values = {"angle" : 50.0, "magnitude": 100.0}
+
+    # Make weights for each outcome - sums to 1
+    weights = {"angle" : 0.6, "magnitude": 0.4}
+
+    # Compare planes
+    matched_planes = Plane.match_plane_lists(planes_a, planes_b, weights, max_values, score_threshold=0.01)
+
+    print(matched_planes)
+
+    best_match = list(matched_planes.values())[0]
+    plane_a = best_match["plane_a"]
+    plane_b = best_match["plane_b"]
+    match_data = best_match["result"]
+
+    proj_a, proj_b_aligned, transform_info = plane_a.get_aligned_2d_projection(
+        plane_b,
+        offset_deg=match_data["offset"],
+        scale_factor=match_data["scale_factor"]
+    )
+
+    rotation_2d = transform_info["rotation_deg"]
+    scale_2d = transform_info["scale"]
+    translation_2d = transform_info["translation"]
+
+    # Transform all 2d points of original ellipses
+    rois_b_2d = {}
+    for idx, poly in enumerate(zoomed_polys):
+        coords = list(poly.exterior.coords)
+        coords_3d = [(x,y,0) for x,y in coords]
+        rois_b_2d[idx] = np.array(
+            plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
+        )
+    
+    rois_a_2d = {}
+    for idx, poly in enumerate(ellipses):
+        coords = list(poly.exterior.coords)
+        coords_3d = [(x,y,0) for x,y in coords]
+        rois_a_2d[idx] = np.array([plane_a._project_point_2d(pt) for pt in coords_3d])
+        
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.set_title("Aligned 2D Projections")
+
+    # Plot Plane A circles
+    for pid, pts in rois_a_2d.items():
+        x, y = pts[:, 0], pts[:, 1]
+        ax.plot(x, y, color='blue', label=f"A{pid}" if pid == 0 else None)
+        cx, cy = pts.mean(axis=0)
+        ax.scatter(cx, cy, color='blue', s=30)
+        ax.text(cx + 0.05, cy + 0.05, f"A{pid}", fontsize=8, color='blue')
+
+    # Plot Transformed Plane B circles
+    for pid, pts in rois_b_2d.items():
+        x, y = pts[:, 0], pts[:, 1]
+        ax.plot(x, y, color='green', label=f"B{pid}" if pid == 0 else None)
+        cx, cy = pts.mean(axis=0)
+        ax.scatter(cx, cy, color='green', s=30)
+        ax.text(cx + 0.05, cy + 0.05, f"B{pid}", fontsize=8, color='green')
+
+
+    ax.set_aspect('equal')
+    ax.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+    return
 
     # Align polygons
     align_polygons(z_planes, new_plane, z_guess=1)

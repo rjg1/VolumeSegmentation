@@ -47,7 +47,7 @@ def calculate_avg_radius(boundary_points, centroid, num_samples, random_generato
     return sum(distances) / len(distances) if distances else 0
 
 class Region:
-    def __init__(self, points=None, original_index = None, precalc_area = False, precalc_centroid = False, precalc_radius = False):
+    def __init__(self, points=None, original_index = None, precalc_area = False, precalc_centroid = False, precalc_radius = False, intensity = 0):
         # Initialise max bound points
         self.random_generator = random.Random(RANDOM_SEED)
         self.xmin = np.inf
@@ -60,6 +60,7 @@ class Region:
         self.centroid = None
         self.avg_radius = None
         self.original_index = original_index
+        self.intensity = intensity
         if points:
             self.points = points
             # Update max and min points

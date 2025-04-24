@@ -397,7 +397,7 @@ def enforce_restrictions(z1, z2, roi1, roi2, z_distance_threshold, distance_thre
         #     return False
             # Handle zero areas to prevent division by zero
         if roi1_area == 0 or roi2_area == 0:
-            return False  # Or handle zero-area cases as you see fit
+            return False
 
         # Calculate the average area for a more symmetric percentage change
         avg_area = (roi1_area + roi2_area) / 2

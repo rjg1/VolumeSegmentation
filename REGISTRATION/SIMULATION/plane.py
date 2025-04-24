@@ -5,6 +5,8 @@ from scipy.ndimage import gaussian_filter1d
 from collections import defaultdict
 from planepoint import PlanePoint
 from numpy.fft import fft, ifft
+from typing import List, Dict, Tuple
+import matplotlib.pyplot as plt
 
 PLANE_ANCHOR_ID = 0
 
@@ -27,10 +29,7 @@ class Plane:
         self.magnitudes = []
         self.angles_and_magnitudes()
 
-        print([np.rad2deg(p) for p in self.angles])
-
         # # TODO some equality checking to ensure duplicate planes aren't created
-        # # TODO fix handling of ids that are non integer
 
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
@@ -383,20 +382,25 @@ class Plane:
 
     # Expects a list of PlanePoint
     def project_points(self, points, threshold=1.0):
+        point_added = False
         idx = len(self.plane_points.keys()) # New index to add points
         for ppt in points:
             pt = ppt.position # Extract position from planepoint
             if self._distance_to_plane(pt) <= threshold: # If it is close enough to the plane, project it
                 proj = self._project_point(pt)
-                self.plane_points[idx] = PlanePoint(ppt.id, proj, traits=ppt.traits) # Update position vector to projected
+                new_point = PlanePoint(ppt.id, proj, traits=ppt.traits) # Update position vector to projected
+                self.plane_points[idx] = new_point
+                self.alignment_points.append(new_point)
                 idx += 1 # Increase index
+                point_added = True
+        # Re-calculate angles list
+        if point_added:
+            self.angles_and_magnitudes()
 
     def get_local_2d_coordinates(self):
         if len(self.alignment_points) < 1:
             raise ValueError("Need at least 1 alignment point to define a frame.")
-        v1 = self.alignment_points[0].position - self.anchor_point.position
-        u = v1 / np.linalg.norm(v1)
-        v = np.cross(self.normal, u)
+        u, v = self.compute_local_axes()
 
         self.projected_2d = {}
         for idx, ppt in self.plane_points.items():
@@ -407,14 +411,9 @@ class Plane:
     
 
     def _project_point_2d(self, pt, u = None, v = None):
-        if self.fixed_basis:
-                u = np.array([1, 0, 0])
-                v = np.cross(self.normal, u)
-                v = v / np.linalg.norm(v)
-        elif u is None or v is None:
-                v1 = self.alignment_points[0].position - self.anchor_point.position
-                u = v1 / np.linalg.norm(v1)
-                v = np.cross(self.normal, u)
+        if self.fixed_basis or u is None or v is None:
+                u, v = self.compute_local_axes()
+
         vec = pt - self.anchor_point.position
         x = np.dot(vec, u)
         y = np.dot(vec, v)
@@ -545,3 +544,170 @@ class Plane:
     # Transforms a list of points in 3D
     def transform_points_3d(self, points, rotation_matrix, b_anchor_point, scale=1.0, translation = np.zeros(3), project = True):
         return [self._apply_3d_transform(point, rotation_matrix, scale=scale, translation=translation, b_anchor_point=b_anchor_point, project=project) for point in points]
+    
+    
+    def is_equivalent_to(self, other_plane, comparison_pts = 3, angle_threshold_deg=1.0, distance_threshold=0.5, match_anchors = True):
+        """
+        Fast approximate check if two planes are geometrically equal by:
+        - Comparing the angle between their normal vectors.
+        - Measuring perpendicular distance of some points from self to other_plane.
+
+        Parameters:
+            comparison_pts (int) : max number of points to compare
+            angle_threshold_deg (float): max allowed angular difference between normals.
+            distance_threshold (float): max allowed point-to-plane distance.
+        """
+        # Check anchor points are different first - assuming anchor points must match for equivalence
+        if match_anchors:
+            anchor_a = np.array(self.anchor_point.position)
+            anchor_b = np.array(other_plane.anchor_point.position)
+            if not np.allclose(anchor_a, anchor_b, atol=distance_threshold):
+                return False
+
+
+        # Normalize both normals
+        n1 = self.normal / np.linalg.norm(self.normal)
+        n2 = other_plane.normal / np.linalg.norm(other_plane.normal)
+
+        # Check angle between normals
+        dot_product = np.dot(n1, n2)
+        angle_rad = np.arccos(np.clip(abs(dot_product), -1.0, 1.0))  # take abs for flipped normals
+        angle_deg = np.degrees(angle_rad)
+        if angle_deg > angle_threshold_deg:
+            return False
+
+        # Check perpendicular distances of 3 sampled points from self to other_plane
+        sampled_points = [self.anchor_point.position] # always sample anchor
+        alignments = list(self.alignment_points)
+        sampled_points += [pt.position for pt in alignments[:comparison_pts-1]] if len(alignments) >= comparison_pts-1 else [pt.position for pt in alignments]
+
+        # Plane B equation: n·(x - p0) = 0 → distance = |n·(x - p0)|
+        p0 = other_plane.anchor_point.position
+        n = other_plane.normal / np.linalg.norm(other_plane.normal)
+
+        for pt in sampled_points:
+            vec = pt - p0
+            dist = np.abs(np.dot(n, vec))
+            if dist > distance_threshold:
+                return False
+
+
+        return True
+    
+    def compute_local_axes(self):
+        """
+        Compute the local 2D coordinate axes (u, v) for the plane.
+
+        Returns:
+            (u, v): A tuple of two orthonormal 3D vectors defining the local plane axes.
+        """
+        if self.fixed_basis:
+            u = np.array([1.0, 0.0, 0.0])
+            v = np.cross(self.normal, u)
+            v = v / np.linalg.norm(v)
+        else:
+            v1 = self.alignment_points[0].position - self.anchor_point.position
+            u = v1 / np.linalg.norm(v1)
+            v = np.cross(self.normal, u)
+            v = v / np.linalg.norm(v)
+        return u, v
+
+    @staticmethod
+    def match_plane_lists(planes_a, planes_b, weights, max_values, score_threshold=0.5):
+        """
+        Matches planes from planes_a to planes_b based on a composite similarity score.
+        Each score is calculated as a weighted combination of angle, magnitude, and trait similarities.
+
+        Parameters:
+            planes_a, planes_b (list of Plane): Lists of planes to match.
+            weights (dict): Dictionary with keys "angle", "magnitude", and trait names for weighting.
+            max_values (dict): Dictionary with keys "angle", "magnitude", and trait names for normalization.
+            score_threshold (float): Minimum similarity score required to consider a match.
+
+        Returns:
+            List of matched tuples (idx_a, idx_b, score, match_result_dict)
+        """
+        results = {}
+
+        for i, plane_a in enumerate(planes_a):
+            for j, plane_b in enumerate(planes_b):
+                match_result = plane_a.match_planes(plane_b, 
+                                                    angle_mse_threshold = max_values['angle'], 
+                                                    magnitude_mse_threshold = max_values['magnitude'])
+                print(match_result)
+
+                if not match_result["match"]:
+                    continue
+
+                angle_mse = match_result.get("angle_mse", float("inf"))
+                magnitude_mse = match_result.get("magnitude_mse", float("inf"))
+                trait_values = match_result.get("trait_values", {})
+
+                # Validate angle and magnitude are within limits
+                if angle_mse > max_values.get("angle", float("inf")) or \
+                magnitude_mse > max_values.get("magnitude", float("inf")):
+                    continue
+
+                # Validate traits are within their individual limits
+                trait_scores = {}
+                trait_failed = False
+                for trait, error in trait_values.items():
+                    max_trait = max_values.get(trait, float("inf"))
+                    if error > max_trait:
+                        trait_failed = True
+                        break
+                    trait_scores[trait] = 1 - (error / max_trait) if max_trait > 0 else 0.0
+                if trait_failed:
+                    continue
+
+                # Compute normalized component scores
+                angle_score = 1 - (angle_mse / max_values.get("angle", 1.0))
+                magnitude_score = 1 - (magnitude_mse / max_values.get("magnitude", 1.0))
+
+                # Weighted sum of scores
+                score = weights.get("angle", 0) * angle_score + \
+                        weights.get("magnitude", 0) * magnitude_score + \
+                        sum(weights.get(trait, 0) * trait_scores[trait] for trait in trait_scores)
+
+                if score >= score_threshold:
+                    results[score] = {
+                        "plane_a": plane_a,
+                        "plane_b": plane_b,
+                        "result": match_result
+                    }
+
+        # Re-make dict with scores sorted in ascending order
+        return dict(sorted(results.items(), key=lambda item: item[0], reverse=True))
+
+
+    def plot_plane_2d_projection(self, show=True, save_path=None):
+        """
+        Plots the 2D projection of a plane (anchor + alignment points).
+        Anchor is plotted in red, alignments in blue.
+        """
+        # Get 2D projections of all points
+        projected = self.get_local_2d_coordinates()  # returns {id: (x, y)}
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.set_title("2D Projection of Plane")
+
+        for pid, (x, y) in projected.items():
+            if pid == 0:
+                ax.scatter(x, y, color='red', s=60, label='Anchor')
+                ax.text(x + 0.2, y + 0.2, f"A{self.plane_points[pid].id}", color='red')
+            else:
+                ax.scatter(x, y, color='blue', s=40)
+                ax.text(x + 0.2, y + 0.2, f"P{self.plane_points[pid].id}", color='blue')
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_aspect("equal")
+        ax.grid(True)
+        ax.legend()
+
+        if save_path:
+            plt.savefig(save_path)
+        if show:
+            plt.show()
+        else:
+            plt.close()
