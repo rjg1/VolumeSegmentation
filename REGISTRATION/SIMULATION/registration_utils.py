@@ -116,17 +116,45 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
             ax.text(centroid_a[0]+0.1, centroid_a[1]+0.1, f"A{i}", color="blue", fontsize=8)
             ax.text(centroid_b[0]+0.1, centroid_b[1]+0.1, f"B{j}", color="green", fontsize=8)
 
+            # Plot Region A
+            if not poly_a.is_empty:
+                try:
+                    if poly_a.geom_type == "Polygon":
+                        x, y = poly_a.exterior.xy
+                        ax.fill(x, y, color="blue", alpha=0.15, label="Region A" if i == matches[0][0] else "")
+                    elif poly_a.geom_type == "MultiPolygon":
+                        for subpoly in poly_a.geoms:
+                            x, y = subpoly.exterior.xy
+                            ax.fill(x, y, color="blue", alpha=0.15)
+                except:
+                    pass
+
+            # Plot Region B
+            if not poly_b.is_empty:
+                try:
+                    if poly_b.geom_type == "Polygon":
+                        x, y = poly_b.exterior.xy
+                        ax.fill(x, y, color="green", alpha=0.15, label="Region B" if i == matches[0][0] else "")
+                    elif poly_b.geom_type == "MultiPolygon":
+                        for subpoly in poly_b.geoms:
+                            x, y = subpoly.exterior.xy
+                            ax.fill(x, y, color="green", alpha=0.15)
+                except:
+                    pass
+
+            # Plot Intersection
             if not inter.is_empty:
                 try:
                     if inter.geom_type == "Polygon":
                         x, y = inter.exterior.xy
-                        ax.fill(x, y, color="purple", alpha=0.3)
+                        ax.fill(x, y, color="purple", alpha=0.3, label="Intersection" if i == matches[0][0] else "")
                     elif inter.geom_type == "MultiPolygon":
                         for subpoly in inter.geoms:
                             x, y = subpoly.exterior.xy
                             ax.fill(x, y, color="purple", alpha=0.3)
                 except:
                     pass
+
 
     if plot:
         ax.grid(True)
@@ -351,7 +379,7 @@ def project_angled_plane_points(
         pid_mapping: {old_pid: new_pid}  # (empty dict if method == "split")
     """
 
-    # 1. Project ROI points
+    # Project ROI points
     projected_pts_2d = []
     original_pts_3d = []
 
@@ -370,7 +398,7 @@ def project_angled_plane_points(
 
     projected_pts_2d = np.array(projected_pts_2d)
 
-    # 2. Cluster projected points
+    # Cluster projected points
     clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(projected_pts_2d)
     labels = clustering.labels_
 
@@ -382,13 +410,13 @@ def project_angled_plane_points(
             clusters[label] = []
         clusters[label].append((projected_pts_2d[idx], original_pts_3d[idx]))
 
-    # 3. Project anchor/alignment points
+    # Project anchor/alignment points
     projected_anchors = {}
     for _, plane_point in angled_plane.plane_points.items():
         proj2d = angled_plane._project_point_2d(plane_point.position)
         projected_anchors[plane_point.id] = proj2d
 
-    # 4. Build final regions
+    # Build final regions
     output_regions = {}
     assigned_pids = set()
     pid_mapping = {}
