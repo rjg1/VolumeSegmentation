@@ -15,10 +15,7 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "max_tilt_deg": 30.0,
     "projection_dist_thresh":  0.5,
     "normalize_intensity" : True,
-    "xmin" : -np.inf, #image boundaries to clip
-    "xmax" : np.inf,
-    "ymin" : -np.inf,
-    "ymax" : np.inf,
+    "plane_boundaries" : [-np.inf, np.inf, -np.inf, np.inf],
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True,
     "fixed_basis" : True,
@@ -213,7 +210,9 @@ class ZStack:
             max_tilt_rad = np.radians(params["max_tilt_deg"])
             self.planes = []
 
-            self._find_edge_rois(params["xmin"], params["xmax"], params["ymin"], params["ymax"], params["margin"])
+
+            boundaries = params["plane_boundaries"]
+            self._find_edge_rois(boundaries[0], boundaries[1], boundaries[2], boundaries[3], params["margin"])
 
             if not self.has_intensity:
                 raise ValueError("Requires intensity to run")

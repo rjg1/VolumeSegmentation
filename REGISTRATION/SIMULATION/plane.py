@@ -278,10 +278,17 @@ class Plane:
 
 
     # Full pipeline for matching planes
-    def match_planes(self, plane_b, match_plane_params = None):
-        params = MATCH_PLANE_PARAM_DEFAULTS.copy()  # start with defaults
-        if match_plane_params:
-            params.update(match_plane_params)  # override with anything user provides
+    def match_planes(self, plane_b, match_plane_params = None, dict_updated = False):
+        if dict_updated: # Don't bother re-sanitizing parameter list
+            params = match_plane_params
+        else:
+            params = MATCH_PLANE_PARAM_DEFAULTS.copy()  # start with defaults
+            if match_plane_params:
+                for key, val in match_plane_params.items():
+                    if key in params and isinstance(params[key], dict) and isinstance(val, dict):
+                        params[key].update(val)  # Merge into sub-dict
+                    else:
+                        params[key] = val  # Replace
 
         angles_a, mags_a = self.angles_and_magnitudes()
         angles_b, mags_b = plane_b.angles_and_magnitudes()
@@ -752,7 +759,15 @@ class Plane:
         if plane_list_params:
             params.update(match_plane_params)  # override with anything user provides
         
-        print(f"Plane list params: {params}")
+        # Ensure defaults in matching paramerers
+        match_params = MATCH_PLANE_PARAM_DEFAULTS.copy()
+        if match_plane_params:
+            # Update top level normally
+            for key, val in match_plane_params.items():
+                if key in match_params and isinstance(match_params[key], dict) and isinstance(val, dict):
+                    match_params[key].update(val)  # Merge into sub-dict
+                else:
+                    match_params[key] = val  # Replace
 
         max_values = {trait : params["traits"][trait]["max_value"] for trait in params["traits"]}
         weights = {trait : params["traits"][trait]["weight"] for trait in params["traits"]}
@@ -762,8 +777,9 @@ class Plane:
 
         for i, plane_a in enumerate(planes_a):
             for j, plane_b in enumerate(planes_b):
-                match_result = plane_a.match_planes(plane_b, match_plane_params)
-                print(match_result)
+                match_result = plane_a.match_planes(plane_b, 
+                                                    match_plane_params = match_params, 
+                                                    dict_updated = True)
 
                 if not match_result["match"]:
                     continue

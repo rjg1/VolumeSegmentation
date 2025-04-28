@@ -10,12 +10,12 @@ from shapely.affinity import scale, translate, rotate
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from region import Region, BoundaryRegion
-from registration_utils import compute_avg_uoi
+from registration_utils import compute_avg_uoi, match_zstacks_2d
 from zstack import ZStack
 from plane import Plane
 from scipy.optimize import linear_sum_assignment
 
-NUM_ELLIPSES =  50
+NUM_ELLIPSES =  10
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
@@ -166,13 +166,7 @@ def main():
 
     # Import into a z-stack object
     z_stack_a = ZStack(z_planes) # original 3d data
-    z_stack_b = ZStack(new_plane) # new plane
-    # Generate z-plane
-
-    # TODO - check for existing planes / add z-guess
-    print("Generating planes")
-    # noramlize intensities?
-
+    z_stack_b = ZStack(new_plane) # new plane 
 
     plane_gen_params = {
         "anchor_intensity_threshold": 0.8,
@@ -181,32 +175,16 @@ def main():
         "max_tilt_deg": 40.0,
         "projection_dist_thresh":  0.5,
         "normalize_intensity" : True,
-        "xmin" : 0, #image boundaries to clip
-        "xmax" : 100,
-        "ymin" : 0,
-        "ymax" : 100,
+        "plane_boundaries" : [0, 100, 0, 100],
         "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
         "match_anchors" : True,
         "fixed_basis" : True,
         "max_alignments" : 500
     }
 
-    planes_a = z_stack_a.generate_planes(plane_gen_params=plane_gen_params)
-    planes_b = z_stack_b.generate_planes(plane_gen_params=plane_gen_params)
-    print("Generated planes")
-
-    angles_b = [np.rad2deg(a) for a in planes_b[0].angles]
-    angles_a = [np.rad2deg(a) for a in planes_a[0].angles]
-
-    # print(angles_a)
-    # print(angles_b)
-
-    # planes_b[0].plot_plane_2d_projection()
-    # planes_a[0].plot_plane_2d_projection()
-
     match_plane_params = {
         "bin_match_params" : {
-            "min_matches" : 4
+            "min_matches" : 2
         }
     }
 
@@ -223,6 +201,30 @@ def main():
             }
         }
     }
+
+    match_params = {
+        "plane_gen_params" : plane_gen_params,
+        "match_plane_params" : match_plane_params,
+        "plane_list_params" : plane_list_params,
+        "plot_uoi" : True,
+        "plot_match" : True
+    }
+
+    # match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)
+
+    # return
+
+    # Generate z-plane
+
+    # TODO - check for existing planes / add z-guess
+    print("Generating planes")
+    # noramlize intensities?
+
+
+    planes_a = z_stack_a.generate_planes(plane_gen_params=plane_gen_params)
+    planes_b = z_stack_b.generate_planes(plane_gen_params=plane_gen_params)
+    print("Generated planes")
+
 
     # Compare planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, 
@@ -252,14 +254,16 @@ def main():
             round(rotation_2d, 2),
             round(scale_2d, 2),
             round(translation_2d[0], 2),
-            round(translation_2d[1], 2)
+            round(translation_2d[1], 2),
+            plane_a,
+            plane_b
         )
 
         unique_transformations.add(rounded)
 
     IoUs = []
 
-    for rotation_2d, scale_2d, t_x, t_y in unique_transformations:
+    for rotation_2d, scale_2d, t_x, t_y, plane_a, plane_b in unique_transformations:
         translation_2d = (t_x, t_y)
 
         # Transform all 2d points of original ellipses
