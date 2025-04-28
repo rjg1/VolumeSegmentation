@@ -207,16 +207,21 @@ def main():
         "match_plane_params" : match_plane_params,
         "plane_list_params" : plane_list_params,
         "plot_uoi" : True,
-        "plot_match" : True
+        "plot_match" : True,
+        "seg_params": {
+            "eps": 3.0,
+            "min_samples" : 2
+        }
     }
 
-    # match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)
+    match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)
 
-    # return
+    return
 
     # Generate z-plane
 
     # TODO - check for existing planes / add z-guess
+
     print("Generating planes")
     # noramlize intensities?
 

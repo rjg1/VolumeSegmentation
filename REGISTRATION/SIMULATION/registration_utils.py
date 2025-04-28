@@ -5,12 +5,12 @@ from scipy.spatial import distance
 import matplotlib.pyplot as plt
 import numpy as np
 from zstack import ZStack, PLANE_GEN_PARAMS_DEFAULT
-from plane import Plane, PLANE_LIST_PARAM_DEFAULTS, MATCH_PLANE_PARAM_DEFAULTS
-from shapely.geometry import Polygon
+from plane import Plane, PLANE_LIST_PARAM_DEFAULTS, MATCH_PLANE_PARAM_DEFAULTS, PLANE_ANCHOR_ID
+from shapely.geometry import Polygon, Point
 from planepoint import PlanePoint
 from scipy.spatial.distance import cdist
 import copy
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans
 from scipy.spatial import ConvexHull
 
 # Default parameters to match 2 z-stacks in 2D via their best matching planes
@@ -20,6 +20,10 @@ DEFAULT_2D_MATCH_PARAMS = {
     "stack_b_boundary" : None,
     "plane_list_params" : PLANE_LIST_PARAM_DEFAULTS,
     "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
+    "seg_params": {
+        "eps": 3.0,
+        "min_samples" : 2
+    },
     "plot_uoi" : False,
     "plot_match" : False
 }
@@ -99,33 +103,33 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
                 except:
                     pass
 
-            # Shade non-overlapping parts of A
-            a_only = poly_a.difference(poly_b)
-            if not a_only.is_empty:
-                try:
-                    if a_only.geom_type == "Polygon":
-                        x, y = a_only.exterior.xy
-                        ax.fill(x, y, color="red", alpha=0.2, label="A only" if i == matches[0][0] else "")
-                    elif a_only.geom_type == "MultiPolygon":
-                        for subpoly in a_only.geoms:
-                            x, y = subpoly.exterior.xy
-                            ax.fill(x, y, color="red", alpha=0.2)
-                except:
-                    pass
+            # # Shade non-overlapping parts of A
+            # a_only = poly_a.difference(poly_b)
+            # if not a_only.is_empty:
+            #     try:
+            #         if a_only.geom_type == "Polygon":
+            #             x, y = a_only.exterior.xy
+            #             ax.fill(x, y, color="red", alpha=0.2, label="A only" if i == matches[0][0] else "")
+            #         elif a_only.geom_type == "MultiPolygon":
+            #             for subpoly in a_only.geoms:
+            #                 x, y = subpoly.exterior.xy
+            #                 ax.fill(x, y, color="red", alpha=0.2)
+            #     except:
+            #         pass
 
-            # Shade non-overlapping parts of B
-            b_only = poly_b.difference(poly_a)
-            if not b_only.is_empty:
-                try:
-                    if b_only.geom_type == "Polygon":
-                        x, y = b_only.exterior.xy
-                        ax.fill(x, y, color="red", alpha=0.2, label="B only" if i == matches[0][0] else "")
-                    elif b_only.geom_type == "MultiPolygon":
-                        for subpoly in b_only.geoms:
-                            x, y = subpoly.exterior.xy
-                            ax.fill(x, y, color="red", alpha=0.2)
-                except:
-                    pass
+            # # Shade non-overlapping parts of B
+            # b_only = poly_b.difference(poly_a)
+            # if not b_only.is_empty:
+            #     try:
+            #         if b_only.geom_type == "Polygon":
+            #             x, y = b_only.exterior.xy
+            #             ax.fill(x, y, color="red", alpha=0.2, label="B only" if i == matches[0][0] else "")
+            #         elif b_only.geom_type == "MultiPolygon":
+            #             for subpoly in b_only.geoms:
+            #                 x, y = subpoly.exterior.xy
+            #                 ax.fill(x, y, color="red", alpha=0.2)
+            #     except:
+            #         pass
 
     if plot:
         handles, labels = ax.get_legend_handles_labels()
@@ -158,7 +162,6 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         plane_gen_params = copy.deepcopy(params["plane_gen_params"])
         if params["stack_a_boundary"]: # Update custom image boundaries if they are uneven
             plane_gen_params["plane_boundaries"] = params["stack_a_boundary"]
-
         planes_a = zstack_a.generate_planes(plane_gen_params)
     else:
         planes_a = zstack_a.planes
@@ -175,10 +178,13 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
-    # Get all unique 2D transformations from best matches
-    unique_transformations = set()
+    # Stores just (rounded) values for uniqueness checking
+    seen_transformations = set()
 
-    for match in list(matched_planes.values()):
+    # Stores full records including planes
+    unique_transformations = []
+
+    for match in matched_planes.values():
         plane_a = match["plane_a"]
         plane_b = match["plane_b"]
         match_data = match["result"]
@@ -186,47 +192,49 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         proj_a, proj_b_aligned, transform_info = plane_a.get_aligned_2d_projection(
             plane_b,
             offset_deg=match_data["offset"],
-            scale_factor= match_data["scale_factor"]
+            scale_factor=match_data["scale_factor"]
         )
 
         rotation_2d = transform_info["rotation_deg"]
         scale_2d = transform_info["scale"]
         translation_2d = transform_info["translation"]
+
         rounded = (
             round(rotation_2d, 2),
             round(scale_2d, 2),
             round(translation_2d[0], 2),
             round(translation_2d[1], 2),
-            plane_a,
-            plane_b
         )
 
+        if rounded not in seen_transformations:
+            seen_transformations.add(rounded)
+            unique_transformations.append((rotation_2d, scale_2d, translation_2d[0], translation_2d[1], match_data, plane_a, plane_b))
 
-    print(f"Unique transformations found (rot, scale, t_x, t_y, plane_a, plane_b): {unique_transformations}")
+    print(f"Unique transformations found (rot, scale, t_x, t_y): {[(rot, scale, tx, ty) for rot, scale, tx, ty, _, _, _ in unique_transformations]}")
 
     # Calculate UoIs of all unique 2D transformations
     UoIs = []
 
     # Project and transform points on both planes for each transformation identified
-    for rotation_2d, scale_2d, tx, ty, plane_a, plane_b in unique_transformations:
+    for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
         # Determine whether either plane is flat
-        flat_plane_a = np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
-        flat_plane_b = np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
+        flat_plane_a = False #np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
+        flat_plane_b = False #np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
         translation_2d = (tx, ty)
 
-        rois_a_2d_proj = {}
-        rois_b_2d_proj = {}
         # Get dicts of {idx : [x,y,z]}
         if flat_plane_a:
             rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
-            rois_a_2d = project_angled_plane_points(zstack_a, plane_a)
+            rois_a_2d = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
 
         if flat_plane_b:
             rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
-            rois_b_2d = project_angled_plane_points(zstack_b, plane_b)
+            rois_b_2d = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
 
+        rois_a_2d_proj = {}
+        rois_b_2d_proj = {}
         # Iterate through A rois and project to 2D plane
         for idx, coords_3d in rois_a_2d.items():
             rois_a_2d_proj[idx] = np.array([plane_a._project_point_2d(pt) for pt in coords_3d])
@@ -237,20 +245,64 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
             )
 
-        # TODO Plot match here if designated in params
+        # Plot match here if designated in params
+        if params["plot_match"]:
+            # Setup plot
+            fig, ax = plt.subplots(figsize=(10, 8))
+            ax.set_title("Projected and Transformed ROIs (Plane A and Plane B)")
+            ax.set_aspect('equal')
+
+            # Plot ROIs from Plane A (always blue)
+            for pid, points in rois_a_2d_proj.items():
+                if points.shape[0] == 0:
+                    continue
+                ax.plot(points[:, 0], points[:, 1], 'o', markersize=2, color='blue')  # ← explicitly blue
+                centroid = points.mean(axis=0)
+                ax.text(centroid[0], centroid[1], f"A{pid}", fontsize=8, color='blue')
+
+            # Plot ROIs from Plane B (always green)
+            for pid, points in rois_b_2d_proj.items():
+                if points.shape[0] == 0:
+                    continue
+                ax.plot(points[:, 0], points[:, 1], 'x', markersize=2, color='green')  # ← explicitly green
+                centroid = points.mean(axis=0)
+                ax.text(centroid[0], centroid[1], f"B{pid}", fontsize=8, color='green')
+
+            ax.grid(True)
+            plt.tight_layout()
+            plt.show()
 
         # Calculate UoI for all unique transformations
-        regions_a = {pid : BoundaryRegion([(x, y, z) for x,y,z in rois_a_2d[pid]]) for pid, pts in rois_a_2d.items()}
-        regions_b = {pid : BoundaryRegion([(x, y, z) for x,y,z in rois_b_2d[pid]]) for pid, pts in rois_b_2d.items()}
-        UoI = compute_avg_uoi(regions_a, regions_b, match_data["og_matches"], plot=params["plot_uoi"])
+        regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
+        regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
+
+        # And you have original matches from match_data["og_matches"]
+        matches = match_data["og_matches"]
+
+        # Filter matches to only those where both PIDs survived projection
+        filtered_matches = [
+            (i, j) for (i, j) in matches
+            if i in regions_a and j in regions_b
+        ]
+
+        print(regions_a.keys())
+        print(regions_b.keys())
+
+        print(matches)
+
+        UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, plot=params["plot_uoi"])
         UoIs.append(UoI)
 
 
     # Calculate best UoI
-    best_UoI = max(UoIs)
-    best_idx = UoIs.index(best_UoI)
-    best_transformation = list(unique_transformations)[best_idx]
-    print(f"Best UoI: {best_UoI}, Best Transformation: {best_transformation}")
+    if len(UoIs) > 0:
+        best_UoI = max(UoIs)
+        best_idx = UoIs.index(best_UoI)
+        best_transformation = list(unique_transformations)[best_idx]
+        best_transformation = best_transformation[0:4] # extract only the operations
+        print(f"Best UoI: {best_UoI}, Best Transformation: {best_transformation}")
+    else:
+        print("No matches found - no UoI calculated")
 
 
 def project_flat_plane_points(z_stack, anchor_point):
@@ -278,53 +330,112 @@ def project_flat_plane_points(z_stack, anchor_point):
 
     return boundary_regions
 
-def project_angled_plane_points(z_stack, angled_plane, fixed_basis=True, eps=5.0, min_samples=5):
+def project_angled_plane_points(
+    z_stack, angled_plane: Plane,
+    threshold=0.5, eps=5.0, min_samples=5
+):
     """
-    Projects points onto an angled plane and segments clusters into ROIs.
+    Projects points onto an angled plane, clusters them into ROIs, 
+    and assigns each alignment point to exactly one unique cluster region.
 
     Args:
-        z_stack: The ZStack object containing ROIs.
+        z_stack: The ZStack object.
         angled_plane: The Plane object.
-        fixed_basis: Whether to use a fixed basis for projections.
-        eps: DBSCAN eps value for clustering.
-        min_samples: Minimum points per cluster.
+        threshold: Distance threshold to consider points near the plane.
+        eps: DBSCAN epsilon.
+        min_samples: DBSCAN minimum samples.
 
     Returns:
-        Dictionary {pid : [(x, y, z)]}, where pid is a cluster label.
+        Dictionary {pid : [(x, y, z)]} where pid is a unique ROI ID.
+        Only alignment/anchor points that are assigned are kept.
     """
 
-    all_projected_pts = []
-    original_coords = []
-    idx_map = []  # map from projected point index to (x, y, z) original
+    # 1. Project ROI points
+    projected_pts_2d = []
+    original_pts_3d = []
 
-    # Project all points
     for z in z_stack.z_planes:
         for roi_id, roi_data in z_stack.z_planes[z].items():
             coords = roi_data["coords"]
             for (x, y) in coords:
                 pt3d = np.array([x, y, z])
-                proj = angled_plane.project_point(pt3d, fixed_basis=fixed_basis)
-                if proj is not None:
-                    all_projected_pts.append(proj)
-                    original_coords.append((x, y, z))  # save original 3D point
-                    idx_map.append(len(idx_map))  # just sequential indexing
+                if angled_plane._distance_to_plane(pt3d) < threshold:
+                    proj2d = angled_plane._project_point_2d(pt3d)
+                    projected_pts_2d.append(proj2d)
+                    original_pts_3d.append((x, y, z))
 
-    if not all_projected_pts:
+    if not projected_pts_2d:
         return {}
 
-    all_projected_pts = np.array(all_projected_pts)
+    projected_pts_2d = np.array(projected_pts_2d)
 
-    # Cluster projected points
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(all_projected_pts)
+    # 2. Cluster projected points
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(projected_pts_2d)
     labels = clustering.labels_
 
-    # Group points by cluster
-    regions_raw = {}
+    clusters = {}
     for idx, label in enumerate(labels):
         if label == -1:
-            continue  # skip noise
-        if label not in regions_raw:
-            regions_raw[label] = []
-        regions_raw[label].append(original_coords[idx])  # store 3D points
+            continue  # Skip noise
+        if label not in clusters:
+            clusters[label] = []
+        clusters[label].append((projected_pts_2d[idx], original_pts_3d[idx]))
 
-    return regions_raw
+    # 3. Project anchor/alignment points
+    projected_anchors = {}
+    for _, plane_point in angled_plane.plane_points.items():
+        proj2d = angled_plane._project_point_2d(plane_point.position)
+        projected_anchors[plane_point.id] = proj2d
+
+    # 4. Build final regions
+    output_regions = {}
+    assigned_pids = set()
+
+    for label, points in clusters.items():
+        cluster_pts_2d = np.array([pt2d for pt2d, pt3d in points])
+
+        if len(cluster_pts_2d) >= 3:
+            hull = ConvexHull(cluster_pts_2d)
+            cluster_polygon = Polygon(cluster_pts_2d[hull.vertices])
+        else:
+            cluster_polygon = None
+
+        # Find anchors inside cluster
+        anchors_inside = []
+        if cluster_polygon is not None:
+            for pid, anchor_pt in projected_anchors.items():
+                point = Point(anchor_pt)
+                if cluster_polygon.contains(point):
+                    anchors_inside.append(pid)
+
+        if len(anchors_inside) == 0:
+            continue  # No alignment points inside → discard cluster
+
+        if len(anchors_inside) == 1:
+            # Exactly one alignment point inside
+            pid = anchors_inside[0]
+            output_regions[pid] = [pt3d for pt2d, pt3d in points]
+            assigned_pids.add(pid)
+        else:
+            # Multiple anchors inside -> split
+            anchor_pts = np.array([projected_anchors[pid] for pid in anchors_inside])
+            kmeans = KMeans(
+                n_clusters=len(anchor_pts),
+                init=anchor_pts,
+                n_init=1,
+                max_iter=1,
+                random_state=42
+            )
+            cluster_pts_only = np.array([pt2d for pt2d, pt3d in points])
+            labels_split = kmeans.fit_predict(cluster_pts_only)
+
+            split_clusters = {pid: [] for pid in anchors_inside}
+            for idx, split_label in enumerate(labels_split):
+                assigned_anchor = anchors_inside[split_label]
+                split_clusters[assigned_anchor].append(points[idx][1])  # Keep original 3D point
+
+            for pid, pts3d in split_clusters.items():
+                output_regions[pid] = pts3d
+                assigned_pids.add(pid)
+
+    return output_regions

@@ -22,7 +22,6 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "max_alignments" : 500
 }
 
-
 def get_hull_boundary_points(hull):
     """Extract the list of boundary points of a 2D convex hull."""
     vertices = hull.points[hull.vertices]
@@ -209,7 +208,6 @@ class ZStack:
 
             max_tilt_rad = np.radians(params["max_tilt_deg"])
             self.planes = []
-
 
             boundaries = params["plane_boundaries"]
             self._find_edge_rois(boundaries[0], boundaries[1], boundaries[2], boundaries[3], params["margin"])
