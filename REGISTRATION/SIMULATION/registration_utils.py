@@ -22,7 +22,7 @@ DEFAULT_2D_MATCH_PARAMS = {
     "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
     "seg_params": {
         "eps": 3.0,
-        "min_samples" : 2
+        "min_samples" : 5
     },
     "plot_uoi" : False,
     "plot_match" : False
@@ -178,6 +178,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
+    print(matched_planes)
+
     # Stores just (rounded) values for uniqueness checking
     seen_transformations = set()
 
@@ -218,6 +220,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Project and transform points on both planes for each transformation identified
     for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
         # Determine whether either plane is flat
+        # TODO turn off Falses so script can run as normal
         flat_plane_a = False #np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
         flat_plane_b = False #np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
         translation_2d = (tx, ty)
@@ -272,9 +275,14 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             plt.tight_layout()
             plt.show()
 
+
+
         # Calculate UoI for all unique transformations
         regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
         regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
+
+        # plot_regions_2d_polygons(regions_a, title="Projected Regions A")
+        # plot_regions_2d_polygons(regions_b, title="Projected Regions B")
 
         # And you have original matches from match_data["og_matches"]
         matches = match_data["og_matches"]
@@ -439,3 +447,45 @@ def project_angled_plane_points(
                 assigned_pids.add(pid)
 
     return output_regions
+
+# TEST DEBUG
+def plot_regions_2d_polygons(regions, title="Regions 2D Projection"):
+    """
+    Plot the boundary polygons of projected regions (2D).
+    Expects {pid : BoundaryRegion}.
+    """
+    import matplotlib.pyplot as plt
+    from shapely.geometry import Polygon
+    from scipy.spatial import ConvexHull
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.set_title(title)
+    ax.set_aspect('equal')
+
+    for pid, region in regions.items():
+        points = region.get_boundary_points()  # <-- Extract boundary points from BoundaryRegion
+        if len(points) < 3:
+            continue  # Need at least 3 points to form a polygon
+
+        pts2d = np.array([(x, y) for x, y, z in points])
+
+        try:
+            hull = ConvexHull(pts2d)
+            hull_pts = pts2d[hull.vertices]
+            hull_pts = np.vstack([hull_pts, hull_pts[0]])
+
+            ax.plot(hull_pts[:, 0], hull_pts[:, 1], '-', label=f"Region {pid}")
+
+            centroid = pts2d.mean(axis=0)
+            ax.scatter(centroid[0], centroid[1], color='black', s=10)
+            ax.text(centroid[0], centroid[1], f"{pid}", fontsize=8, color='black')
+
+        except Exception as e:
+            print(f"Warning: Could not form polygon for region {pid}: {e}")
+            continue
+
+    ax.grid(True)
+    ax.legend(fontsize=6, loc='best')
+    plt.tight_layout()
+    plt.show()

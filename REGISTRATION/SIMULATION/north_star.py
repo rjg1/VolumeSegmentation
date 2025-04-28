@@ -189,7 +189,7 @@ def main():
     }
 
     plane_list_params = {
-        "min_score" : 0.7,
+        "min_score" : 0.95,
         "traits": {
             "angle" : {
                 "weight": 0.6,
@@ -210,7 +210,7 @@ def main():
         "plot_match" : True,
         "seg_params": {
             "eps": 3.0,
-            "min_samples" : 2
+            "min_samples" : 5
         }
     }
 

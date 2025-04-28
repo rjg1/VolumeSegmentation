@@ -757,8 +757,8 @@ class Plane:
         """
         params = PLANE_LIST_PARAM_DEFAULTS.copy()  # start with defaults
         if plane_list_params:
-            params.update(match_plane_params)  # override with anything user provides
-        
+            params.update(plane_list_params)  # override with anything user provides
+
         # Ensure defaults in matching paramerers
         match_params = MATCH_PLANE_PARAM_DEFAULTS.copy()
         if match_plane_params:
