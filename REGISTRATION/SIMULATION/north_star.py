@@ -210,7 +210,7 @@ def main():
         "plot_match" : True,
         "seg_params": {
             "method" : "merge",
-            "eps": 2,
+            "eps": 1.5,
             "min_samples" : 5
         }
     }
