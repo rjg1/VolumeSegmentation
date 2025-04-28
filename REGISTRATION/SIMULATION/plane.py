@@ -10,10 +10,45 @@ import matplotlib.pyplot as plt
 
 PLANE_ANCHOR_ID = 0
 
+# Default parameters for matching two planes
+MATCH_PLANE_PARAM_DEFAULTS = {
+    "bin_match_params" : {
+        "resolution" : 360,
+        "angle_tolerance" : 2,
+        "radians" : True,
+        "min_matches" : 2,
+        "outlier_thresh" : 2,
+        "mse_threshold" : 1e-3
+    },
+    "angle_match_params" : {
+        "blur_sigma" : 2,
+        "resolution" : 360
+    },
+    "angle_mse_threshold" : 1.0,
+    "magnitude_mse_threshold" : 1.0,
+    "circular_fft" : True,
+}
+
+# Default parameters for matching two lists of planes
+PLANE_LIST_PARAM_DEFAULTS = {
+        "min_score" : 0.7,
+        "traits": {
+            "angle" : {
+                "weight": 0.6,
+                "max_value" : 5.0
+            },
+            "magnitude" : {
+                "weight": 0.4,
+                "max_value" : 10.0
+            }
+        }
+    }
+
 class Plane:
-    def __init__(self, anchor_point, alignment_points, fixed_basis = True):
+    def __init__(self, anchor_point, alignment_points, fixed_basis = True, max_alignments = 10):
         self.anchor_point = anchor_point
-        self.alignment_points = alignment_points
+        self.max_alignments = max_alignments
+        self.alignment_points = alignment_points[:self.max_alignments]
         self.fixed_basis = fixed_basis
         if len(self.alignment_points) >= 2: # Make a plane from the anchor point and 2 alignment points
             self.normal, self.d = self._plane_from_points(self.anchor_point, *self.alignment_points[:2])
@@ -28,8 +63,6 @@ class Plane:
         self.angles = []
         self.magnitudes = []
         self.angles_and_magnitudes()
-
-        # # TODO some equality checking to ensure duplicate planes aren't created
 
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
@@ -84,40 +117,36 @@ class Plane:
         max_score = corr[best_offset]
         return best_offset, max_score, corr
 
-    def _fuzzy_bin_match(self, angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, 
-        offset_deg, resolution=360, window=2, radians = True
+    def _fuzzy_bin_match(
+        self, angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset_deg, 
+        resolution=360, angle_tolerance=2, radians=True,
+        min_matches=2, outlier_thresh=2.0, mse_threshold=1e-3
     ):
         """
-        Fast fuzzy bucket-based ROI matcher using binning and moving window.
-
-        Parameters:
-        - angles_a, mags_a: Plane A ROI angles and magnitudes
-        - angles_b, mags_b: Plane B ROI angles and magnitudes
-        - offset_deg: degrees to rotate Plane B
-        - resolution: number of bins (e.g., 360 for 1° resolution)
-        - window: angular window size in degrees to allow fuzzy matching
+        Full fuzzy matcher with 1:1 matching, scaling, outlier removal, early termination,
+        and returns angular and magnitude differences per match.
 
         Returns:
-        - matches: list of (i, j) index pairs for matched ROIs
-        - angular_diffs: list of angle differences
-        - magnitude_diffs: list of magnitude differences
+        - best_matches: list of (pida, pidb) ROI id pairs
+        - best_scaling: fitted scaling factor
+        - best_mse: final mean squared error
+        - angular_diffs: per-match angle differences
+        - magnitude_diffs: per-match scaled magnitude differences
         """
         if radians:
-            angles_a_deg = [np.degrees(a) for a in angles_a]
-            angles_b_deg = [np.degrees(b) for b in angles_b]
+            angles_a_deg = np.degrees(angles_a)
+            angles_b_deg = np.degrees(angles_b)
         else:
             angles_a_deg = angles_a
             angles_b_deg = angles_b
 
-        # Exclude anchor ROIs
-        ids_a = ids_a[1:]
+        ids_a = ids_a[1:]  # skip anchor
         ids_b = ids_b[1:]
 
-        # Normalize and rotate Plane B
         angles_b_rot = [(angle + offset_deg) % 360 for angle in angles_b_deg]
 
         # Bin ROIs
-        bucket_a = defaultdict(list) # {angle : [<indices>]}
+        bucket_a = defaultdict(list)
         bucket_b = defaultdict(list)
 
         for i, (pida, angle) in enumerate(zip(ids_a, angles_a_deg)):
@@ -128,55 +157,148 @@ class Plane:
             idx = int(round(angle * resolution / 360)) % resolution
             bucket_b[idx].append((j, pidb))
 
-        # Match using fuzzy window
-        used_a = set()
-        used_b = set()
-        matches = []
-        angular_diffs = []
-        magnitude_diffs = []
+        # Build candidate matches
+        candidates = []
+        for angle_a in bucket_a:
+            for delta in range(-angle_tolerance, angle_tolerance + 1):
+                angle_b = (angle_a + delta) % resolution
+                for i, pida in bucket_a[angle_a]:
+                    for j, pidb in bucket_b.get(angle_b, []):
+                        candidates.append((i, j, pida, pidb))
 
-        for angle_a in bucket_a: # iterate through all angles in plane A
-            for delta in range(-window, window + 1): # match over a certain offset window
-                angle_b = (angle_a + delta) % resolution # wrap offset window around 360 degrees if necessary
-                for i, pida in bucket_a[angle_a]: # for all ROIs at this offset (assumed 1 in most cases)
-                    for j, pidb in bucket_b.get(angle_b, []): # for all ROIs at the corresponding offset (assumed 0-1) 
-                        if i not in used_a and j not in used_b: # match immediately and break if execution reaches here
-                            angle_diff = abs(angles_a_deg[i] - angles_b_rot[j]) % 360 # calculate the angle diff - offszet by 1 as id 1 is first entry in angles list
-                            angle_diff = min(angle_diff, 360 - angle_diff) # take the minimum of the two directions in angle
-                            mag_diff = abs(mags_a[i] - mags_b[j]) # get the absolute magnitude diff
+        if not candidates:
+            return [], None, None, [], []
 
-                            matches.append((pida, pidb)) # append roi ids for matches
-                            angular_diffs.append(angle_diff)
-                            magnitude_diffs.append(mag_diff)
+        # Build options
+        options = defaultdict(list)
+        for i, j, pida, pidb in candidates:
+            options[i].append((j, pida, pidb))
 
-                            used_a.add(i) # mark as matched
-                            used_b.add(j) # mark as matched
-                            break  # only one match per roi pair
+        i_list = sorted(options.keys())
 
-        return matches, angular_diffs, magnitude_diffs
+        match_sets = []
+
+        def backtrack(current_set, used_is, used_js, candidates_left):
+            if len(candidates_left) == 0 and len(current_set) >= min_matches:
+                match_sets.append(list(current_set))  # save any valid partial match set
+
+            if not candidates_left:
+                return
+
+            for idx, (i, j, pida, pidb) in enumerate(candidates_left):
+                if i not in used_is and j not in used_js:
+                    current_set.append((i, j, pida, pidb))
+                    used_is.add(i)
+                    used_js.add(j)
+
+                    backtrack(
+                        current_set,
+                        used_is,
+                        used_js,
+                        candidates_left[idx+1:]  # remaining candidates for this match
+                    )
+
+                    used_is.remove(i)
+                    used_js.remove(j)
+                    current_set.pop()
+
+        # Start backtracking to make match sets
+        backtrack([], set(), set(), candidates)
+
+        if not match_sets:
+            return [], None, None, [], []
+
+        best_mse = np.inf
+        best_matches = []
+        best_scaling = None
+        best_angular_diffs = []
+        best_magnitude_diffs = []
+
+        for match_set in match_sets:
+            mags_a_sel = np.array([mags_a[i] for (i, j, pida, pidb) in match_set])
+            mags_b_sel = np.array([mags_b[j] for (i, j, pida, pidb) in match_set])
+
+            angles_a_sel = np.array([angles_a_deg[i] for (i, j, pida, pidb) in match_set])
+            angles_b_sel = np.array([angles_b_rot[j] for (i, j, pida, pidb) in match_set])
+
+            # Initial scaling
+            numerator = np.sum(mags_a_sel * mags_b_sel)
+            denominator = np.sum(mags_b_sel ** 2)
+            if denominator == 0:
+                continue
+            s = numerator / denominator
+
+            residuals = mags_a_sel - s * mags_b_sel
+            std = np.std(residuals)
+
+            # Outlier removal
+            mask = np.abs(residuals) <= outlier_thresh * std
+            if np.sum(mask) < min_matches:
+                continue
+
+            mags_a_final = mags_a_sel[mask]
+            mags_b_final = mags_b_sel[mask]
+            angles_a_final = angles_a_sel[mask]
+            angles_b_final = angles_b_sel[mask]
+            matches_final = [match for match, keep in zip(match_set, mask) if keep]
+
+            # Refit scaling after outlier removal
+            numerator = np.sum(mags_a_final * mags_b_final)
+            denominator = np.sum(mags_b_final ** 2)
+            if denominator == 0:
+                continue
+            s_final = numerator / denominator
+
+            final_residuals = mags_a_final - s_final * mags_b_final
+            mse = np.mean(final_residuals**2)
+
+            # Compute angular differences
+            angular_diffs = []
+            for a1, a2 in zip(angles_a_final, angles_b_final):
+                diff = abs(a1 - a2) % 360
+                angular_diffs.append(min(diff, 360 - diff))
+
+            # Compute magnitude differences after scaling
+            magnitude_diffs = np.abs(mags_a_final - s_final * mags_b_final)
+
+            if mse < best_mse:
+                best_mse = mse
+                best_matches = [(pida, pidb) for (_, _, pida, pidb) in matches_final]
+                best_scaling = s_final
+                best_angular_diffs = angular_diffs
+                best_magnitude_diffs = magnitude_diffs.tolist()
+
+                if best_mse <= mse_threshold:
+                    break  # early exit
+
+        if not best_matches:
+            return [], None, None, [], []
+
+        return best_matches, best_scaling, best_mse, best_angular_diffs, best_magnitude_diffs
 
 
     # Full pipeline for matching planes
-    def match_planes(self, plane_b, blur_sigma = 2, angle_tolerance = 2, min_matches = 2, angle_mse_threshold = 1.0, magnitude_mse_threshold = 1.0, circular_fft = True):
+    def match_planes(self, plane_b, match_plane_params = None):
+        params = MATCH_PLANE_PARAM_DEFAULTS.copy()  # start with defaults
+        if match_plane_params:
+            params.update(match_plane_params)  # override with anything user provides
+
         angles_a, mags_a = self.angles_and_magnitudes()
         angles_b, mags_b = plane_b.angles_and_magnitudes()
 
         ids_a, ids_b = list(self.plane_points.keys()), list(plane_b.plane_points.keys())
 
         # Calculate best rotational offset
-        signal_a = self._build_angular_signal(angles_a, resolution=360, blur_sigma=blur_sigma)
-        signal_b = self._build_angular_signal(angles_b, resolution=360, blur_sigma=blur_sigma)
-        if circular_fft:
+        signal_a = self._build_angular_signal(angles_a, **params["angle_match_params"])
+        signal_b = self._build_angular_signal(angles_b, **params["angle_match_params"])
+        if params["circular_fft"]:
             offset, score, correlation = self._match_circular_signals_fft(signal_a, signal_b)
         else:
             offset, score, correlation = self._match_circular_signals(signal_a, signal_b)
         
         # Find angle matches and compute angular error + magnitudal error
-        matches, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset, window = angle_tolerance)
-
-        # Map a points id in the plane_points dictionary to its corresponding index in mags_/angles_ list. Excludes anchor pt.
-        id_to_idx_a = {pt_id: idx for idx, pt_id in enumerate(ids_a[1:])}
-        id_to_idx_b = {pt_id: idx for idx, pt_id in enumerate(ids_b[1:])}
+        matches, scale, magnitude_mse, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset, 
+                                                                                              **params["bin_match_params"])
 
         # Convert matches to original id matches
         og_matches = []
@@ -184,10 +306,10 @@ class Plane:
             og_matches.append((self.plane_points[i].id, plane_b.plane_points[j].id))
 
         # Check minimum match count
-        if len(matches) < min_matches:
+        if len(matches) < params["bin_match_params"]["min_matches"]:
             return {
                 "match": False,
-                "reason": f"{len(matches)} matches found, below minimum {min_matches}.",
+                "reason": f"{len(matches)} matches found, below minimum {params['bin_match_params']['min_matches']}.",
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
@@ -199,7 +321,7 @@ class Plane:
         # Compute angle MSE
         angle_mse = np.mean(np.square(angular_diffs)) if angular_diffs else float('inf')
 
-        if angle_mse >= angle_mse_threshold:
+        if angle_mse >= params["angle_mse_threshold"]:
             return {
                 "match": False,
                 "reason": "Failed angle MSE threshold",
@@ -209,24 +331,13 @@ class Plane:
                 "matches": matches,
                 "angular_diffs": angular_diffs,
                 "magnitude_diffs": magnitude_diffs,
-                "angle_mse": angle_mse
+                "angle_mse": angle_mse,           
+                "magnitude_mse": magnitude_mse,
+                "scale_factor": scale
             }
-        
-        # Compute best-fit scale for magnitudes and MSE
-        # Extract the magnitudes of all matched vectors
-        matched_a = np.array([mags_a[id_to_idx_a[i]] for i, j in matches])
-        matched_b = np.array([mags_b[id_to_idx_b[j]] for i, j in matches])
-        # Solve the linear least squares problem with the closed form solution
-        numerator = np.sum(matched_a * matched_b) # Sum of the product of all elements index wise
-        denominator = np.sum(matched_b ** 2)
-        scale = numerator / denominator if denominator != 0 else 0.0
-        scaled_b = matched_b * scale # Scale the vectors to match
-        diff = matched_a - scaled_b # Calculate the difference in magnitudes
-        magnitude_mse = np.mean(diff ** 2) # Calculate the MSE
-        abs_diffs = np.abs(diff).tolist() # Calculate the differences
 
-        # Check thresholds
-        if magnitude_mse > magnitude_mse_threshold:
+        # Compare magnitude MSE
+        if magnitude_mse > params["magnitude_mse_threshold"]:
             return {
                 "match": False,
                 "reason": "Failed magnitude MSE threshold",
@@ -235,7 +346,7 @@ class Plane:
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
-                "magnitude_diffs": abs_diffs,
+                "magnitude_diffs": magnitude_diffs,
                 "angle_mse": angle_mse,
                 "magnitude_mse": magnitude_mse,
                 "scale_factor": scale
@@ -251,7 +362,7 @@ class Plane:
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
-                "magnitude_diffs": abs_diffs,
+                "magnitude_diffs": magnitude_diffs,
                 "angle_mse": angle_mse,
                 "magnitude_mse": magnitude_mse,
                 "scale_factor": scale,
@@ -385,6 +496,8 @@ class Plane:
         point_added = False
         idx = len(self.plane_points.keys()) # New index to add points
         for ppt in points:
+            if len(self.alignment_points) >= self.max_alignments: # Do not allow any more alignment points
+                break
             pt = ppt.position # Extract position from planepoint
             if self._distance_to_plane(pt) <= threshold: # If it is close enough to the plane, project it
                 proj = self._project_point(pt)
@@ -546,7 +659,7 @@ class Plane:
         return [self._apply_3d_transform(point, rotation_matrix, scale=scale, translation=translation, b_anchor_point=b_anchor_point, project=project) for point in points]
     
     
-    def is_equivalent_to(self, other_plane, comparison_pts = 3, angle_threshold_deg=1.0, distance_threshold=0.5, match_anchors = True):
+    def is_equivalent_to(self, other_plane, comparison_pts = 3, angle_threshold_deg=1.0, distance_threshold=0.5, match_anchors = False):
         """
         Fast approximate check if two planes are geometrically equal by:
         - Comparing the angle between their normal vectors.
@@ -602,9 +715,15 @@ class Plane:
             (u, v): A tuple of two orthonormal 3D vectors defining the local plane axes.
         """
         if self.fixed_basis:
-            u = np.array([1.0, 0.0, 0.0])
-            v = np.cross(self.normal, u)
-            v = v / np.linalg.norm(v)
+            z_axis = np.array([0.0, 0.0, 1.0])
+            if np.allclose(self.normal, z_axis, atol=1e-2) or np.allclose(self.normal, -z_axis, atol=1e-2):
+                # Flat plane case: preserve x and y directly
+                u = np.array([1.0, 0.0, 0.0])
+                v = np.array([0.0, 1.0, 0.0])
+            else:
+                u = np.array([1.0, 0.0, 0.0])
+                v = np.cross(self.normal, u)
+                v = v / np.linalg.norm(v)
         else:
             v1 = self.alignment_points[0].position - self.anchor_point.position
             u = v1 / np.linalg.norm(v1)
@@ -613,7 +732,9 @@ class Plane:
         return u, v
 
     @staticmethod
-    def match_plane_lists(planes_a, planes_b, weights, max_values, score_threshold=0.5):
+    def match_plane_lists(planes_a, planes_b, 
+                          plane_list_params = None,
+                          match_plane_params = None):
         """
         Matches planes from planes_a to planes_b based on a composite similarity score.
         Each score is calculated as a weighted combination of angle, magnitude, and trait similarities.
@@ -627,13 +748,21 @@ class Plane:
         Returns:
             List of matched tuples (idx_a, idx_b, score, match_result_dict)
         """
+        params = PLANE_LIST_PARAM_DEFAULTS.copy()  # start with defaults
+        if plane_list_params:
+            params.update(match_plane_params)  # override with anything user provides
+        
+        print(f"Plane list params: {params}")
+
+        max_values = {trait : params["traits"][trait]["max_value"] for trait in params["traits"]}
+        weights = {trait : params["traits"][trait]["weight"] for trait in params["traits"]}
+
         results = {}
+
 
         for i, plane_a in enumerate(planes_a):
             for j, plane_b in enumerate(planes_b):
-                match_result = plane_a.match_planes(plane_b, 
-                                                    angle_mse_threshold = max_values['angle'], 
-                                                    magnitude_mse_threshold = max_values['magnitude'])
+                match_result = plane_a.match_planes(plane_b, match_plane_params)
                 print(match_result)
 
                 if not match_result["match"]:
@@ -669,7 +798,7 @@ class Plane:
                         weights.get("magnitude", 0) * magnitude_score + \
                         sum(weights.get(trait, 0) * trait_scores[trait] for trait in trait_scores)
 
-                if score >= score_threshold:
+                if score >= params["min_score"]:
                     results[score] = {
                         "plane_a": plane_a,
                         "plane_b": plane_b,
@@ -711,3 +840,5 @@ class Plane:
             plt.show()
         else:
             plt.close()
+
+

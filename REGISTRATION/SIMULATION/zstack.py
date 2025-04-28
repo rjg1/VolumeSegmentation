@@ -8,6 +8,23 @@ from plane import Plane
 from planepoint import PlanePoint
 import copy
 
+PLANE_GEN_PARAMS_DEFAULT = {
+    "anchor_intensity_threshold": 0.8,
+    "align_intensity_threshold": 0.4,
+    "z_threshold": 5,
+    "max_tilt_deg": 30.0,
+    "projection_dist_thresh":  0.5,
+    "normalize_intensity" : True,
+    "xmin" : -np.inf, #image boundaries to clip
+    "xmax" : np.inf,
+    "ymin" : -np.inf,
+    "ymax" : np.inf,
+    "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
+    "match_anchors" : True,
+    "fixed_basis" : True,
+    "max_alignments" : 500
+}
+
 
 def get_hull_boundary_points(hull):
     """Extract the list of boundary points of a 2D convex hull."""
@@ -186,28 +203,23 @@ class ZStack:
 
     def generate_planes(
             self,
-            anchor_intensity_threshold: float,
-            align_intensity_threshold: float,
-            z_threshold: int,
-            max_tilt_deg: float = 60.0,
-            projection_dist_thresh: float = 0.5,
-            normalize_intensity = True,
-            xmin = -np.inf, #image boundaries to clip
-            xmax = np.inf,
-            ymin = -np.inf,
-            ymax = np.inf,
-            margin = 2 # distance between boundary point and pixel in img to be considered an edge roi
+            plane_gen_params = None
         ):
-            max_tilt_rad = np.radians(max_tilt_deg)
+            params = PLANE_GEN_PARAMS_DEFAULT.copy()  # start with defaults
+            if plane_gen_params:
+                params.update(plane_gen_params)  # override with anything user provides
+            
+
+            max_tilt_rad = np.radians(params["max_tilt_deg"])
             self.planes = []
 
-            self._find_edge_rois(xmin, xmax, ymin, ymax, margin)
+            self._find_edge_rois(params["xmin"], params["xmax"], params["ymin"], params["ymax"], params["margin"])
 
             if not self.has_intensity:
                 raise ValueError("Requires intensity to run")
             
             # Normalize intensitys across planes if applicable
-            if normalize_intensity:
+            if params["normalize_intensity"]:
                 for z, roi_data in self.z_planes.items():
                     intensities = [info["intensity"] for info in roi_data.values() if "intensity" in info]
                     if not intensities:
@@ -229,7 +241,7 @@ class ZStack:
 
 
             # Build a dictionary of {z: [(id, BoundaryRegion)]} for potential anchor and alignment points
-            anchor_by_z, align_by_z = self._build_z_indexed_rois(anchor_intensity_threshold, align_intensity_threshold)
+            anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"])
 
             # Search through anchor points in ascending Z
             for z_anchor in sorted(anchor_by_z.keys()): # Iterate through z levels
@@ -240,7 +252,7 @@ class ZStack:
 
                     # Collect alignment candidates within z threshold
                     local_alignments = []
-                    for dz in range(-z_threshold, z_threshold + 1):
+                    for dz in range(-params["z_threshold"], params["z_threshold"] + 1):
                         for align_id, align_roi in align_by_z.get(z_anchor + dz, []): # Find any entries on this z-level
                             if align_id != anchor_id: # Exclude anchor point from forming a plane with itself
                                 local_alignments.append((align_id, align_roi))
@@ -258,12 +270,12 @@ class ZStack:
                             continue
 
                         # Construct a plane object with these points
-                        plane = Plane(anchor_point, [p1, p2])
+                        plane = Plane(anchor_point, [p1, p2], max_alignments=params["max_alignments"], fixed_basis=params["fixed_basis"])
                         # Find any extra points to project to this plane to increase accuracy of alignment
                         additional_points = [PlanePoint(align_id, align_roi.get_centroid()) for align_id, align_roi in local_alignments if align_id not in (id1, id2, anchor_id)]
-                        plane.project_points(additional_points, threshold=projection_dist_thresh) # Project all nearby points
+                        plane.project_points(additional_points, threshold=params["projection_dist_thresh"]) # Project all nearby points
 
-                        if not any(existing.is_equivalent_to(plane) for existing in self.planes):
+                        if not any(existing.is_equivalent_to(plane, match_anchors = params["match_anchors"]) for existing in self.planes):
                             self.planes.append(plane)
 
             return self.planes
@@ -302,9 +314,9 @@ class ZStack:
         df.to_csv(filename, index=False)
 
     # Remakes planes saved from a previous csv
-    def read_planes_from_csv(filename):
+    def read_planes_from_csv(self, filename):
         df = pd.read_csv(filename)
-        planes = []
+        self.planes = []
 
         for plane_id, group in df.groupby("plane_id"):
             anchor_row = group[group["type"] == "anchor"].iloc[0]
@@ -318,9 +330,9 @@ class ZStack:
 
             if len(alignments) >= 2:
                 plane = Plane(anchor, alignments)
-                planes.append(plane)
+                self.planes.append(plane)
 
-        return planes
+        return self.planes
 
 
 
