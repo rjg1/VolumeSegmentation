@@ -50,13 +50,31 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
     unmatched_ids_a = [i for i in regions_a if i not in matched_ids_a]
     unmatched_ids_b = [j for j in regions_b if j not in matched_ids_b]
 
-    # New matches for unmatched regions
+    # New matches for unmatched regions - match based off maximizing total UoI over matches
     new_matches = []
     if unmatched_ids_a and unmatched_ids_b:
-        centroids_a = np.array([regions_a[i].get_centroid()[:2] for i in unmatched_ids_a])
-        centroids_b = np.array([regions_b[j].get_centroid()[:2] for j in unmatched_ids_b])
+        cost_matrix = np.zeros((len(unmatched_ids_a), len(unmatched_ids_b)))
 
-        cost_matrix = cdist(centroids_a, centroids_b, metric='euclidean')
+        for i_idx, a in enumerate(unmatched_ids_a):
+            for j_idx, b in enumerate(unmatched_ids_b):
+                poly_a = Polygon(regions_a[a].get_boundary_points())
+                poly_b = Polygon(regions_b[b].get_boundary_points())
+
+                if not poly_a.is_valid:
+                    poly_a = poly_a.buffer(0)
+                if not poly_b.is_valid:
+                    poly_b = poly_b.buffer(0)
+
+                if not poly_a.is_valid or not poly_b.is_valid:
+                    uoi = 0.0
+                else:
+                    inter = poly_a.intersection(poly_b)
+                    union = poly_a.union(poly_b)
+                    uoi = inter.area / union.area if union.area > 0 else 0.0
+
+                cost_matrix[i_idx, j_idx] = -uoi  # NEGATE because we maximize UoI
+
+        # Solve the assignment
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
         for i_idx, j_idx in zip(row_ind, col_ind):
@@ -71,7 +89,7 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
     # Init plot
     if plot:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_title("Matched ROIs with UoI Shading (Merged)")
+        ax.set_title("Matched ROIs with UoI Shading")
         ax.set_aspect('equal')
 
     uoi_scores = []
@@ -242,9 +260,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Project and transform points on both planes for each transformation identified
     for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
         # Determine whether either plane is flat
-        # TODO turn off Falses so script can run as normal
-        flat_plane_a = False#np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
-        flat_plane_b = False #np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
+        flat_plane_a = np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
+        flat_plane_b = np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
         translation_2d = (tx, ty)
 
         # Get dicts of {idx : [x,y,z]}
@@ -320,8 +337,6 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             (i, j) for (i, j) in updated_matches
             if i in regions_a and j in regions_b
         ]
-
-        print(filtered_matches)
 
         UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, plot=params["plot_uoi"])
         UoIs.append(UoI)

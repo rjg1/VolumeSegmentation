@@ -15,7 +15,7 @@ from zstack import ZStack
 from plane import Plane
 from scipy.optimize import linear_sum_assignment
 
-NUM_ELLIPSES =  10
+NUM_ELLIPSES = 10
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
@@ -189,7 +189,7 @@ def main():
     }
 
     plane_list_params = {
-        "min_score" : 0.95,
+        "min_score" : 0.99,
         "traits": {
             "angle" : {
                 "weight": 0.6,
@@ -209,7 +209,7 @@ def main():
         "plot_uoi" : True,
         "plot_match" : True,
         "seg_params": {
-            "method" : "merge",
+            "method" : "split",
             "eps": 1.5,
             "min_samples" : 5
         }
