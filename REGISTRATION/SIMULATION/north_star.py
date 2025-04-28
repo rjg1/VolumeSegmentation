@@ -209,7 +209,8 @@ def main():
         "plot_uoi" : True,
         "plot_match" : True,
         "seg_params": {
-            "eps": 3.0,
+            "method" : "merge",
+            "eps": 2,
             "min_samples" : 5
         }
     }

@@ -21,6 +21,7 @@ DEFAULT_2D_MATCH_PARAMS = {
     "plane_list_params" : PLANE_LIST_PARAM_DEFAULTS,
     "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
     "seg_params": {
+        "method" : "split",
         "eps": 3.0,
         "min_samples" : 5
     },
@@ -32,15 +33,144 @@ DEFAULT_2D_MATCH_PARAMS = {
 # matches remaining regoins based on minimising centroid distance using a bipartite match
 # calculates the UoI of all matched regions.
 # returns the average UoI
+# def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
+#     matched_ids_a = set(i for i, _ in matches)
+#     matched_ids_b = set(j for _, j in matches)
+
+#     # Get unmatched ids
+#     unmatched_ids_a = [i for i in regions_a if i not in matched_ids_a]
+#     unmatched_ids_b = [j for j in regions_b if j not in matched_ids_b]
+
+#     # Match unmatched regions using centroid proximity
+#     if unmatched_ids_a and unmatched_ids_b:
+#         centroids_a = np.array([regions_a[i].get_centroid()[:2] for i in unmatched_ids_a])
+#         centroids_b = np.array([regions_b[j].get_centroid()[:2] for j in unmatched_ids_b])
+
+#         cost_matrix = cdist(centroids_a, centroids_b, metric='euclidean')
+#         row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+#         new_matches = [(unmatched_ids_a[i], unmatched_ids_b[j]) for i, j in zip(row_ind, col_ind)]
+#         matches += new_matches
+
+#     # Init plot if needed
+#     if plot:
+#         fig, ax = plt.subplots(figsize=(10, 8))
+#         ax.set_title("Matched ROIs with UoI Shading")
+#         ax.set_aspect("equal")
+
+#     uoi_scores = []
+
+#     for i, j in matches:
+#         region_a = regions_a[i]
+#         region_b = regions_b[j]
+
+#         pts_a = np.array(region_a.get_boundary_points())
+#         pts_b = np.array(region_b.get_boundary_points())
+
+#         # Build polygons
+#         poly_a = Polygon(pts_a)
+#         if not poly_a.is_valid:
+#             poly_a = poly_a.buffer(0)
+
+#         poly_b = Polygon(pts_b)
+#         if not poly_b.is_valid:
+#             poly_b = poly_b.buffer(0)
+
+#         if not poly_a.is_valid or not poly_b.is_valid:
+#             print(f"Skipping invalid match ({i}, {j})")
+#             continue
+
+#         # Compute intersection & union
+#         inter = poly_a.intersection(poly_b)
+#         union = poly_a.union(poly_b)
+#         uoi = inter.area / union.area if union.area > 0 else 0
+#         uoi_scores.append(uoi)
+
+#         if plot:
+#             # Plot centroids
+#             cent_a = region_a.get_centroid()
+#             cent_b = region_b.get_centroid()
+#             ax.scatter(*cent_a[:2], color="blue", marker="o", s=25)
+#             ax.scatter(*cent_b[:2], color="green", marker="x", s=25)
+
+#             # Label centroids
+#             ax.text(cent_a[0] + 0.1, cent_a[1] + 0.1, f"A{i}", color="blue", fontsize=8)
+#             ax.text(cent_b[0] + 0.1, cent_b[1] + 0.1, f"B{j}", color="green", fontsize=8)
+
+#             # Shade intersection
+#             if not inter.is_empty:
+#                 try:
+#                     if inter.geom_type == "Polygon":
+#                         x, y = inter.exterior.xy
+#                         ax.fill(x, y, color="purple", alpha=0.3, label="Intersection" if uoi_scores.count(uoi) == 1 else "")
+#                     elif inter.geom_type == "MultiPolygon":
+#                         for subpoly in inter.geoms:
+#                             x, y = subpoly.exterior.xy
+#                             ax.fill(x, y, color="purple", alpha=0.3)
+#                 except:
+#                     pass
+
+#             # Shade non-overlapping parts of A
+#             a_only = poly_a.difference(poly_b)
+#             if not a_only.is_empty:
+#                 try:
+#                     if a_only.geom_type == "Polygon":
+#                         x, y = a_only.exterior.xy
+#                         ax.fill(x, y, color="red", alpha=0.2, label="A only" if i == matches[0][0] else "")
+#                     elif a_only.geom_type == "MultiPolygon":
+#                         for subpoly in a_only.geoms:
+#                             x, y = subpoly.exterior.xy
+#                             ax.fill(x, y, color="red", alpha=0.2)
+#                 except:
+#                     pass
+
+#             # Shade non-overlapping parts of B
+#             b_only = poly_b.difference(poly_a)
+#             if not b_only.is_empty:
+#                 try:
+#                     if b_only.geom_type == "Polygon":
+#                         x, y = b_only.exterior.xy
+#                         ax.fill(x, y, color="blue", alpha=0.2, label="B only" if i == matches[0][0] else "")
+#                     elif b_only.geom_type == "MultiPolygon":
+#                         for subpoly in b_only.geoms:
+#                             x, y = subpoly.exterior.xy
+#                             ax.fill(x, y, color="blue", alpha=0.2)
+#                 except:
+#                     pass
+
+#     if plot:
+#         handles, labels = ax.get_legend_handles_labels()
+#         unique_labels = dict(zip(labels, handles))
+#         ax.legend(unique_labels.values(), unique_labels.keys())
+#         ax.grid(True)
+#         plt.tight_layout()
+#         plt.show()
+
+#     return sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
+
+from shapely.ops import unary_union
 def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
+    """
+    Computes average UoI between region groups.
+    Handles many-to-many, unmatched ROIs with bipartite matching.
+    """
+
+    grouped_a = {}
+    grouped_b = {}
+
+    for i, j in matches:
+        grouped_a.setdefault(i, []).append(regions_a[i])
+        grouped_b.setdefault(j, []).append(regions_b[j])
+
     matched_ids_a = set(i for i, _ in matches)
     matched_ids_b = set(j for _, j in matches)
 
-    # Get unmatched ids
+    # Identify unmatched IDs
     unmatched_ids_a = [i for i in regions_a if i not in matched_ids_a]
     unmatched_ids_b = [j for j in regions_b if j not in matched_ids_b]
 
-    # Match unmatched regions using centroid proximity
+    # New matches for unmatched regions
+    new_matches = []
     if unmatched_ids_a and unmatched_ids_b:
         centroids_a = np.array([regions_a[i].get_centroid()[:2] for i in unmatched_ids_a])
         centroids_b = np.array([regions_b[j].get_centroid()[:2] for j in unmatched_ids_b])
@@ -48,29 +178,45 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
         cost_matrix = cdist(centroids_a, centroids_b, metric='euclidean')
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
-        new_matches = [(unmatched_ids_a[i], unmatched_ids_b[j]) for i, j in zip(row_ind, col_ind)]
-        matches += new_matches
+        for i_idx, j_idx in zip(row_ind, col_ind):
+            i = unmatched_ids_a[i_idx]
+            j = unmatched_ids_b[j_idx]
 
-    # Init plot if needed
+            grouped_a.setdefault(i, []).append(regions_a[i])
+            grouped_b.setdefault(j, []).append(regions_b[j])
+
+            new_matches.append((i, j))
+
+    # Init plot
     if plot:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_title("Matched ROIs with UoI Shading")
-        ax.set_aspect("equal")
+        ax.set_title("Matched ROIs with UoI Shading (Merged)")
+        ax.set_aspect('equal')
 
     uoi_scores = []
 
-    for i, j in matches:
-        region_a = regions_a[i]
-        region_b = regions_b[j]
+    # Loop over all matches (original and new)
+    all_matches = matches + new_matches
 
-        pts_a = np.array(region_a.get_boundary_points())
-        pts_b = np.array(region_b.get_boundary_points())
+    for i, j in all_matches:
+        if i not in grouped_a or j not in grouped_b:
+            continue
 
-        # Build polygons
-        poly_a = Polygon(pts_a)
-        poly_b = Polygon(pts_b)
+        # Merge polygons
+        poly_a = unary_union([
+            Polygon(region.get_boundary_points()) for region in grouped_a[i]
+        ])
+        if not poly_a.is_valid:
+            poly_a = poly_a.buffer(0)
+
+        poly_b = unary_union([
+            Polygon(region.get_boundary_points()) for region in grouped_b[j]
+        ])
+        if not poly_b.is_valid:
+            poly_b = poly_b.buffer(0)
 
         if not poly_a.is_valid or not poly_b.is_valid:
+            print(f"Skipping invalid merged match ({i}, {j})")
             continue
 
         # Compute intersection & union
@@ -80,22 +226,20 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
         uoi_scores.append(uoi)
 
         if plot:
-            # Plot centroids
-            cent_a = region_a.get_centroid()
-            cent_b = region_b.get_centroid()
-            ax.scatter(*cent_a[:2], color="blue", marker="o", s=25)
-            ax.scatter(*cent_b[:2], color="green", marker="x", s=25)
+            centroid_a = np.array(poly_a.centroid.xy).flatten()
+            centroid_b = np.array(poly_b.centroid.xy).flatten()
 
-            # Label centroids
-            ax.text(cent_a[0] + 0.1, cent_a[1] + 0.1, f"A{i}", color="blue", fontsize=8)
-            ax.text(cent_b[0] + 0.1, cent_b[1] + 0.1, f"B{j}", color="green", fontsize=8)
+            ax.scatter(*centroid_a, color="blue", marker="o", s=25)
+            ax.scatter(*centroid_b, color="green", marker="x", s=25)
 
-            # Shade intersection
+            ax.text(centroid_a[0]+0.1, centroid_a[1]+0.1, f"A{i}", color="blue", fontsize=8)
+            ax.text(centroid_b[0]+0.1, centroid_b[1]+0.1, f"B{j}", color="green", fontsize=8)
+
             if not inter.is_empty:
                 try:
                     if inter.geom_type == "Polygon":
                         x, y = inter.exterior.xy
-                        ax.fill(x, y, color="purple", alpha=0.3, label="Intersection" if uoi_scores.count(uoi) == 1 else "")
+                        ax.fill(x, y, color="purple", alpha=0.3)
                     elif inter.geom_type == "MultiPolygon":
                         for subpoly in inter.geoms:
                             x, y = subpoly.exterior.xy
@@ -103,38 +247,7 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
                 except:
                     pass
 
-            # # Shade non-overlapping parts of A
-            # a_only = poly_a.difference(poly_b)
-            # if not a_only.is_empty:
-            #     try:
-            #         if a_only.geom_type == "Polygon":
-            #             x, y = a_only.exterior.xy
-            #             ax.fill(x, y, color="red", alpha=0.2, label="A only" if i == matches[0][0] else "")
-            #         elif a_only.geom_type == "MultiPolygon":
-            #             for subpoly in a_only.geoms:
-            #                 x, y = subpoly.exterior.xy
-            #                 ax.fill(x, y, color="red", alpha=0.2)
-            #     except:
-            #         pass
-
-            # # Shade non-overlapping parts of B
-            # b_only = poly_b.difference(poly_a)
-            # if not b_only.is_empty:
-            #     try:
-            #         if b_only.geom_type == "Polygon":
-            #             x, y = b_only.exterior.xy
-            #             ax.fill(x, y, color="red", alpha=0.2, label="B only" if i == matches[0][0] else "")
-            #         elif b_only.geom_type == "MultiPolygon":
-            #             for subpoly in b_only.geoms:
-            #                 x, y = subpoly.exterior.xy
-            #                 ax.fill(x, y, color="red", alpha=0.2)
-            #     except:
-            #         pass
-
     if plot:
-        handles, labels = ax.get_legend_handles_labels()
-        unique_labels = dict(zip(labels, handles))
-        ax.legend(unique_labels.values(), unique_labels.keys())
         ax.grid(True)
         plt.tight_layout()
         plt.show()
@@ -221,20 +334,30 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
         # Determine whether either plane is flat
         # TODO turn off Falses so script can run as normal
-        flat_plane_a = False #np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
+        flat_plane_a = False#np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
         flat_plane_b = False #np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
         translation_2d = (tx, ty)
 
         # Get dicts of {idx : [x,y,z]}
+        pid_mapping_a = {}
+        pid_mapping_b = {}
+
         if flat_plane_a:
             rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
-            rois_a_2d = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_a_2d, pid_mapping_a = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
 
         if flat_plane_b:
             rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
-            rois_b_2d = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+
+        matches = match_data["og_matches"]
+        updated_matches = []
+        for a, b in matches:
+            new_a = pid_mapping_a.get(a, a)  # if mapping exists, remap
+            new_b = pid_mapping_b.get(b, b)
+            updated_matches.append((new_a, new_b))
 
         rois_a_2d_proj = {}
         rois_b_2d_proj = {}
@@ -275,28 +398,21 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             plt.tight_layout()
             plt.show()
 
-
-
         # Calculate UoI for all unique transformations
         regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
         regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
 
-        # plot_regions_2d_polygons(regions_a, title="Projected Regions A")
-        # plot_regions_2d_polygons(regions_b, title="Projected Regions B")
-
-        # And you have original matches from match_data["og_matches"]
-        matches = match_data["og_matches"]
+        # Debug code
+        plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
+        plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
 
         # Filter matches to only those where both PIDs survived projection
         filtered_matches = [
-            (i, j) for (i, j) in matches
+            (i, j) for (i, j) in updated_matches
             if i in regions_a and j in regions_b
         ]
 
-        print(regions_a.keys())
-        print(regions_b.keys())
-
-        print(matches)
+        print(filtered_matches)
 
         UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, plot=params["plot_uoi"])
         UoIs.append(UoI)
@@ -340,22 +456,18 @@ def project_flat_plane_points(z_stack, anchor_point):
 
 def project_angled_plane_points(
     z_stack, angled_plane: Plane,
-    threshold=0.5, eps=5.0, min_samples=5
+    threshold=0.5, method="split", eps=5.0, min_samples=5, 
 ):
     """
     Projects points onto an angled plane, clusters them into ROIs, 
-    and assigns each alignment point to exactly one unique cluster region.
+    and assigns anchor/alignment points either via splitting (default) or merging.
 
     Args:
-        z_stack: The ZStack object.
-        angled_plane: The Plane object.
-        threshold: Distance threshold to consider points near the plane.
-        eps: DBSCAN epsilon.
-        min_samples: DBSCAN minimum samples.
+        method: "split" (default) or "merge"
 
     Returns:
-        Dictionary {pid : [(x, y, z)]} where pid is a unique ROI ID.
-        Only alignment/anchor points that are assigned are kept.
+        output_regions: {pid: [(x, y, z)]}
+        pid_mapping: {old_pid: new_pid}  # (empty dict if method == "split")
     """
 
     # 1. Project ROI points
@@ -398,6 +510,7 @@ def project_angled_plane_points(
     # 4. Build final regions
     output_regions = {}
     assigned_pids = set()
+    pid_mapping = {}
 
     for label, points in clusters.items():
         cluster_pts_2d = np.array([pt2d for pt2d, pt3d in points])
@@ -425,48 +538,72 @@ def project_angled_plane_points(
             output_regions[pid] = [pt3d for pt2d, pt3d in points]
             assigned_pids.add(pid)
         else:
-            # Multiple anchors inside -> split
-            anchor_pts = np.array([projected_anchors[pid] for pid in anchors_inside])
-            kmeans = KMeans(
-                n_clusters=len(anchor_pts),
-                init=anchor_pts,
-                n_init=1,
-                max_iter=1,
-                random_state=42
-            )
-            cluster_pts_only = np.array([pt2d for pt2d, pt3d in points])
-            labels_split = kmeans.fit_predict(cluster_pts_only)
+            # Multiple anchors inside -> split or merge
+            if method == "split":
+                # SPLIT
+                anchor_pts = np.array([projected_anchors[pid] for pid in anchors_inside])
+                kmeans = KMeans(
+                    n_clusters=len(anchor_pts),
+                    init=anchor_pts,
+                    n_init=1,
+                    max_iter=1,
+                    random_state=42
+                )
+                cluster_pts_only = np.array([pt2d for pt2d, pt3d in points])
+                labels_split = kmeans.fit_predict(cluster_pts_only)
 
-            split_clusters = {pid: [] for pid in anchors_inside}
-            for idx, split_label in enumerate(labels_split):
-                assigned_anchor = anchors_inside[split_label]
-                split_clusters[assigned_anchor].append(points[idx][1])  # Keep original 3D point
+                split_clusters = {pid: [] for pid in anchors_inside}
+                for idx, split_label in enumerate(labels_split):
+                    assigned_anchor = anchors_inside[split_label]
+                    split_clusters[assigned_anchor].append(points[idx][1])  # Keep original 3D point
 
-            for pid, pts3d in split_clusters.items():
-                output_regions[pid] = pts3d
-                assigned_pids.add(pid)
+                for pid, pts3d in split_clusters.items():
+                    output_regions[pid] = pts3d
+                    assigned_pids.add(pid)
 
-    return output_regions
+            elif method == "merge":
+                # MERGE
+                # Pick first PID as the master
+                master_pid = anchors_inside[0]
+                merged_pts = [pt3d for pt2d, pt3d in points]
+
+                output_regions[master_pid] = merged_pts
+                assigned_pids.add(master_pid)
+
+                # Record that all other PIDs map to this master PID
+                for pid in anchors_inside:
+                    pid_mapping[pid] = master_pid
+
+    return output_regions, pid_mapping
 
 # TEST DEBUG
-def plot_regions_2d_polygons(regions, title="Regions 2D Projection"):
-    """
-    Plot the boundary polygons of projected regions (2D).
-    Expects {pid : BoundaryRegion}.
-    """
-    import matplotlib.pyplot as plt
-    from shapely.geometry import Polygon
-    from scipy.spatial import ConvexHull
-    import numpy as np
+import matplotlib.pyplot as plt
+from shapely.geometry import Polygon, Point
+from scipy.spatial import ConvexHull
+import numpy as np
 
+def plot_regions_and_alignment_points(
+    regions, 
+    plane, 
+    title="Regions + Alignment Points"
+):
+    """
+    Plot boundary polygons of projected regions alongside projected anchor/alignment points.
+    
+    Args:
+        regions: dict {pid : BoundaryRegion}
+        plane: Plane object used for projection
+        title: Plot title
+    """
     fig, ax = plt.subplots(figsize=(10, 8))
     ax.set_title(title)
     ax.set_aspect('equal')
 
+    # Plot region boundaries
     for pid, region in regions.items():
-        points = region.get_boundary_points()  # <-- Extract boundary points from BoundaryRegion
+        points = region.get_boundary_points()
         if len(points) < 3:
-            continue  # Need at least 3 points to form a polygon
+            continue  # Need at least 3 points to make a polygon
 
         pts2d = np.array([(x, y) for x, y, z in points])
 
@@ -476,16 +613,23 @@ def plot_regions_2d_polygons(regions, title="Regions 2D Projection"):
             hull_pts = np.vstack([hull_pts, hull_pts[0]])
 
             ax.plot(hull_pts[:, 0], hull_pts[:, 1], '-', label=f"Region {pid}")
-
             centroid = pts2d.mean(axis=0)
             ax.scatter(centroid[0], centroid[1], color='black', s=10)
-            ax.text(centroid[0], centroid[1], f"{pid}", fontsize=8, color='black')
 
         except Exception as e:
             print(f"Warning: Could not form polygon for region {pid}: {e}")
             continue
 
+    # Now project alignment points and plot
+    for _, plane_point in plane.plane_points.items():
+        proj2d = plane._project_point_2d(plane_point.position)
+        og_id = plane_point.id  # original ID (real ROI id)
+
+        ax.scatter(proj2d[0], proj2d[1], color='red', s=30, marker='x')
+        ax.text(proj2d[0] + 0.5, proj2d[1] + 0.5, f"{og_id}", color='red', fontsize=7)
+
     ax.grid(True)
     ax.legend(fontsize=6, loc='best')
     plt.tight_layout()
     plt.show()
+
