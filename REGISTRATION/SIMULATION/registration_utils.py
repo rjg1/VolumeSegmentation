@@ -175,11 +175,12 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     params = create_param_dict(DEFAULT_2D_MATCH_PARAMS, match_params)
 
     plane_gen_params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, params["plane_gen_params"])
+    plane_gen_params["z_range"] = params["plane_list_params"]["z_range"] # Inherit z-range from plane list params
 
     if params["stack_a_boundary"]: # Update custom image boundaries for plane A if they are uneven
             plane_gen_params["plane_boundaries"] = params["stack_a_boundary"]
     # Insert plane-a specific parameters
-    plane_gen_params["z_guess"] = params["z_guess_a"]
+    plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_a"]
     plane_gen_params["read_filename"] = params["planes_a_read_file"]
     plane_gen_params["save_filename"] = params["planes_a_write_file"]
     planes_a = zstack_a.generate_planes(plane_gen_params)
@@ -187,7 +188,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     if params["stack_b_boundary"]: # Update custom image boundaries for plane B if they are uneven
         plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
     # Insert plane-b specific parameters
-    plane_gen_params["z_guess"] = params["z_guess_b"]
+    plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_b"]
     plane_gen_params["read_filename"] = params["planes_b_read_file"]
     plane_gen_params["save_filename"] = params["planes_b_write_file"]
     planes_b = zstack_b.generate_planes(plane_gen_params)

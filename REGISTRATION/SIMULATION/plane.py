@@ -692,6 +692,7 @@ class Plane:
             v = v / np.linalg.norm(v)
         return u, v
 
+
     @staticmethod
     def match_plane_lists(planes_a, planes_b, 
                           plane_list_params = None,
@@ -719,6 +720,10 @@ class Plane:
         # Used for calculating error in traits
         match_params["trait_metrics"] = {trait : params["traits"][trait]["metric"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
         match_params["trait_thresholds"] = {trait : params["traits"][trait]["max_value"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
+
+        # Remove planes not in the specified z range
+        planes_a = filter_planes_by_z(planes_a, params["z_guess_a"], params["z_range"])
+        planes_b = filter_planes_by_z(planes_b, params["z_guess_b"], params["z_range"])
 
         results = {}
 
@@ -823,3 +828,18 @@ class Plane:
             plt.close()
 
 
+# Helper function to filter out a list of planes by a z guess. A plane must have at least one anchor or alignment point
+# p such that z_guess - z_range <= p.z <= z_guess + z_range
+def filter_planes_by_z(planes, z_guess, z_range):
+    if z_guess == -1:
+        return planes  # no filtering
+    z_min = z_guess - z_range
+    z_max = z_guess + z_range
+    filtered = []
+
+    for plane in planes:
+        all_points = [p.position[2] for p in plane.plane_points.values()]
+        if any(z_min <= z <= z_max for z in all_points):
+            filtered.append(plane)
+
+    return filtered

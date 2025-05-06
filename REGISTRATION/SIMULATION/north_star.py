@@ -185,9 +185,6 @@ def main():
         "match_anchors" : True,
         "fixed_basis" : True,
         "max_alignments" : 500,
-        "z_guess_a": 0,
-        "z_guess_b": 0, 
-        "z_range": 1,
     }
 
     match_plane_params = {

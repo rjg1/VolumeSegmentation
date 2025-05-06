@@ -17,7 +17,7 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500,
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
-    "z_range": 1 # +- tolerance to search for in z in both planes
+    "z_range": 0 # +- tolerance to search for in z in both planes
 }
 
 # Default parameters for matching two planes
@@ -47,6 +47,9 @@ PLANE_LIST_PARAM_DEFAULTS = {
         "max_matches" : 2, # max matches to scale score between
         "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
         "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
+        "z_guess_a": -1, # guess at the z-level where the plane match is located in plane list a -> -1 means no guess -> used for optimization in time here for a pre-generated plane list
+        "z_guess_b": -1, # guess at the z-level where the plane match is located in plane list k b -> -1 means no guess
+        "z_range" : 0, # # +- tolerance to search for in z in both planes
         "traits": {
             "angle" : {
                 "weight": 0.6,
@@ -80,8 +83,6 @@ DEFAULT_2D_MATCH_PARAMS = {
     "min_uoi" : 0.5, # min uoi for a match between planes + transformations
     "plot_uoi" : False, # plot the matched rois and their intersection
     "plot_match" : False, # plot the matched rois only
-    "z_guess_a": -1, # guess at the z-level where the plane match is located in stack a -> -1 means no guess
-    "z_guess_b": -1 # guess at the z-level where the plane match is located in stack b -> -1 means no guess
 }
 
 # Used for updating a parameter dict to overwrite a subset of defaults
