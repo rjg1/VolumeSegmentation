@@ -8,14 +8,14 @@ import random
 
 def main():
     # Step 1: Create original plane A
-    anchor_a = PlanePoint(0, (0, 0, 0), traits={"avg_radius" : {"threshold": 1.0, "metric": "mse", "value": 5.0}})
+    anchor_a = PlanePoint(0, (0, 0, 0), traits={"avg_radius" :  5.0})
     a_traits = {"avg_radius" : [3, 4, 5, 6, 7]}
 
     alignment_positions_a = [(1, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0), (1, 2, 0)]
     alignment_points_a = [PlanePoint(i + 1, p) for i, p in enumerate(alignment_positions_a)]
     for trait in a_traits:
         for idx, value in enumerate(a_traits[trait]):
-            alignment_points_a[idx].add_trait(trait, threshold=1.0, metric="mse", value=value)
+            alignment_points_a[idx].add_trait(trait, value)
 
     plane_a = Plane(
         anchor_point = anchor_a,
@@ -49,13 +49,13 @@ def main():
 
     # Anchor B: transformed origin (0,0,0) under same transformation
     anchor_b_pos = Rz @ np.array([0, 0, 0]) * scale + total_offset
-    anchor_b = PlanePoint(0, anchor_b_pos, traits={"avg_radius": {"threshold": 1.0, "metric": "mse", "value": 5.0}})
+    anchor_b = PlanePoint(0, anchor_b_pos, traits={"avg_radius": 5.0})
 
     # Create PlanePoint objects for B
     transformed = [PlanePoint(i + 1, p) for i, p in enumerate(transformed_points)]
     for trait in b_traits:
         for idx, value in enumerate(b_traits[trait]):
-            transformed[idx].add_trait(trait, threshold=1.0, metric="mse", value=value)
+            transformed[idx].add_trait(trait, value)
 
     plane_b = Plane(
         anchor_point=anchor_b,
@@ -64,8 +64,8 @@ def main():
 
     # Step 3: Match
     match_data = plane_a.match_planes(plane_b)
-    pprint.pp(match_data)
-
+    import json
+    print(match_data)
 
     ##
     proj_a = plane_a.get_local_2d_coordinates()

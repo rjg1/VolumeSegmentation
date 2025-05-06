@@ -318,10 +318,10 @@ class Plane:
             }
     
         # Check traits
-        traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(matches, plane_b)
+        traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(matches, plane_b, params["trait_metrics"], params["trait_thresholds"])
         return {
                 "match": traits_passed,
-                "reason": "Trait missmatch - see outcomes" if not traits_passed else "MSE angle and magnitudes passed. Trait matches all passed",
+                "reason": "Trait mismatch - see outcomes" if not traits_passed else "MSE angle and magnitudes passed. Trait matches all passed",
                 "offset": offset,
                 "ang_cc_score": score,
                 "og_matches" : og_matches,
@@ -336,48 +336,44 @@ class Plane:
                 "mismatched_traits": mismatched_traits
         }
 
-    def _check_traits(self, matches, plane_b):
-        traits_passed = True    # output variable initialisation
+    def _check_traits(self, matches, plane_b, trait_metric_map, trait_threshold_map):
+        traits_passed = True
         trait_values = {}
         trait_outcomes = {}
-
+        trait_error_values = {}  # {trait : [<error1>, <error2>, ...]}
         mismatched_traits = set()
         matched_traits = set()
-        trait_error_values = {}  # {trait : [<error m1>, <error m2>, ...]}
-        trait_metrics = {}
-        trait_thresholds = {}
-        for match in matches:
-            i, j = match
+
+        for i, j in matches:
             ppta = self.plane_points[i]
             pptb = plane_b.plane_points[j]
 
             for trait in ppta.traits:
-                if trait not in pptb.traits or trait in mismatched_traits: # unable to gain meaningful information on mismatched traits
-                    mismatched_traits.add(trait) # ignore in future
+                if trait not in pptb.traits or trait in mismatched_traits:
+                    mismatched_traits.add(trait)
                     continue
-                else:
-                    matched_traits.add(trait)
-                if not trait_error_values.get(trait, None):
+                matched_traits.add(trait)
+
+                # Init error list for trait
+                if trait not in trait_error_values:
                     trait_error_values[trait] = []
-                    trait_metrics[trait] = ppta.traits[trait]["metric"] # weird assumption that all points have the same stored metric but should be right
-                    trait_thresholds[trait] = ppta.traits[trait]["threshold"] # as above tbh
-                
-                trait_error_values[trait].append(np.abs(ppta.traits[trait]["value"] - pptb.traits[trait]["value"]))
 
-            # Find any mismatched traits from the matched point on plane B
-            mismatched_b_traits = [trait for trait in pptb.traits if trait not in matched_traits]
-            mismatched_traits.update(mismatched_b_traits)
+                err = np.abs(ppta.traits[trait] - pptb.traits[trait])
+                trait_error_values[trait].append(err)
 
-        if mismatched_traits.intersection(matched_traits):
-            for trait in matched_traits:
-                if trait in mismatched_traits:
-                    matched_traits.pop(trait)
-                    trait_error_values.pop(trait)
+            # Catch any traits present only in pptb
+            for trait in pptb.traits:
+                if trait not in matched_traits:
+                    mismatched_traits.add(trait)
 
-        # Calculate error by metric
+        # Filter out invalid matched traits
+        matched_traits -= mismatched_traits
+
+        # Compute aggregate errors
         for trait in matched_traits:
-            metric = trait_metrics[trait]
             errors = trait_error_values[trait]
+            metric = trait_metric_map.get(trait, "mse")
+            threshold = trait_threshold_map.get(trait, float("inf"))
 
             if metric == "mse":
                 value = np.mean(np.square(errors))
@@ -390,7 +386,7 @@ class Plane:
             elif metric == "sum":
                 value = np.sum(errors)
             elif metric == "range":
-                value = np.max(errors) - np.min(errors)
+                value = np.ptp(errors)
             elif metric == "std":
                 value = np.std(errors)
             else:
@@ -398,7 +394,7 @@ class Plane:
                 continue
 
             trait_values[trait] = value
-            trait_outcomes[trait] = value <= trait_thresholds[trait]
+            trait_outcomes[trait] = value <= threshold
             if not trait_outcomes[trait]:
                 traits_passed = False
 
@@ -716,8 +712,13 @@ class Plane:
         params = create_param_dict(PLANE_LIST_PARAM_DEFAULTS, plane_list_params) # Params for this function
         match_params = create_param_dict(MATCH_PLANE_PARAM_DEFAULTS, match_plane_params) # Params for match_planes function
 
+        # Used for scoring
         max_values = {trait : params["traits"][trait]["max_value"] for trait in params["traits"]}
         weights = {trait : params["traits"][trait]["weight"] for trait in params["traits"]}
+
+        # Used for calculating error in traits
+        match_params["trait_metrics"] = {trait : params["traits"][trait]["metric"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
+        match_params["trait_thresholds"] = {trait : params["traits"][trait]["max_value"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
 
         results = {}
 
@@ -758,6 +759,25 @@ class Plane:
                 score = weights.get("angle", 0) * angle_score + \
                         weights.get("magnitude", 0) * magnitude_score + \
                         sum(weights.get(trait, 0) * trait_scores[trait] for trait in trait_scores)
+
+                # Modify score based on number of alignment matches
+                num_matches = len(match_result["matches"])
+                min_matches = match_plane_params["bin_match_params"]["min_matches"]
+                max_matches = params["max_matches"]
+                min_modifier = params["min_score_modifier"]
+                max_modifier = params["max_score_modifier"]
+
+                if max_matches > min_matches:
+                    # Clamp match count between min and max
+                    clamped_matches = max(min(num_matches, max_matches), min_matches)
+                    
+                    # Linearly interpolate modifier
+                    alpha = (max_modifier - min_modifier) / (max_matches - min_matches) # e.g 0.2 / 3 -> number to step up in score modifier per match over min matches
+                    alpha_steps = clamped_matches - min_matches # Number of matches over min matches
+                    score_modifier = min_modifier + (alpha * alpha_steps)
+                    
+                    score *= score_modifier
+
 
                 if score >= params["min_score"]:
                     results[score] = {

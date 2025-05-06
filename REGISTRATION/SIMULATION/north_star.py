@@ -15,7 +15,8 @@ from zstack import ZStack
 from plane import Plane
 from scipy.optimize import linear_sum_assignment
 
-NUM_ELLIPSES = 10
+RANDOM_SEED = 10
+NUM_ELLIPSES = 50
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
@@ -53,7 +54,7 @@ def ellipse_polygon(center_x, center_y, radius_x, radius_y, angle_deg=0, num_poi
     return ellipse
 
 def main():
-    random.seed(10)
+    random.seed(RANDOM_SEED)
     ellipses = []
     ellipse_intensities = []
     transformed_ellipses = []
@@ -168,9 +169,13 @@ def main():
     z_stack_a = ZStack(z_planes) # original 3d data
     z_stack_b = ZStack(new_plane) # new plane 
 
+    plane_a_file = f"north_star_plane_a_rs{RANDOM_SEED}_el{NUM_ELLIPSES}.csv"
+    plane_b_file = f"north_star_plane_b_rs{RANDOM_SEED}_el{NUM_ELLIPSES}.csv"
+
     plane_gen_params = {
-        "anchor_intensity_threshold": 0.5,
+        "anchor_intensity_threshold": 0.7,
         "align_intensity_threshold": 0.4,
+        "regenerate_planes" : False, # Set to regenerate + save planes
         "z_threshold": 2,
         "max_tilt_deg": 40.0,
         "projection_dist_thresh":  0.5,
@@ -192,7 +197,10 @@ def main():
     }
 
     plane_list_params = {
-        "min_score" : 0.99,
+        "min_score" : 0.85,
+        "max_matches" : 4, # max matches to scale score between
+        "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
+        "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
         "traits": {
             "angle" : {
                 "weight": 0.6,
@@ -209,6 +217,10 @@ def main():
         "plane_gen_params" : plane_gen_params,
         "match_plane_params" : match_plane_params,
         "plane_list_params" : plane_list_params,
+        "planes_a_read_file" : plane_a_file,
+        "planes_b_read_file" : plane_b_file,
+        "planes_a_write_file" : plane_a_file,
+        "planes_b_write_file" : plane_b_file,
         "plot_uoi" : False,
         "plot_match" : True,
         "min_uoi": 0.7,
@@ -219,7 +231,8 @@ def main():
         }
     }
 
-    match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)
+    uoi_match_data = match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)
+    print(uoi_match_data)
 
     return
 

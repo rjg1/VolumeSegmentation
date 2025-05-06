@@ -178,18 +178,24 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
 
     if params["stack_a_boundary"]: # Update custom image boundaries for plane A if they are uneven
             plane_gen_params["plane_boundaries"] = params["stack_a_boundary"]
+    # Insert plane-a specific parameters
     plane_gen_params["z_guess"] = params["z_guess_a"]
+    plane_gen_params["read_filename"] = params["planes_a_read_file"]
+    plane_gen_params["save_filename"] = params["planes_a_write_file"]
     planes_a = zstack_a.generate_planes(plane_gen_params)
 
     if params["stack_b_boundary"]: # Update custom image boundaries for plane B if they are uneven
         plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
+    # Insert plane-b specific parameters
     plane_gen_params["z_guess"] = params["z_guess_b"]
+    plane_gen_params["read_filename"] = params["planes_b_read_file"]
+    plane_gen_params["save_filename"] = params["planes_b_write_file"]
     planes_b = zstack_b.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
-    print(matched_planes)
+    print(f"Best plane match score: {list(matched_planes.keys())[0]}")
 
     # Stores just (rounded) values for uniqueness checking
     seen_transformations = set()
@@ -227,6 +233,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
 
     # Calculate UoIs of all unique 2D transformations
     UoIs = []
+    uoi_match_data = [] # list of data relating to plane matches by UoI
 
     # Project and transform points on both planes for each transformation identified
     for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
@@ -283,35 +290,14 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         ]
 
         UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, params["min_uoi"], plot=params["plot_uoi"])
-        # Plot match here if designated in params
-        if params["plot_match"] and UoI >= params["min_uoi"]:
-            # Setup plot
-            fig, ax = plt.subplots(figsize=(10, 8))
-            ax.set_title("Projected and Transformed ROIs (Plane A and Plane B)")
-            ax.set_aspect('equal')
-
-            # Plot ROIs from Plane A (always blue)
-            for pid, points in rois_a_2d_proj.items():
-                if points.shape[0] == 0:
-                    continue
-                ax.plot(points[:, 0], points[:, 1], 'o', markersize=2, color='blue')  # ← explicitly blue
-                centroid = points.mean(axis=0)
-                ax.text(centroid[0], centroid[1], f"A{pid}", fontsize=8, color='blue')
-
-            # Plot ROIs from Plane B (always green)
-            for pid, points in rois_b_2d_proj.items():
-                if points.shape[0] == 0:
-                    continue
-                ax.plot(points[:, 0], points[:, 1], 'x', markersize=2, color='green')  # ← explicitly green
-                centroid = points.mean(axis=0)
-                ax.text(centroid[0], centroid[1], f"B{pid}", fontsize=8, color='green')
-
-            ax.grid(True)
-            plt.tight_layout()
-            plt.show()
-        
         if UoI >= params["min_uoi"]:
             UoIs.append(UoI)
+            uoi_match_data.append({"plane_a" : plane_a,
+                                   "plane_b": plane_b,
+                                   "rotation_2d": rotation_2d,
+                                   "scale_2d": scale_2d,
+                                   "translation_2d" : (tx, ty),
+                                   "UoI": UoI})
 
 
     # Calculate best UoI
@@ -323,6 +309,51 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         print(f"Best UoI: {best_UoI}, Best Transformation: {best_transformation}")
     else:
         print(f"No plane matches found with UoI above min: {params['min_uoi']}")
+
+    # Sort by descending UoI
+    sorted_data = sorted(uoi_match_data, key=lambda x: x["UoI"], reverse=True)
+
+    # Plot matches if required
+    if params["plot_match"]:
+        plot_uoi_match_data(sorted_data, zstack_a, zstack_b)
+    
+    return sorted_data
+
+def plot_uoi_match_data(sorted_data, zstack_a, zstack_b):
+    for entry in sorted_data:
+        plane_a = entry["plane_a"]
+        plane_b = entry["plane_b"]
+        rotation_2d = entry["rotation_2d"]
+        scale_2d = entry["scale_2d"]
+        tx, ty = entry["translation_2d"]
+        uoi = entry["UoI"]
+
+        # Recompute projections
+        rois_a_2d_proj = {pid: np.array([plane_a._project_point_2d(pt) for pt in coords])
+                        for pid, coords in project_flat_plane_points(zstack_a, plane_a.anchor_point).items()}
+        rois_b_2d_proj = {pid: np.array(
+            plane_a.project_and_transform_points(coords, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=(tx, ty)))
+                        for pid, coords in project_flat_plane_points(zstack_b, plane_b.anchor_point).items()}
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_title(f"Projected ROIs A and B (UoI={uoi:.2f})")
+        ax.set_aspect('equal')
+
+        for pid, points in rois_a_2d_proj.items():
+            if len(points) > 0:
+                ax.plot(points[:, 0], points[:, 1], 'o', markersize=2, color='blue')
+                centroid = points.mean(axis=0)
+                ax.text(centroid[0], centroid[1], f"A{pid}", fontsize=8, color='blue')
+
+        for pid, points in rois_b_2d_proj.items():
+            if len(points) > 0:
+                ax.plot(points[:, 0], points[:, 1], 'x', markersize=2, color='green')
+                centroid = points.mean(axis=0)
+                ax.text(centroid[0], centroid[1], f"B{pid}", fontsize=8, color='green')
+
+        ax.grid(True)
+        plt.tight_layout()
+        plt.show()
 
 
 def project_flat_plane_points(z_stack, anchor_point):

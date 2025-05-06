@@ -2,6 +2,8 @@ import copy
 import numpy as np
 
 PLANE_GEN_PARAMS_DEFAULT = {
+    "read_filename" : None, # file to read plane parameters from
+    "save_filename" : None, # file to save plane parameters to 
     "anchor_intensity_threshold": 0.8,
     "align_intensity_threshold": 0.4,
     "z_threshold": 5,
@@ -35,19 +37,26 @@ MATCH_PLANE_PARAM_DEFAULTS = {
     "angle_mse_threshold" : 1.0,
     "magnitude_mse_threshold" : 1.0,
     "circular_fft" : True,
+    "trait_metrics" : {},
+    "trait_thresholds" : {}
 }
 
 # Default parameters for matching two lists of planes
 PLANE_LIST_PARAM_DEFAULTS = {
         "min_score" : 0.7,
+        "max_matches" : 2, # max matches to scale score between
+        "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
+        "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
         "traits": {
             "angle" : {
                 "weight": 0.6,
-                "max_value" : 5.0
+                "max_value" : 5.0,
+                "metric" : "mse"
             },
             "magnitude" : {
                 "weight": 0.4,
-                "max_value" : 10.0
+                "max_value" : 10.0,
+                "metric" : "mse",
             }
         }
     }
@@ -57,6 +66,10 @@ DEFAULT_2D_MATCH_PARAMS = {
     "plane_gen_params" : PLANE_GEN_PARAMS_DEFAULT,
     "stack_a_boundary" : None,
     "stack_b_boundary" : None,
+    "planes_a_read_file" : None,
+    "planes_b_read_file" : None,
+    "planes_a_write_file" : None,
+    "planes_b_write_file" : None,
     "plane_list_params" : PLANE_LIST_PARAM_DEFAULTS,
     "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
     "seg_params": {

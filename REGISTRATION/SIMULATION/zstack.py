@@ -6,6 +6,7 @@ from scipy.spatial import ConvexHull
 from itertools import combinations
 from plane import Plane
 from planepoint import PlanePoint
+import os
 import copy
 from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 
@@ -193,9 +194,24 @@ class ZStack:
         ):
             params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
 
+            # Load from CSV if specified
+            if params["read_filename"] is not None and not params["regenerate_planes"]:
+                read_path = params["read_filename"]
+                if os.path.exists(read_path):
+                    try:
+                        print(f"[INFO] Attempting to load planes from: {read_path}")
+                        return self.read_planes_from_csv(read_path)
+                    except Exception as e:
+                        print(f"[WARN] Failed to parse plane file '{read_path}': {e}")
+                else:
+                    print(f"[WARN] Plane file '{read_path}' does not exist. Regenerating planes.")
+
             # If planes already exist and regeneration not required, simply return the existing planes
             if len(self.planes) > 0 and not params['regenerate_planes']:
+                print("Using past save of planes...")
                 return self.planes
+
+            print("Generating planes...")
 
             max_tilt_rad = np.radians(params["max_tilt_deg"])
             self.planes = []
@@ -281,6 +297,14 @@ class ZStack:
                         if not any(existing.is_equivalent_to(plane, match_anchors = params["match_anchors"]) for existing in self.planes):
                             self.planes.append(plane)
 
+            # Write output to file if required
+            if params["save_filename"] is not None:
+                try:
+                    print(f"[INFO] Saving planes to: {params['save_filename']}")
+                    self.write_planes_to_csv(params["save_filename"])
+                except Exception as e:
+                    print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
+
             return self.planes
 
     # TODO test this
@@ -294,48 +318,97 @@ class ZStack:
     # Writes plane points to a csv for reconstruction
     def write_planes_to_csv(self, filename):
         rows = []
-        for plane_id, plane in enumerate(self.planes):
-            rows.append({
-                "plane_id": plane_id,
-                "pid" : plane.anchor_point.id,
-                "x": plane.anchor_point.position[0],
-                "y": plane.anchor_point.position[1],
-                "z": plane.anchor_point.position[2],
-                "type": "anchor"
-            })
+
+        # Step 1: Collect all trait names from all plane points
+        all_traits = set()
+        for plane in self.planes:
+            all_traits.update(plane.anchor_point.traits.keys())
             for _, ppt in list(plane.plane_points.items())[1:]:  # skip anchor
-                rows.append({
+                all_traits.update(ppt.traits.keys())
+
+        sorted_traits = sorted(all_traits)  # consistent column ordering
+
+        # Step 2: Build rows for each plane in plane list of z stack
+        for plane_id, plane in enumerate(self.planes):
+            # Anchor point
+            anchor = plane.anchor_point
+            row = {
+                "plane_id": plane_id,
+                "pid": anchor.id,
+                "x": anchor.position[0],
+                "y": anchor.position[1],
+                "z": anchor.position[2],
+                "type": "anchor"
+            }
+            for tr in sorted_traits:
+                row[f"tr_{tr}"] = anchor.traits[tr] if tr in anchor.traits else None
+            rows.append(row)
+
+            # Alignment points
+            for _, ppt in list(plane.plane_points.items())[1:]: # skips anchor at index 0
+                row = {
                     "plane_id": plane_id,
-                    "pid" : ppt.id,
+                    "pid": ppt.id,
                     "x": ppt.position[0],
                     "y": ppt.position[1],
                     "z": ppt.position[2],
                     "type": "alignment"
-                })
+                }
+                for tr in sorted_traits:
+                    row[f"tr_{tr}"] = ppt.traits[tr] if tr in ppt.traits else None
+                rows.append(row)
 
+        # Step 3: Save to CSV
         df = pd.DataFrame(rows)
         df.to_csv(filename, index=False)
 
+
     # Remakes planes saved from a previous csv
     def read_planes_from_csv(self, filename):
-        df = pd.read_csv(filename)
+        required_columns = {"plane_id", "pid", "x", "y", "z", "type"}
+        try:
+            df = pd.read_csv(filename)
+        except Exception as e:
+            raise IOError(f"Failed to read CSV: {e}")
+        if not required_columns.issubset(set(df.columns)):
+            raise ValueError(f"CSV missing required columns. Expected at least: {required_columns}")
+        
         self.planes = []
 
+        # Step 1: Identify all trait columns
+        trait_columns = [col for col in df.columns if col.startswith("tr_")]
+        trait_names = [col[3:] for col in trait_columns]  # remove 'tr_' prefix
+
+        # Step 2: Group by plane_id
         for plane_id, group in df.groupby("plane_id"):
+            # Extract anchor row
             anchor_row = group[group["type"] == "anchor"].iloc[0]
-            anchor = PlanePoint(int(anchor_row.pid), (anchor_row.x, anchor_row.y, anchor_row.z))
+            anchor_traits = {
+                tr: anchor_row[f"tr_{tr}"]
+                for tr in trait_names
+                if not pd.isna(anchor_row[f"tr_{tr}"])
+            }
+            anchor = PlanePoint(int(anchor_row.pid), (anchor_row.x, anchor_row.y, anchor_row.z), traits=anchor_traits)
 
+            # Extract alignment rows
+            alignment_points = []
             alignment_rows = group[group["type"] == "alignment"]
-            alignments = [
-                PlanePoint(int(row.pid), (row.x, row.y, row.z))
-                for i, row in alignment_rows.iterrows()
-            ]
+            for _, row in alignment_rows.iterrows():
+                traits = {
+                    tr: row[f"tr_{tr}"]
+                    for tr in trait_names
+                    if not pd.isna(row[f"tr_{tr}"])
+                }
+                ppt = PlanePoint(int(row.pid), (row.x, row.y, row.z), traits=traits)
+                alignment_points.append(ppt)
 
-            if len(alignments) >= 2:
-                plane = Plane(anchor, alignments)
+            # Only add planes with enough alignment points
+            if len(alignment_points) >= 2:
+                plane = Plane(anchor, alignment_points)
                 self.planes.append(plane)
 
         return self.planes
+
 
 
 
