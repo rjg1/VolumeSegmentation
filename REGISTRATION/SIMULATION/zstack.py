@@ -7,20 +7,7 @@ from itertools import combinations
 from plane import Plane
 from planepoint import PlanePoint
 import copy
-
-PLANE_GEN_PARAMS_DEFAULT = {
-    "anchor_intensity_threshold": 0.8,
-    "align_intensity_threshold": 0.4,
-    "z_threshold": 5,
-    "max_tilt_deg": 30.0,
-    "projection_dist_thresh":  0.5,
-    "normalize_intensity" : True,
-    "plane_boundaries" : [-np.inf, np.inf, -np.inf, np.inf],
-    "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
-    "match_anchors" : True,
-    "fixed_basis" : True,
-    "max_alignments" : 500
-}
+from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 
 def get_hull_boundary_points(hull):
     """Extract the list of boundary points of a 2D convex hull."""
@@ -201,10 +188,11 @@ class ZStack:
             self,
             plane_gen_params = None
         ):
-            params = PLANE_GEN_PARAMS_DEFAULT.copy()  # start with defaults
-            if plane_gen_params:
-                params.update(plane_gen_params)  # override with anything user provides
-            
+            params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
+
+            # If planes already exist and regeneration not required, simply return the existing planes
+            if len(self.planes) > 0 and not params['regenerate_planes']:
+                return self.planes
 
             max_tilt_rad = np.radians(params["max_tilt_deg"])
             self.planes = []

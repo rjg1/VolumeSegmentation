@@ -179,7 +179,10 @@ def main():
         "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
         "match_anchors" : True,
         "fixed_basis" : True,
-        "max_alignments" : 500
+        "max_alignments" : 500,
+        "z_guess_a": 0,
+        "z_guess_b": 0, 
+        "z_range": 1,
     }
 
     match_plane_params = {
@@ -206,8 +209,9 @@ def main():
         "plane_gen_params" : plane_gen_params,
         "match_plane_params" : match_plane_params,
         "plane_list_params" : plane_list_params,
-        "plot_uoi" : True,
+        "plot_uoi" : False,
         "plot_match" : True,
+        "min_uoi": 0.7,
         "seg_params": {
             "method" : "split",
             "eps": 1.5,

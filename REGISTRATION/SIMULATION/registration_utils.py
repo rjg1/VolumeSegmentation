@@ -4,8 +4,9 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import distance
 import matplotlib.pyplot as plt
 import numpy as np
-from zstack import ZStack, PLANE_GEN_PARAMS_DEFAULT
-from plane import Plane, PLANE_LIST_PARAM_DEFAULTS, MATCH_PLANE_PARAM_DEFAULTS, PLANE_ANCHOR_ID
+from param_handling import PLANE_GEN_PARAMS_DEFAULT, PLANE_LIST_PARAM_DEFAULTS, MATCH_PLANE_PARAM_DEFAULTS, create_param_dict
+from plane import Plane
+from zstack import ZStack
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from planepoint import PlanePoint
@@ -26,12 +27,13 @@ DEFAULT_2D_MATCH_PARAMS = {
         "eps": 3.0,
         "min_samples" : 5
     },
-    "plot_uoi" : False,
-    "plot_match" : False
+    "min_uoi" : 0.5, # min uoi for a match between planes + transformations
+    "plot_uoi" : False, # plot the matched rois and their intersection
+    "plot_match" : False # plot the matched rois only
 }
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
-def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
+def compute_avg_uoi(regions_a, regions_b, matches, min_uoi, plot=False):
     """
     Computes average UoI between region groups.
     Handles many-to-many, unmatched ROIs with bipartite matching.
@@ -173,47 +175,31 @@ def compute_avg_uoi(regions_a, regions_b, matches, plot=False):
                 except:
                     pass
 
+    uoi = sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
 
-    if plot:
+    if plot and uoi > min_uoi:
         ax.grid(True)
         plt.tight_layout()
         plt.show()
 
-    return sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
+    return uoi
 
 # Complete pipeline for matching the planes of 2 Z-stack objects
 def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack, 
                   match_params = None):
-    # Define function for updating dictionary to match defaults
-    def deep_update(base, updates):
-        for key, value in updates.items():
-            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                deep_update(base[key], value)  # Recurse
-            else:
-                base[key] = value
     # Copy defaults
-    params = copy.deepcopy(DEFAULT_2D_MATCH_PARAMS)
-    if match_params: # If user specified non-default parameters
-        deep_update(params, match_params) # Update them
+    params = create_param_dict(DEFAULT_2D_MATCH_PARAMS, match_params)
 
-    # Extract or generate planes from each z-stack
-    if len(zstack_a.planes) == 0:
-        print(f"Generating A planes")
-        plane_gen_params = copy.deepcopy(params["plane_gen_params"])
-        if params["stack_a_boundary"]: # Update custom image boundaries if they are uneven
+    plane_gen_params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, params["plane_gen_params"])
+
+    if params["stack_a_boundary"]: # Update custom image boundaries for plane A if they are uneven
             plane_gen_params["plane_boundaries"] = params["stack_a_boundary"]
-        planes_a = zstack_a.generate_planes(plane_gen_params)
-    else:
-        planes_a = zstack_a.planes
+    planes_a = zstack_a.generate_planes(plane_gen_params)
 
-    if len(zstack_b.planes) == 0:
-        print(f"Generating B planes")
-        plane_gen_params = copy.deepcopy(params["plane_gen_params"])
-        if params["stack_b_boundary"]: # Update custom image boundaries if they are uneven
-            plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
-        planes_b = zstack_b.generate_planes(plane_gen_params)
-    else:
-        planes_b = zstack_b.planes
+    if params["stack_b_boundary"]: # Update custom image boundaries for plane B if they are uneven
+        plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
+
+    planes_b = zstack_b.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
@@ -297,8 +283,23 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
             )
 
+        # Calculate UoI for all unique transformations
+        regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
+        regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
+
+        # Debug code
+        # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
+        # plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
+
+        # Filter matches to only those where both PIDs survived projection
+        filtered_matches = [
+            (i, j) for (i, j) in updated_matches
+            if i in regions_a and j in regions_b
+        ]
+
+        UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, params["min_uoi"], plot=params["plot_uoi"])
         # Plot match here if designated in params
-        if params["plot_match"]:
+        if params["plot_match"] and UoI >= params["min_uoi"]:
             # Setup plot
             fig, ax = plt.subplots(figsize=(10, 8))
             ax.set_title("Projected and Transformed ROIs (Plane A and Plane B)")
@@ -323,23 +324,9 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             ax.grid(True)
             plt.tight_layout()
             plt.show()
-
-        # Calculate UoI for all unique transformations
-        regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
-        regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
-
-        # Debug code
-        # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
-        # plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
-
-        # Filter matches to only those where both PIDs survived projection
-        filtered_matches = [
-            (i, j) for (i, j) in updated_matches
-            if i in regions_a and j in regions_b
-        ]
-
-        UoI = compute_avg_uoi(regions_a, regions_b, filtered_matches, plot=params["plot_uoi"])
-        UoIs.append(UoI)
+        
+        if UoI >= params["min_uoi"]:
+            UoIs.append(UoI)
 
 
     # Calculate best UoI
@@ -350,7 +337,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         best_transformation = best_transformation[0:4] # extract only the operations
         print(f"Best UoI: {best_UoI}, Best Transformation: {best_transformation}")
     else:
-        print("No matches found - no UoI calculated")
+        print(f"No plane matches found with UoI above min: {params['min_uoi']}")
 
 
 def project_flat_plane_points(z_stack, anchor_point):
@@ -559,4 +546,3 @@ def plot_regions_and_alignment_points(
     ax.legend(fontsize=6, loc='best')
     plt.tight_layout()
     plt.show()
-

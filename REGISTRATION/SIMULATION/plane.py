@@ -7,42 +7,10 @@ from planepoint import PlanePoint
 from numpy.fft import fft, ifft
 from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
+from registration_utils import MATCH_PLANE_PARAM_DEFAULTS, PLANE_LIST_PARAM_DEFAULTS, create_param_dict
+
 
 PLANE_ANCHOR_ID = 0
-
-# Default parameters for matching two planes
-MATCH_PLANE_PARAM_DEFAULTS = {
-    "bin_match_params" : {
-        "resolution" : 360,
-        "angle_tolerance" : 2,
-        "radians" : True,
-        "min_matches" : 2,
-        "outlier_thresh" : 2,
-        "mse_threshold" : 1e-3
-    },
-    "angle_match_params" : {
-        "blur_sigma" : 2,
-        "resolution" : 360
-    },
-    "angle_mse_threshold" : 1.0,
-    "magnitude_mse_threshold" : 1.0,
-    "circular_fft" : True,
-}
-
-# Default parameters for matching two lists of planes
-PLANE_LIST_PARAM_DEFAULTS = {
-        "min_score" : 0.7,
-        "traits": {
-            "angle" : {
-                "weight": 0.6,
-                "max_value" : 5.0
-            },
-            "magnitude" : {
-                "weight": 0.4,
-                "max_value" : 10.0
-            }
-        }
-    }
 
 class Plane:
     def __init__(self, anchor_point, alignment_points, fixed_basis = True, max_alignments = 10):
@@ -278,17 +246,8 @@ class Plane:
 
 
     # Full pipeline for matching planes
-    def match_planes(self, plane_b, match_plane_params = None, dict_updated = False):
-        if dict_updated: # Don't bother re-sanitizing parameter list
-            params = match_plane_params
-        else:
-            params = MATCH_PLANE_PARAM_DEFAULTS.copy()  # start with defaults
-            if match_plane_params:
-                for key, val in match_plane_params.items():
-                    if key in params and isinstance(params[key], dict) and isinstance(val, dict):
-                        params[key].update(val)  # Merge into sub-dict
-                    else:
-                        params[key] = val  # Replace
+    def match_planes(self, plane_b, match_plane_params = None):
+        params = create_param_dict(MATCH_PLANE_PARAM_DEFAULTS, match_plane_params)
 
         angles_a, mags_a = self.angles_and_magnitudes()
         angles_b, mags_b = plane_b.angles_and_magnitudes()
@@ -778,8 +737,7 @@ class Plane:
         for i, plane_a in enumerate(planes_a):
             for j, plane_b in enumerate(planes_b):
                 match_result = plane_a.match_planes(plane_b, 
-                                                    match_plane_params = match_params, 
-                                                    dict_updated = True)
+                                                    match_plane_params = match_params)
 
                 if not match_result["match"]:
                     continue
