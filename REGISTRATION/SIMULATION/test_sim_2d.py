@@ -63,7 +63,7 @@ def main():
     )
 
     # Step 3: Match
-    match_data = plane_a.match_planes(plane_b, angle_tolerance=1)
+    match_data = plane_a.match_planes(plane_b)
     pprint.pp(match_data)
 
 

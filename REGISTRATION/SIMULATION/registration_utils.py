@@ -17,7 +17,7 @@ from scipy.spatial import ConvexHull
 
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
-def compute_avg_uoi(regions_a, regions_b, matches, min_uoi, plot=False):
+def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
     """
     Computes average UoI between region groups.
     Handles many-to-many, unmatched ROIs with bipartite matching.

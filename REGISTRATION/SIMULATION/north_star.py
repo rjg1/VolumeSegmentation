@@ -169,12 +169,12 @@ def main():
     z_stack_b = ZStack(new_plane) # new plane 
 
     plane_gen_params = {
-        "anchor_intensity_threshold": 0.8,
+        "anchor_intensity_threshold": 0.5,
         "align_intensity_threshold": 0.4,
         "z_threshold": 2,
         "max_tilt_deg": 40.0,
         "projection_dist_thresh":  0.5,
-        "normalize_intensity" : True,
+        "transform_intensity" : "quantile",
         "plane_boundaries" : [0, 100, 0, 100],
         "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
         "match_anchors" : True,

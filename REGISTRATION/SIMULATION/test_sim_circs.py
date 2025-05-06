@@ -110,7 +110,7 @@ def main():
 
 
     # Step 4: Match & align
-    match_data = plane_a.match_planes(plane_b, angle_tolerance=1)
+    match_data = plane_a.match_planes(plane_b)
     aligned_b_points, R_align, translation = plane_a.get_aligned_3d_projection(
         plane_b, matches=match_data["matches"], scale_factor=match_data["scale_factor"]
     )

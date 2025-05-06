@@ -280,7 +280,7 @@ class Plane:
                 "angular_diffs": angular_diffs,
                 "magnitude_diffs": magnitude_diffs,
                 "offset": offset,
-                "score": score
+                "ang_cc_score": score
             }
 
         # Compute angle MSE
@@ -291,7 +291,7 @@ class Plane:
                 "match": False,
                 "reason": "Failed angle MSE threshold",
                 "offset": offset,
-                "score": score,
+                "ang_cc_score": score,
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
@@ -307,7 +307,7 @@ class Plane:
                 "match": False,
                 "reason": "Failed magnitude MSE threshold",
                 "offset": offset,
-                "score": score,
+                "ang_cc_score": score,
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
@@ -323,7 +323,7 @@ class Plane:
                 "match": traits_passed,
                 "reason": "Trait missmatch - see outcomes" if not traits_passed else "MSE angle and magnitudes passed. Trait matches all passed",
                 "offset": offset,
-                "score": score,
+                "ang_cc_score": score,
                 "og_matches" : og_matches,
                 "matches": matches,
                 "angular_diffs": angular_diffs,
@@ -713,25 +713,13 @@ class Plane:
         Returns:
             List of matched tuples (idx_a, idx_b, score, match_result_dict)
         """
-        params = PLANE_LIST_PARAM_DEFAULTS.copy()  # start with defaults
-        if plane_list_params:
-            params.update(plane_list_params)  # override with anything user provides
-
-        # Ensure defaults in matching paramerers
-        match_params = MATCH_PLANE_PARAM_DEFAULTS.copy()
-        if match_plane_params:
-            # Update top level normally
-            for key, val in match_plane_params.items():
-                if key in match_params and isinstance(match_params[key], dict) and isinstance(val, dict):
-                    match_params[key].update(val)  # Merge into sub-dict
-                else:
-                    match_params[key] = val  # Replace
+        params = create_param_dict(PLANE_LIST_PARAM_DEFAULTS, plane_list_params) # Params for this function
+        match_params = create_param_dict(MATCH_PLANE_PARAM_DEFAULTS, match_plane_params) # Params for match_planes function
 
         max_values = {trait : params["traits"][trait]["max_value"] for trait in params["traits"]}
         weights = {trait : params["traits"][trait]["weight"] for trait in params["traits"]}
 
         results = {}
-
 
         for i, plane_a in enumerate(planes_a):
             for j, plane_b in enumerate(planes_b):

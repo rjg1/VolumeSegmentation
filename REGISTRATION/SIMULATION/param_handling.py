@@ -7,7 +7,7 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "z_threshold": 5,
     "max_tilt_deg": 30.0,
     "projection_dist_thresh":  0.5,
-    "normalize_intensity" : True,
+    "transform_intensity" : "quantile", # "quantile", "raw", "minmax" - transforms avg intensity per roi and compares to anchor/align intensity threshold
     "plane_boundaries" : [-np.inf, np.inf, -np.inf, np.inf],
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True,

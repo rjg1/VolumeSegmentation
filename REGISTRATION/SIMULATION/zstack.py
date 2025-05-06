@@ -206,26 +206,35 @@ class ZStack:
             if not self.has_intensity:
                 raise ValueError("Requires intensity to run")
             
-            # Normalize intensitys across planes if applicable
-            if params["normalize_intensity"]:
-                for z, roi_data in self.z_planes.items():
-                    intensities = [info["intensity"] for info in roi_data.values() if "intensity" in info]
-                    if not intensities:
-                        continue  # Skip if no intensity data
+            # Transform intensities across planes if applicable
+            transform_mode = params.get("transform_intensity", "raw")
+            for z, roi_data in self.z_planes.items():
+                intensities = [info["intensity"] for info in roi_data.values() if "intensity" in info]
+                if not intensities:
+                    continue
 
-                    min_intensity = min(intensities)
-                    max_intensity = max(intensities)
-                    range_intensity = max_intensity - min_intensity
+                if transform_mode == "raw":
+                    continue  # No change
 
-                    if range_intensity == 0:
-                        # If all intensities are the same, set all to 1.0
-                        for info in roi_data.values():
-                            if "intensity" in info:
+                elif transform_mode == "minmax":
+                    min_int = min(intensities)
+                    max_int = max(intensities)
+                    range_int = max_int - min_int
+
+                    for info in roi_data.values():
+                        if "intensity" in info:
+                            if range_int == 0:
                                 info["intensity"] = 1.0
-                    else:
-                        for info in roi_data.values():
-                            if "intensity" in info:
-                                info["intensity"] = (info["intensity"] - min_intensity) / range_intensity
+                            else:
+                                info["intensity"] = (info["intensity"] - min_int) / range_int
+
+                elif transform_mode == "quantile":
+                    sorted_intensities = sorted(intensities)
+                    total = len(sorted_intensities)
+                    for info in roi_data.values():
+                        if "intensity" in info:
+                            count_less = sum(1 for val in sorted_intensities if val < info["intensity"])
+                            info["intensity"] = count_less / total
 
 
             # Build a dictionary of {z: [(id, BoundaryRegion)]} for potential anchor and alignment points
