@@ -23,14 +23,14 @@ def main():
 
     # Step 1: Create original plane A
     anchor_a = PlanePoint(0, (0 + anchor_offset[0], 0 + anchor_offset[1], 0),
-                          traits={"avg_radius": {"threshold": 1.0, "metric": "mse", "value": 0.4}})
+                          traits={"avg_radius": 0.4})
     a_traits = {"avg_radius": [0.3, 0.45, 0.3, 0.4, 0.5]}
     alignment_positions_a = [(1, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0), (1, 2, 0)]
 
     alignment_points_a = [PlanePoint(i + 1, p) for i, p in enumerate(alignment_positions_a)]
     for trait in a_traits:
         for idx, value in enumerate(a_traits[trait]):
-            alignment_points_a[idx].add_trait(trait, threshold=1.0, metric="mse", value=value)
+            alignment_points_a[idx].add_trait(trait, value)
 
     plane_a = Plane(anchor_point=anchor_a, alignment_points=alignment_points_a)
 
@@ -62,7 +62,7 @@ def main():
     offset_vector = np.array([3.0, 2.0, 1.0])
     transformed_points = [p + offset_vector for p in transformed_points]
     anchor_b = PlanePoint(0, anchor_b_pos + offset_vector,
-                          traits={"avg_radius": {"threshold": 1.0, "metric": "mse", "value": 0.4}})
+                          traits={"avg_radius": 0.4})
 
     # Plane B trait values
     # b_traits = {"avg_radius": [a_traits["avg_radius"][i] * random.uniform(0.6, 1.4) for i in subset_indices]}
@@ -70,13 +70,13 @@ def main():
     transformed = [PlanePoint(i + 1, p) for i, p in enumerate(transformed_points)]
     for trait in b_traits:
         for idx, value in enumerate(b_traits[trait]):
-            transformed[idx].add_trait(trait, threshold=1.0, metric="mse", value=value)
+            transformed[idx].add_trait(trait, value)
 
     plane_b = Plane(anchor_point=anchor_b, alignment_points=transformed)
 
     # Step 3: Generate circles for both planes
     circle_points_a = {
-        ppt.id: generate_circle_3d(ppt.position, radius=ppt.traits["avg_radius"]["value"])
+        ppt.id: generate_circle_3d(ppt.position, radius=ppt.traits["avg_radius"])
         for ppt in [anchor_a] + alignment_points_a
     }
 
@@ -84,7 +84,7 @@ def main():
     circle_points_b_scaled_tilted = {}
     for pid in subset_ids_b:
         center = plane_b.plane_points[pid].position
-        radius = plane_b.plane_points[pid].traits["avg_radius"]["value"]
+        radius = plane_b.plane_points[pid].traits["avg_radius"]
 
         # Generate circle points in XY plane centered at origin
         circle = generate_circle_3d(center=[0, 0, 0], radius=radius)
