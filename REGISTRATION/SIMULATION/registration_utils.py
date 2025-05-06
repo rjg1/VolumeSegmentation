@@ -4,7 +4,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import distance
 import matplotlib.pyplot as plt
 import numpy as np
-from param_handling import PLANE_GEN_PARAMS_DEFAULT, PLANE_LIST_PARAM_DEFAULTS, MATCH_PLANE_PARAM_DEFAULTS, create_param_dict
+from param_handling import DEFAULT_2D_MATCH_PARAMS, PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 from plane import Plane
 from zstack import ZStack
 from shapely.geometry import Polygon, Point
@@ -15,22 +15,6 @@ import copy
 from sklearn.cluster import DBSCAN, KMeans
 from scipy.spatial import ConvexHull
 
-# Default parameters to match 2 z-stacks in 2D via their best matching planes
-DEFAULT_2D_MATCH_PARAMS = {
-    "plane_gen_params" : PLANE_GEN_PARAMS_DEFAULT,
-    "stack_a_boundary" : None,
-    "stack_b_boundary" : None,
-    "plane_list_params" : PLANE_LIST_PARAM_DEFAULTS,
-    "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
-    "seg_params": {
-        "method" : "split",
-        "eps": 3.0,
-        "min_samples" : 5
-    },
-    "min_uoi" : 0.5, # min uoi for a match between planes + transformations
-    "plot_uoi" : False, # plot the matched rois and their intersection
-    "plot_match" : False # plot the matched rois only
-}
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
 def compute_avg_uoi(regions_a, regions_b, matches, min_uoi, plot=False):
@@ -194,11 +178,12 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
 
     if params["stack_a_boundary"]: # Update custom image boundaries for plane A if they are uneven
             plane_gen_params["plane_boundaries"] = params["stack_a_boundary"]
+    plane_gen_params["z_guess"] = params["z_guess_a"]
     planes_a = zstack_a.generate_planes(plane_gen_params)
 
     if params["stack_b_boundary"]: # Update custom image boundaries for plane B if they are uneven
         plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
-
+    plane_gen_params["z_guess"] = params["z_guess_b"]
     planes_b = zstack_b.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes

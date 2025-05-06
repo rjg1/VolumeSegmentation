@@ -160,13 +160,16 @@ class ZStack:
         df_out = pd.DataFrame(rows)
         df_out.to_csv(out_path, index=False)
 
-    def _build_z_indexed_rois(self, anchor_threshold, align_threshold):
+    def _build_z_indexed_rois(self, anchor_threshold, align_threshold, z_max = np.inf, z_min = -np.inf):
         self._build_xy_rois()  # Ensure rois are constructed
 
         anchor_rois_by_z = defaultdict(list)
         align_rois_by_z = defaultdict(list)
 
         for (z, roi_id), roi in self.xy_rois.items():
+            if z > z_max or z < z_min: # exclude ROIs out of search range
+                continue
+
             centroid = roi.get_centroid()
             if centroid is None or roi.get_radius() <= 0:
                 continue
@@ -226,7 +229,13 @@ class ZStack:
 
 
             # Build a dictionary of {z: [(id, BoundaryRegion)]} for potential anchor and alignment points
-            anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"])
+            z_max = np.inf
+            z_min = -np.inf
+            if params["z_guess"] != -1:
+                z_max = params["z_guess"] + params["z_range"]
+                z_min = params["z_guess"] - params["z_range"]
+            
+            anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"], z_max = z_max, z_min = z_min)
 
             # Search through anchor points in ascending Z
             for z_anchor in sorted(anchor_by_z.keys()): # Iterate through z levels

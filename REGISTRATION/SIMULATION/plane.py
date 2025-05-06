@@ -1,4 +1,3 @@
-
 import numpy as np
 from scipy.signal import correlate
 from scipy.ndimage import gaussian_filter1d
@@ -7,7 +6,7 @@ from planepoint import PlanePoint
 from numpy.fft import fft, ifft
 from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
-from registration_utils import MATCH_PLANE_PARAM_DEFAULTS, PLANE_LIST_PARAM_DEFAULTS, create_param_dict
+from param_handling import MATCH_PLANE_PARAM_DEFAULTS, PLANE_LIST_PARAM_DEFAULTS, create_param_dict
 
 
 PLANE_ANCHOR_ID = 0
