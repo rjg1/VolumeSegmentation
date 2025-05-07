@@ -737,9 +737,6 @@ class Plane:
 
                 score = match_result["score"]
 
-                num_matches = len(match_result['matches'])
-                if num_matches > max_matches_observed:
-                    max_matches_observed = num_matches
 
                 if score >= params["min_score"]:
                     results[score] = {
@@ -749,6 +746,10 @@ class Plane:
                     }
                     print(match_result)
 
+                    num_matches = len(match_result['matches'])
+                    if num_matches > max_matches_observed:
+                        max_matches_observed = num_matches
+
         # Re-scale scores based on matches
         scaled_results = {}
         num_matches = len(match_result["matches"])
@@ -756,6 +757,8 @@ class Plane:
         max_matches = min(params["max_matches"], max_matches_observed) # clamp to largest number of matches observed
         min_modifier = params["min_score_modifier"]
         max_modifier = params["max_score_modifier"]
+
+        print(f"Max observed matchess: {max_matches_observed}, max matches used: {max_matches}")
 
         if max_matches > min_matches:
             for score, outcome_dict in results.items():
@@ -768,9 +771,11 @@ class Plane:
                 alpha_steps = clamped_matches - min_matches # Number of matches over min matches
                 score_modifier = min_modifier + (alpha * alpha_steps)
                 score_adjusted = score * score_modifier
-
-                scaled_results[score_adjusted] = outcome_dict
+                
+                if score_adjusted >= params["min_score"]:
+                    scaled_results[score_adjusted] = outcome_dict
         else:
+            print(f"no scaling done")
             scaled_results = results # no scaling required
 
 

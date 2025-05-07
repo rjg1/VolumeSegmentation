@@ -16,7 +16,7 @@ from plane import Plane
 from scipy.optimize import linear_sum_assignment
 
 RANDOM_SEED = 10
-NUM_ELLIPSES = 50
+NUM_ELLIPSES = 10
 INTENSITY_SELECTION_THRESHOLD = 0.5 # Intensity required for an ROI to be considered as an anchor point
 INTENSITY_DELTA_PERC = 0.2 # Intensity delta percent between two ROIs for the match to be considered
 ANGLE_DELTA_DEG = 10 # Angle to rotate between tests
@@ -190,24 +190,25 @@ def main():
     match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2
+        },
+        "traits": {
+            "angle" : {
+                "weight": 0.6,
+                "max_value" : 0.0005
+            },
+            "magnitude" : {
+                "weight": 0.4,
+                "max_value" : 0.0005
+            }
         }
     }
 
     plane_list_params = {
-        "min_score" : 0.99,
+        "min_score" : 0.9,
         "max_matches" : 4, # max matches to scale score between
         "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
         "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
-        "traits": {
-            "angle" : {
-                "weight": 0.6,
-                "max_value" : 0.00000000000000000000001
-            },
-            "magnitude" : {
-                "weight": 0.4,
-                "max_value" : 0.0000001
-            }
-        }
+
     }
 
     match_params = {

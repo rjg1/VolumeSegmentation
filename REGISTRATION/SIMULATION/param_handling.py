@@ -38,13 +38,13 @@ MATCH_PLANE_PARAM_DEFAULTS = {
     "traits": {
         "angle" : {
             "weight": 0.6,
-            "max_value" : 5.0,
+            "max_value" : 0.001,
             "metric" : "mse",
             "terminate_after": np.inf,
         },
         "magnitude" : {
             "weight": 0.4,
-            "max_value" : 10.0,
+            "max_value" : 0.001,
             "metric" : "mse",
             "terminate_after": np.inf,
         }

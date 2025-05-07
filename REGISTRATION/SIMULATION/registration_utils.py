@@ -174,6 +174,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Copy defaults
     params = create_param_dict(DEFAULT_2D_MATCH_PARAMS, match_params)
 
+    print(params)
+
     plane_gen_params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, params["plane_gen_params"])
     plane_gen_params["z_range"] = params["plane_list_params"]["z_range"] # Inherit z-range from plane list params
 
