@@ -196,7 +196,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
-    print(f"Best plane match score: {list(matched_planes.keys())[0]}")
+    if len(matched_planes) > 0:
+        print(f"Best plane match score: {list(matched_planes.keys())[0]}")
 
     # Stores just (rounded) values for uniqueness checking
     seen_transformations = set()

@@ -173,7 +173,7 @@ def main():
     plane_b_file = f"north_star_plane_b_rs{RANDOM_SEED}_el{NUM_ELLIPSES}.csv"
 
     plane_gen_params = {
-        "anchor_intensity_threshold": 0.7,
+        "anchor_intensity_threshold": 0.5,
         "align_intensity_threshold": 0.4,
         "regenerate_planes" : False, # Set to regenerate + save planes
         "z_threshold": 2,
@@ -194,18 +194,18 @@ def main():
     }
 
     plane_list_params = {
-        "min_score" : 0.85,
-        "max_matches" : 3, # max matches to scale score between
-        "min_score_modifier" : 0.9, # if matches for a plane = min_matches, score is modified by min score
+        "min_score" : 0.99,
+        "max_matches" : 4, # max matches to scale score between
+        "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
         "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
         "traits": {
             "angle" : {
                 "weight": 0.6,
-                "max_value" : 5.0
+                "max_value" : 0.00000000000000000000001
             },
             "magnitude" : {
                 "weight": 0.4,
-                "max_value" : 10.0
+                "max_value" : 0.0000001
             }
         }
     }

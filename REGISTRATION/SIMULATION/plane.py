@@ -724,6 +724,7 @@ class Plane:
         planes_b = filter_planes_by_z(planes_b, params["z_guess_b"], params["z_range"])
 
         results = {}
+        max_matches_observed = 0
 
         for i, plane_a in enumerate(planes_a):
             for j, plane_b in enumerate(planes_b):
@@ -734,25 +735,11 @@ class Plane:
                 if not match_result["match"]:
                     continue
 
-                # Modify score based on number of alignment matches
                 score = match_result["score"]
-                num_matches = len(match_result["matches"])
-                min_matches = match_plane_params["bin_match_params"]["min_matches"]
-                max_matches = params["max_matches"]
-                min_modifier = params["min_score_modifier"]
-                max_modifier = params["max_score_modifier"]
 
-                if max_matches > min_matches:
-                    # Clamp match count between min and max
-                    clamped_matches = max(min(num_matches, max_matches), min_matches)
-                    
-                    # Linearly interpolate modifier
-                    alpha = (max_modifier - min_modifier) / (max_matches - min_matches) # e.g 0.2 / 3 -> number to step up in score modifier per match over min matches
-                    alpha_steps = clamped_matches - min_matches # Number of matches over min matches
-                    score_modifier = min_modifier + (alpha * alpha_steps)
-                    
-                    score *= score_modifier
-
+                num_matches = len(match_result['matches'])
+                if num_matches > max_matches_observed:
+                    max_matches_observed = num_matches
 
                 if score >= params["min_score"]:
                     results[score] = {
@@ -762,10 +749,33 @@ class Plane:
                     }
                     print(match_result)
 
-        # Re-scale scores here
+        # Re-scale scores based on matches
+        scaled_results = {}
+        num_matches = len(match_result["matches"])
+        min_matches = match_plane_params["bin_match_params"]["min_matches"]
+        max_matches = min(params["max_matches"], max_matches_observed) # clamp to largest number of matches observed
+        min_modifier = params["min_score_modifier"]
+        max_modifier = params["max_score_modifier"]
+
+        if max_matches > min_matches:
+            for score, outcome_dict in results.items():
+                num_matches = len(outcome_dict['result']['matches'])
+                # Clamp match count between min and max
+                clamped_matches = max(min(num_matches, max_matches), min_matches)
+                
+                # Linearly interpolate modifier
+                alpha = (max_modifier - min_modifier) / (max_matches - min_matches) # e.g 0.2 / 3 -> number to step up in score modifier per match over min matches
+                alpha_steps = clamped_matches - min_matches # Number of matches over min matches
+                score_modifier = min_modifier + (alpha * alpha_steps)
+                score_adjusted = score * score_modifier
+
+                scaled_results[score_adjusted] = outcome_dict
+        else:
+            scaled_results = results # no scaling required
+
 
         # Re-make dict with scores sorted in ascending order
-        return dict(sorted(results.items(), key=lambda item: item[0], reverse=True))
+        return dict(sorted(scaled_results.items(), key=lambda item: item[0], reverse=True))
 
 
     def plot_plane_2d_projection(self, show=True, save_path=None):
