@@ -284,25 +284,8 @@ class Plane:
             }
 
         # Check traits
-        # Adjust Plane B traits for matched points using offset and scale
-        for i, j in matches:
-            pptb = plane_b.plane_points[j]
-
-            # Get raw angle and magnitude
-            b_angle_raw = pptb.traits["angle"]
-            b_mag_raw = pptb.traits["magnitude"]
-
-            # Apply offset and scale
-            b_angle_offset = (b_angle_raw + np.radians(offset)) % (2 * np.pi)
-            b_mag_scaled = b_mag_raw * scale
-
-            # Overwrite traits
-            pptb.add_trait("angle", b_angle_offset)
-            pptb.add_trait("magnitude", b_mag_scaled)
-
-
         traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(
-            matches, plane_b, params["traits"]
+            matches, plane_b, params["traits"], offset=offset, scale=scale
         )
 
         score = self._compute_trait_score(trait_values, params["traits"])
@@ -347,7 +330,7 @@ class Plane:
         return total_score / total_weight
 
 
-    def _check_traits(self, matches, plane_b, trait_param_dict):
+    def _check_traits(self, matches, plane_b, trait_param_dict, offset=None, scale=None):
         traits_passed = True
         trait_values = {}
         trait_outcomes = {}
@@ -369,7 +352,16 @@ class Plane:
                 if trait not in trait_error_values:
                     trait_error_values[trait] = []
 
-                err = np.abs(ppta.traits[trait] - pptb.traits[trait])
+               # Special-case adjusted angle/magnitude values for plane B
+                if trait == "angle" and offset is not None:
+                    b_val = (pptb.traits[trait] + np.radians(offset)) % (2 * np.pi) # Adjust it by the offset (degrees -> radians)
+                elif trait == "magnitude" and scale is not None:
+                    b_val = pptb.traits[trait] * scale # Rescale
+                else:
+                    b_val = pptb.traits[trait]
+
+                a_val = ppta.traits[trait]
+                err = np.abs(a_val - b_val)
                 trait_error_values[trait].append(err)
 
             # Catch any traits present only in pptb
