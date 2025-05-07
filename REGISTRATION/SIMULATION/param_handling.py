@@ -34,11 +34,21 @@ MATCH_PLANE_PARAM_DEFAULTS = {
         "blur_sigma" : 2,
         "resolution" : 360
     },
-    "angle_mse_threshold" : 1.0,
-    "magnitude_mse_threshold" : 1.0,
     "circular_fft" : True,
-    "trait_metrics" : {},
-    "trait_thresholds" : {}
+    "traits": {
+        "angle" : {
+            "weight": 0.6,
+            "max_value" : 5.0,
+            "metric" : "mse",
+            "terminate_after": np.inf,
+        },
+        "magnitude" : {
+            "weight": 0.4,
+            "max_value" : 10.0,
+            "metric" : "mse",
+            "terminate_after": np.inf,
+        }
+    }
 }
 
 # Default parameters for matching two lists of planes
@@ -50,18 +60,6 @@ PLANE_LIST_PARAM_DEFAULTS = {
         "z_guess_a": -1, # guess at the z-level where the plane match is located in plane list a -> -1 means no guess -> used for optimization in time here for a pre-generated plane list
         "z_guess_b": -1, # guess at the z-level where the plane match is located in plane list k b -> -1 means no guess
         "z_range" : 0, # # +- tolerance to search for in z in both planes
-        "traits": {
-            "angle" : {
-                "weight": 0.6,
-                "max_value" : 5.0,
-                "metric" : "mse"
-            },
-            "magnitude" : {
-                "weight": 0.4,
-                "max_value" : 10.0,
-                "metric" : "mse",
-            }
-        }
     }
 
 # Default parameters for matching 2 zstacks by a single plane in 2D

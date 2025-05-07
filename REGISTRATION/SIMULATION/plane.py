@@ -257,9 +257,9 @@ class Plane:
         signal_a = self._build_angular_signal(angles_a, **params["angle_match_params"])
         signal_b = self._build_angular_signal(angles_b, **params["angle_match_params"])
         if params["circular_fft"]:
-            offset, score, correlation = self._match_circular_signals_fft(signal_a, signal_b)
+            offset, ang_score, correlation = self._match_circular_signals_fft(signal_a, signal_b)
         else:
-            offset, score, correlation = self._match_circular_signals(signal_a, signal_b)
+            offset, ang_score, correlation = self._match_circular_signals(signal_a, signal_b)
         
         # Find angle matches and compute angular error + magnitudal error
         matches, scale, magnitude_mse, angular_diffs, magnitude_diffs = self._fuzzy_bin_match(angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset, 
@@ -280,63 +280,74 @@ class Plane:
                 "angular_diffs": angular_diffs,
                 "magnitude_diffs": magnitude_diffs,
                 "offset": offset,
-                "ang_cc_score": score
+                "ang_cc_score": ang_score
             }
 
-        # Compute angle MSE
-        angle_mse = np.mean(np.square(angular_diffs)) if angular_diffs else float('inf')
-
-        if angle_mse >= params["angle_mse_threshold"]:
-            return {
-                "match": False,
-                "reason": "Failed angle MSE threshold",
-                "offset": offset,
-                "ang_cc_score": score,
-                "og_matches" : og_matches,
-                "matches": matches,
-                "angular_diffs": angular_diffs,
-                "magnitude_diffs": magnitude_diffs,
-                "angle_mse": angle_mse,           
-                "magnitude_mse": magnitude_mse,
-                "scale_factor": scale
-            }
-
-        # Compare magnitude MSE
-        if magnitude_mse > params["magnitude_mse_threshold"]:
-            return {
-                "match": False,
-                "reason": "Failed magnitude MSE threshold",
-                "offset": offset,
-                "ang_cc_score": score,
-                "og_matches" : og_matches,
-                "matches": matches,
-                "angular_diffs": angular_diffs,
-                "magnitude_diffs": magnitude_diffs,
-                "angle_mse": angle_mse,
-                "magnitude_mse": magnitude_mse,
-                "scale_factor": scale
-            }
-    
         # Check traits
-        traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(matches, plane_b, params["trait_metrics"], params["trait_thresholds"])
+        # Adjust Plane B traits for matched points using offset and scale
+        for i, j in matches:
+            pptb = plane_b.plane_points[j]
+
+            # Get raw angle and magnitude
+            b_angle_raw = pptb.traits["angle"]
+            b_mag_raw = pptb.traits["magnitude"]
+
+            # Apply offset and scale
+            b_angle_offset = (b_angle_raw + np.radians(offset)) % (2 * np.pi)
+            b_mag_scaled = b_mag_raw * scale
+
+            # Overwrite traits
+            pptb.add_trait("angle", b_angle_offset)
+            pptb.add_trait("magnitude", b_mag_scaled)
+
+
+        traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(
+            matches, plane_b, params["traits"]
+        )
+
+        score = self._compute_trait_score(trait_values, params["traits"])
+        
         return {
-                "match": traits_passed,
-                "reason": "Trait mismatch - see outcomes" if not traits_passed else "MSE angle and magnitudes passed. Trait matches all passed",
+                "match": traits_passed, # True unless a trait exceeded a specified terminate_after threshold
+                "score" : score, # Final score match between planes
+                "reason": "Trait mismatch - see outcomes" if not traits_passed else "Trait matches all passed",
                 "offset": offset,
-                "ang_cc_score": score,
+                "ang_cc_score": ang_score,
                 "og_matches" : og_matches,
                 "matches": matches,
-                "angular_diffs": angular_diffs,
-                "magnitude_diffs": magnitude_diffs,
-                "angle_mse": angle_mse,
-                "magnitude_mse": magnitude_mse,
                 "scale_factor": scale,
                 "trait_values": trait_values,
                 "trait_outcomes": trait_outcomes,
                 "mismatched_traits": mismatched_traits
         }
 
-    def _check_traits(self, matches, plane_b, trait_metric_map, trait_threshold_map):
+    def _compute_trait_score(self, trait_values, trait_params):
+        """
+        Given trait error values and per-trait param dict, compute normalized and weighted total score.
+        """
+        total_score = 0.0
+        total_weight = 0.0
+
+        for trait, value in trait_values.items():
+            max_val = trait_params.get(trait, {}).get("max_value", 1.0)
+            weight = trait_params.get(trait, {}).get("weight", 0.0)
+
+            if max_val == 0:
+                continue  # avoid divide-by-zero
+
+            norm_score = 1.0 - (value / max_val)
+            norm_score = max(0.0, min(1.0, norm_score))  # clamp to [0, 1]
+
+            total_score += norm_score * weight
+            total_weight += weight
+
+        if total_weight == 0:
+            return 0.0
+
+        return total_score / total_weight
+
+
+    def _check_traits(self, matches, plane_b, trait_param_dict):
         traits_passed = True
         trait_values = {}
         trait_outcomes = {}
@@ -372,8 +383,10 @@ class Plane:
         # Compute aggregate errors
         for trait in matched_traits:
             errors = trait_error_values[trait]
-            metric = trait_metric_map.get(trait, "mse")
-            threshold = trait_threshold_map.get(trait, float("inf"))
+            trait_params = trait_param_dict.get(trait, {})
+            metric = trait_params.get("metric", "mse")
+            threshold = trait_params.get("terminate_after", float("inf"))
+
 
             if metric == "mse":
                 value = np.mean(np.square(errors))
@@ -414,6 +427,10 @@ class Plane:
             if np.isclose(angle, 2 * np.pi):
                 angle = 0.0
             magnitude = np.sqrt(x**2 + y**2)
+
+            # Add traits
+            ppt.add_trait("angle", angle)
+            ppt.add_trait("magnitude", magnitude)
 
             angle_mag_data.append((angle, magnitude, idx, ppt))
 
@@ -703,24 +720,13 @@ class Plane:
 
         Parameters:
             planes_a, planes_b (list of Plane): Lists of planes to match.
-            weights (dict): Dictionary with keys "angle", "magnitude", and trait names for weighting.
-            max_values (dict): Dictionary with keys "angle", "magnitude", and trait names for normalization.
-            score_threshold (float): Minimum similarity score required to consider a match.
 
         Returns:
             List of matched tuples (idx_a, idx_b, score, match_result_dict)
         """
         params = create_param_dict(PLANE_LIST_PARAM_DEFAULTS, plane_list_params) # Params for this function
         match_params = create_param_dict(MATCH_PLANE_PARAM_DEFAULTS, match_plane_params) # Params for match_planes function
-
-        # Used for scoring
-        max_values = {trait : params["traits"][trait]["max_value"] for trait in params["traits"]}
-        weights = {trait : params["traits"][trait]["weight"] for trait in params["traits"]}
-
-        # Used for calculating error in traits
-        match_params["trait_metrics"] = {trait : params["traits"][trait]["metric"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
-        match_params["trait_thresholds"] = {trait : params["traits"][trait]["max_value"] for trait in params["traits"] if trait not in ["angle", "magnitude"]}
-
+    
         # Remove planes not in the specified z range
         planes_a = filter_planes_by_z(planes_a, params["z_guess_a"], params["z_range"])
         planes_b = filter_planes_by_z(planes_b, params["z_guess_b"], params["z_range"])
@@ -732,40 +738,12 @@ class Plane:
                 match_result = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
 
+                # Set if early termination specified for specific traits, or if less than min_matches between planes
                 if not match_result["match"]:
                     continue
 
-                angle_mse = match_result.get("angle_mse", float("inf"))
-                magnitude_mse = match_result.get("magnitude_mse", float("inf"))
-                trait_values = match_result.get("trait_values", {})
-
-                # Validate angle and magnitude are within limits
-                if angle_mse > max_values.get("angle", float("inf")) or \
-                magnitude_mse > max_values.get("magnitude", float("inf")):
-                    continue
-
-                # Validate traits are within their individual limits
-                trait_scores = {}
-                trait_failed = False
-                for trait, error in trait_values.items():
-                    max_trait = max_values.get(trait, float("inf"))
-                    if error > max_trait:
-                        trait_failed = True
-                        break
-                    trait_scores[trait] = 1 - (error / max_trait) if max_trait > 0 else 0.0
-                if trait_failed:
-                    continue
-
-                # Compute normalized component scores
-                angle_score = 1 - (angle_mse / max_values.get("angle", 1.0))
-                magnitude_score = 1 - (magnitude_mse / max_values.get("magnitude", 1.0))
-
-                # Weighted sum of scores
-                score = weights.get("angle", 0) * angle_score + \
-                        weights.get("magnitude", 0) * magnitude_score + \
-                        sum(weights.get(trait, 0) * trait_scores[trait] for trait in trait_scores)
-
                 # Modify score based on number of alignment matches
+                score = match_result["score"]
                 num_matches = len(match_result["matches"])
                 min_matches = match_plane_params["bin_match_params"]["min_matches"]
                 max_matches = params["max_matches"]
@@ -790,6 +768,9 @@ class Plane:
                         "plane_b": plane_b,
                         "result": match_result
                     }
+                    print(match_result)
+
+        # Re-scale scores here
 
         # Re-make dict with scores sorted in ascending order
         return dict(sorted(results.items(), key=lambda item: item[0], reverse=True))
