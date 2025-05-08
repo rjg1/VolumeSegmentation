@@ -269,7 +269,7 @@ class ZStack:
                     anchor_pos = anchor_roi.get_centroid() # Extract centroid
                     anchor_point = PlanePoint(anchor_id, anchor_pos) # Make a PlanePoint object for plane construction
 
-                    # Collect alignment candidates within z threshold
+                    # Collect alignment candidates within z threshold # TODO can be calculated before this
                     local_alignments = []
                     for dz in range(-params["z_threshold"], params["z_threshold"] + 1):
                         for align_id, align_roi in align_by_z.get(z_anchor + dz, []): # Find any entries on this z-level
@@ -280,7 +280,7 @@ class ZStack:
                         p1 = PlanePoint(id1, roi1.get_centroid())
                         p2 = PlanePoint(id2, roi2.get_centroid())
 
-                        # Check to see if these points can form a reasonable plane by restricting angle between all 3 points
+                        # Check to see if these points can form a reasonable plane by restricting angle between all 3 points # TODO cache this?
                         if not self._is_tilt_valid(anchor_point.position, p1.position, max_tilt_rad):
                             continue
                         if not self._is_tilt_valid(anchor_point.position, p2.position, max_tilt_rad):
@@ -290,10 +290,13 @@ class ZStack:
 
                         # Construct a plane object with these points
                         plane = Plane(anchor_point, [p1, p2], max_alignments=params["max_alignments"], fixed_basis=params["fixed_basis"])
-                        # Find any extra points to project to this plane to increase accuracy of alignment
+                        # TODO quick check to see if normal is the same as any other planes made by this anchor point
+                        # Find any extra points to project to this plane to increase accuracy of alignment 
+                        # # TODO cache this for a given plane angle -> future planes made of same ROIs get to skip this
                         additional_points = [PlanePoint(align_id, align_roi.get_centroid()) for align_id, align_roi in local_alignments if align_id not in (id1, id2, anchor_id)]
                         plane.project_points(additional_points, threshold=params["projection_dist_thresh"]) # Project all nearby points
 
+                        # TODO do this for only planes projected by this anchor point
                         if not any(existing.is_equivalent_to(plane, match_anchors = params["match_anchors"]) for existing in self.planes):
                             self.planes.append(plane)
 
@@ -414,4 +417,150 @@ class ZStack:
 
 
 
-    
+    # def generate_planes(self, plane_gen_params=None):
+    # params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
+
+    # if params["read_filename"] is not None and not params["regenerate_planes"]:
+    #     read_path = params["read_filename"]
+    #     if os.path.exists(read_path):
+    #         try:
+    #             print(f"[INFO] Attempting to load planes from: {read_path}")
+    #             return self.read_planes_from_csv(read_path)
+    #         except Exception as e:
+    #             print(f"[WARN] Failed to parse plane file '{read_path}': {e}")
+    #     else:
+    #         print(f"[WARN] Plane file '{read_path}' does not exist. Regenerating planes.")
+
+    # if len(self.planes) > 0 and not params['regenerate_planes']:
+    #     print("Using past save of planes...")
+    #     return self.planes
+
+    # print("Generating planes...")
+
+    # max_tilt_rad = np.radians(params["max_tilt_deg"])
+    # self.planes = []
+    # boundaries = params["plane_boundaries"]
+    # self._find_edge_rois(boundaries[0], boundaries[1], boundaries[2], boundaries[3], params["margin"])
+
+    # if not self.has_intensity:
+    #     raise ValueError("Requires intensity to run")
+
+    # transform_mode = params.get("transform_intensity", "raw")
+    # for z, roi_data in self.z_planes.items():
+    #     intensities = [info["intensity"] for info in roi_data.values() if "intensity" in info]
+    #     if not intensities:
+    #         continue
+
+    #     if transform_mode == "minmax":
+    #         min_int = min(intensities)
+    #         max_int = max(intensities)
+    #         range_int = max_int - min_int
+    #         for info in roi_data.values():
+    #             if "intensity" in info:
+    #                 info["intensity"] = (info["intensity"] - min_int) / range_int if range_int else 1.0
+
+    #     elif transform_mode == "quantile":
+    #         sorted_intensities = sorted(intensities)
+    #         total = len(sorted_intensities)
+    #         for info in roi_data.values():
+    #             if "intensity" in info:
+    #                 count_less = sum(1 for val in sorted_intensities if val < info["intensity"])
+    #                 info["intensity"] = count_less / total
+
+    # z_max = np.inf
+    # z_min = -np.inf
+    # if params["z_guess"] != -1:
+    #     z_max = params["z_guess"] + params["z_range"]
+    #     z_min = params["z_guess"] - params["z_range"]
+
+    # anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"], z_max=z_max, z_min=z_min)
+
+    # tasks = [
+    #     (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
+    #     for anchor_id, anchor_roi in anchor_by_z[z]
+    # ]
+
+    # def is_coplanar(plane, normals_list, angle_thresh_rad=0.017, dist_thresh=1e-3):
+    #     for n in normals_list:
+    #         dot = np.dot(plane.normal, n)
+    #         angle_diff = np.arccos(np.clip(dot, -1.0, 1.0))
+    #         if angle_diff <= angle_thresh_rad:
+    #             d = -np.dot(n, plane.anchor_point.position)
+    #             dist = abs(np.dot(n, plane.plane_points[1].position) + d)
+    #             if dist < dist_thresh:
+    #                 return True
+    #     return False
+
+    # def process_anchor(z_anchor, anchor_id, anchor_roi):
+    #     anchor_planes = []
+    #     normals_seen = []
+    #     seen_triplets = set()
+    #     anchor_pos = anchor_roi.get_centroid()
+    #     anchor_point = PlanePoint(anchor_id, anchor_pos)
+
+    #     # Precompute local alignments once per z-slice
+    #     local_alignments = [
+    #         (align_id, align_roi)
+    #         for dz in range(-params["z_threshold"], params["z_threshold"] + 1)
+    #         for align_id, align_roi in align_by_z.get(z_anchor + dz, [])
+    #         if align_id != anchor_id
+    #     ]
+
+    #     tilt_cache = {}
+    #     def tilt_valid(id_a, pos_a, id_b, pos_b):
+    #         key = frozenset((id_a, id_b))
+    #         if key in tilt_cache:
+    #             return tilt_cache[key]
+    #         result = self._is_tilt_valid(pos_a, pos_b, max_tilt_rad)
+    #         tilt_cache[key] = result
+    #         return result
+
+    #     for (id1, roi1), (id2, roi2) in combinations(local_alignments, 2):
+    #         triplet_key = frozenset((anchor_id, id1, id2))
+    #         if triplet_key in seen_triplets:
+    #             continue
+    #         seen_triplets.add(triplet_key)
+
+    #         p1 = PlanePoint(id1, roi1.get_centroid())
+    #         p2 = PlanePoint(id2, roi2.get_centroid())
+
+    #         if not tilt_valid(anchor_id, anchor_pos, id1, p1.position):
+    #             continue
+    #         if not tilt_valid(anchor_id, anchor_pos, id2, p2.position):
+    #             continue
+    #         if not tilt_valid(id1, p1.position, id2, p2.position):
+    #             continue
+
+    #         plane = Plane(anchor_point, [p1, p2], max_alignments=params["max_alignments"], fixed_basis=params["fixed_basis"])
+
+    #         if is_coplanar(plane, normals_seen):
+    #             continue
+
+    #         normals_seen.append(plane.normal)
+
+    #         additional_points = [
+    #             PlanePoint(align_id, align_roi.get_centroid())
+    #             for align_id, align_roi in local_alignments
+    #             if align_id not in (id1, id2, anchor_id)
+    #         ]
+    #         plane.project_points(additional_points, threshold=params["projection_dist_thresh"])
+
+    #         anchor_planes.append(plane)
+
+    #     return anchor_planes
+
+    # self.planes = []
+    # n_threads = params.get("n_threads", 4)
+    # with ThreadPoolExecutor(max_workers=n_threads) as executor:
+    #     futures = [executor.submit(process_anchor, *task) for task in tasks]
+    #     for future in futures:
+    #         self.planes.extend(future.result())
+
+    # if params["save_filename"] is not None:
+    #     try:
+    #         print(f"[INFO] Saving planes to: {params['save_filename']}")
+    #         self.write_planes_to_csv(params["save_filename"])
+    #     except Exception as e:
+    #         print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
+
+    # return self.planes
