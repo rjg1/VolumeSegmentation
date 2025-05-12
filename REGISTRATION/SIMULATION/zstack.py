@@ -336,12 +336,12 @@ class ZStack:
         n_threads = params.get("n_threads", 4)
         with ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures = [executor.submit(process_anchor, *task) for task in tasks]
-            # with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
-            #     for future in futures:
-            #         self.planes.extend(future.result())
-            #         pbar.update(1)
-            for future in futures:
-                self.planes.extend(future.result())
+            with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
+                for future in futures:
+                    self.planes.extend(future.result())
+                    pbar.update(1)
+            # for future in futures:
+            #     self.planes.extend(future.result())
 
 
         if params["save_filename"] is not None:

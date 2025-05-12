@@ -6,6 +6,7 @@ from planepoint import PlanePoint
 from numpy.fft import fft, ifft
 from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from param_handling import MATCH_PLANE_PARAM_DEFAULTS, PLANE_LIST_PARAM_DEFAULTS, create_param_dict
 
 
@@ -733,8 +734,10 @@ class Plane:
         results = {}
         max_matches_observed = 0
 
-        for i, plane_a in enumerate(planes_a):
-            for j, plane_b in enumerate(planes_b):
+        outer = tqdm(enumerate(planes_a), desc="Planes A", position=0)
+        for i, plane_a in outer:
+            inner = tqdm(enumerate(planes_b), desc=f"Planes B (A[{i}])", position=1, leave=False)
+            for j, plane_b in inner:
                 match_result = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
 
@@ -751,7 +754,6 @@ class Plane:
                         "plane_b": plane_b,
                         "result": match_result
                     }
-                    print(match_result)
 
                     num_matches = len(match_result['matches'])
                     if num_matches > max_matches_observed:
@@ -765,7 +767,7 @@ class Plane:
         min_modifier = params["min_score_modifier"]
         max_modifier = params["max_score_modifier"]
 
-        print(f"Max observed matchess: {max_matches_observed}, max matches used: {max_matches}")
+        print(f"Max observed matches: {max_matches_observed}, max matches used: {max_matches}")
 
         if max_matches > min_matches:
             for score, outcome_dict in results.items():
