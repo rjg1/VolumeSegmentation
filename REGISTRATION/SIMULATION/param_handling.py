@@ -17,7 +17,8 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
-    "z_range": 0 # +- tolerance to search for in z in both planes
+    "z_range": 0, # +- tolerance to search for in z in both planes
+    "n_threads" : 4 
 }
 
 # Default parameters for matching two planes
