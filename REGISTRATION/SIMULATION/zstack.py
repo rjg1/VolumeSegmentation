@@ -9,6 +9,7 @@ from planepoint import PlanePoint
 import os
 from concurrent.futures import ThreadPoolExecutor
 import copy
+import cupy as cp
 from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 
 def get_hull_boundary_points(hull):
@@ -312,6 +313,177 @@ class ZStack:
                 plane.project_points(additional_points, threshold=params["projection_dist_thresh"])
 
                 anchor_planes.append(plane)
+
+            return anchor_planes
+
+        self.planes = []
+        n_threads = params.get("n_threads", 4)
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            futures = [executor.submit(process_anchor, *task) for task in tasks]
+            for future in futures:
+                self.planes.extend(future.result())
+
+        if params["save_filename"] is not None:
+            try:
+                print(f"[INFO] Saving planes to: {params['save_filename']}")
+                self.write_planes_to_csv(params["save_filename"])
+            except Exception as e:
+                print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
+
+        return self.planes
+
+
+    def generate_planes_gpu(self, plane_gen_params=None):
+        params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
+
+        if params["read_filename"] is not None and not params["regenerate_planes"]:
+            read_path = params["read_filename"]
+            if os.path.exists(read_path):
+                try:
+                    print(f"[INFO] Attempting to load planes from: {read_path}")
+                    return self.read_planes_from_csv(read_path)
+                except Exception as e:
+                    print(f"[WARN] Failed to parse plane file '{read_path}': {e}")
+            else:
+                print(f"[WARN] Plane file '{read_path}' does not exist. Regenerating planes.")
+
+        if len(self.planes) > 0 and not params['regenerate_planes']:
+            print("Using past save of planes...")
+            return self.planes
+
+        print("Generating planes...")
+
+        max_tilt_rad = np.radians(params["max_tilt_deg"])
+        self.planes = []
+        boundaries = params["plane_boundaries"]
+        self._find_edge_rois(boundaries[0], boundaries[1], boundaries[2], boundaries[3], params["margin"])
+
+        if not self.has_intensity:
+            raise ValueError("Requires intensity to run")
+
+        transform_mode = params.get("transform_intensity", "raw")
+        for z, roi_data in self.z_planes.items():
+            intensities = [info["intensity"] for info in roi_data.values() if "intensity" in info]
+            if not intensities:
+                continue
+
+            if transform_mode == "minmax":
+                min_int = min(intensities)
+                max_int = max(intensities)
+                range_int = max_int - min_int
+                for info in roi_data.values():
+                    if "intensity" in info:
+                        info["intensity"] = (info["intensity"] - min_int) / range_int if range_int else 1.0
+
+            elif transform_mode == "quantile":
+                sorted_intensities = sorted(intensities)
+                total = len(sorted_intensities)
+                for info in roi_data.values():
+                    if "intensity" in info:
+                        count_less = sum(1 for val in sorted_intensities if val < info["intensity"])
+                        info["intensity"] = count_less / total
+
+        z_max = np.inf
+        z_min = -np.inf
+        if params["z_guess"] != -1:
+            z_max = params["z_guess"] + params["z_range"]
+            z_min = params["z_guess"] - params["z_range"]
+
+        anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"], z_max=z_max, z_min=z_min)
+
+        tasks = [
+            (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
+            for anchor_id, anchor_roi in anchor_by_z[z]
+        ]
+
+        def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
+            v1 = pair_pts1 - anchor_pos
+            v2 = pair_pts2 - anchor_pos
+            cp_v1 = cp.asarray(v1)
+            cp_v2 = cp.asarray(v2)
+            dot = cp.sum(cp_v1 * cp_v2, axis=1)
+            norms = cp.linalg.norm(cp_v1, axis=1) * cp.linalg.norm(cp_v2, axis=1)
+            angles = cp.arccos(cp.clip(dot / norms, -1.0, 1.0))
+            return (angles <= max_angle).get()
+
+        def is_coplanar(normal, normals_list, angle_thresh_rad=0.017):
+            if not normals_list:
+                return False
+            normals = np.stack(normals_list)
+            dots = np.dot(normals, normal)
+            angles = np.arccos(np.clip(dots, -1.0, 1.0))
+            return np.any(angles <= angle_thresh_rad)
+
+        def gpu_project_points(points, normal, anchor_pos, threshold):
+            points_gpu = cp.asarray(points)
+            normal_gpu = cp.asarray(normal)
+            anchor_gpu = cp.asarray(anchor_pos)
+
+            distances = cp.dot(points_gpu - anchor_gpu, normal_gpu)
+            projected = points_gpu - distances[:, cp.newaxis] * normal_gpu
+            within_thresh = cp.abs(distances) <= threshold
+
+            return projected.get(), within_thresh.get()
+
+        def process_anchor(z_anchor, anchor_id, anchor_roi):
+            anchor_planes = []
+            normals_seen = []
+            anchor_pos = anchor_roi.get_centroid()
+            anchor_point = PlanePoint(anchor_id, anchor_pos)
+
+            local_alignments = [
+                (align_id, align_roi.get_centroid())
+                for dz in range(-params["z_threshold"], params["z_threshold"] + 1)
+                for align_id, align_roi in align_by_z.get(z_anchor + dz, [])
+                if align_id != anchor_id
+            ]
+
+            point_ids, point_pos = zip(*local_alignments)
+            combos = list(combinations(range(len(point_pos)), 2))
+
+            pts1 = np.array([point_pos[i] for i, j in combos])
+            pts2 = np.array([point_pos[j] for i, j in combos])
+
+            valid_mask = gpu_tilt_check(np.array(anchor_pos), pts1, pts2, max_tilt_rad)
+
+            for (i, j), valid in zip(combos, valid_mask):
+                if not valid:
+                    continue
+
+                id1, id2 = point_ids[i], point_ids[j]
+                p1 = PlanePoint(id1, point_pos[i])
+                p2 = PlanePoint(id2, point_pos[j])
+
+                v1 = p1.position - anchor_pos
+                v2 = p2.position - anchor_pos
+                normal = np.cross(v1, v2)
+                norm_mag = np.linalg.norm(normal)
+                if norm_mag == 0:
+                    continue
+
+                normal /= norm_mag
+
+                if is_coplanar(normal, normals_seen):
+                    continue
+
+                plane = Plane(anchor_point, [p1, p2], max_alignments=params["max_alignments"], fixed_basis=params["fixed_basis"])
+
+                candidate_pts = [
+                    (align_id, align_roi.get_centroid())
+                    for align_id, align_roi in align_by_z.get(z_anchor, [])
+                    if align_id not in (id1, id2, anchor_id)
+                ]
+
+                if candidate_pts:
+                    ids, positions = zip(*candidate_pts)
+                    projected_pts, mask = gpu_project_points(np.array(positions), normal, anchor_pos, params["projection_dist_thresh"])
+
+                    for k, keep in enumerate(mask):
+                        if keep:
+                            plane.plane_points[len(plane.plane_points)] = PlanePoint(ids[k], projected_pts[k])
+
+                anchor_planes.append(plane)
+                normals_seen.append(normal)
 
             return anchor_planes
 

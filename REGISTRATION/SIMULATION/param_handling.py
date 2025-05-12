@@ -18,7 +18,7 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to search for in z in both planes
-    "n_threads" : 4 
+    "n_threads" : 4
 }
 
 # Default parameters for matching two planes
@@ -29,7 +29,8 @@ MATCH_PLANE_PARAM_DEFAULTS = {
         "radians" : True,
         "min_matches" : 2,
         "outlier_thresh" : 2,
-        "mse_threshold" : 1e-3
+        "mse_threshold" : 1e-3,
+        "fixed_scale": None,
     },
     "angle_match_params" : {
         "blur_sigma" : 2,
@@ -82,6 +83,7 @@ DEFAULT_2D_MATCH_PARAMS = {
     "min_uoi" : 0.5, # min uoi for a match between planes + transformations
     "plot_uoi" : False, # plot the matched rois and their intersection
     "plot_match" : False, # plot the matched rois only
+    "use_gpu" : False
 }
 
 # Used for updating a parameter dict to overwrite a subset of defaults

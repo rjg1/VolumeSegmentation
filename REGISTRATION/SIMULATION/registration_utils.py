@@ -185,7 +185,10 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_a"]
     plane_gen_params["read_filename"] = params["planes_a_read_file"]
     plane_gen_params["save_filename"] = params["planes_a_write_file"]
-    planes_a = zstack_a.generate_planes(plane_gen_params)
+    if params["use_gpu"]:
+        planes_a = zstack_a.generate_planes_gpu(plane_gen_params)
+    else:
+        planes_a = zstack_a.generate_planes(plane_gen_params)
 
     if params["stack_b_boundary"]: # Update custom image boundaries for plane B if they are uneven
         plane_gen_params["plane_boundaries"] = params["stack_b_boundary"]
@@ -193,7 +196,10 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_b"]
     plane_gen_params["read_filename"] = params["planes_b_read_file"]
     plane_gen_params["save_filename"] = params["planes_b_write_file"]
-    planes_b = zstack_b.generate_planes(plane_gen_params)
+    if params["use_gpu"]:
+        planes_b = zstack_a.generate_planes_gpu(plane_gen_params)
+    else:
+        planes_b = zstack_a.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])

@@ -87,7 +87,7 @@ class Plane:
     def _fuzzy_bin_match(
         self, angles_a, mags_a, angles_b, mags_b, ids_a, ids_b, offset_deg, 
         resolution=360, angle_tolerance=2, radians=True,
-        min_matches=2, outlier_thresh=2.0, mse_threshold=1e-3
+        min_matches=2, outlier_thresh=2.0, mse_threshold=1e-3, fixed_scale=None
     ):
         """
         Full fuzzy matcher with 1:1 matching, scaling, outlier removal, early termination,
@@ -193,7 +193,10 @@ class Plane:
             denominator = np.sum(mags_b_sel ** 2)
             if denominator == 0:
                 continue
-            s = numerator / denominator
+            if fixed_scale:
+                s = fixed_scale
+            else:  
+                s = numerator / denominator
 
             residuals = mags_a_sel - s * mags_b_sel
             std = np.std(residuals)
@@ -214,7 +217,11 @@ class Plane:
             denominator = np.sum(mags_b_final ** 2)
             if denominator == 0:
                 continue
-            s_final = numerator / denominator
+
+            if fixed_scale:
+                s_final = fixed_scale
+            else:  
+                s_final = numerator / denominator
 
             final_residuals = mags_a_final - s_final * mags_b_final
             mse = np.mean(final_residuals**2)

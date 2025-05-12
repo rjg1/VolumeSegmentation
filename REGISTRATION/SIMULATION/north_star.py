@@ -97,34 +97,34 @@ def main():
     z_planes = dict(sorted(z_planes.items())) # Sort in ascending z, allowing volumes to be built from the ground up
 
     # # Plot initial setup of points
-    # Normalize intensities for colormap
-    norm = mcolors.Normalize(vmin=0, vmax=1)
-    cmap = cm.Greys_r
+    # # Normalize intensities for colormap
+    # norm = mcolors.Normalize(vmin=0, vmax=1)
+    # cmap = cm.Greys_r
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
 
-    # Plot ellipses and annotate with IDs
-    for idx, (ellipse, intensity) in enumerate(zip(ellipses, ellipse_intensities)):
-        ox, oy = ellipse.exterior.xy
-        oz = np.zeros_like(ox)  # z=0 plane
-        verts = [list(zip(ox, oy, oz))]
-        face_color = cmap(norm(intensity))
-        poly = Poly3DCollection(verts, facecolors=face_color, edgecolors='black', alpha=0.6)
-        ax.add_collection3d(poly)
+    # # Plot ellipses and annotate with IDs
+    # for idx, (ellipse, intensity) in enumerate(zip(ellipses, ellipse_intensities)):
+    #     ox, oy = ellipse.exterior.xy
+    #     oz = np.zeros_like(ox)  # z=0 plane
+    #     verts = [list(zip(ox, oy, oz))]
+    #     face_color = cmap(norm(intensity))
+    #     poly = Poly3DCollection(verts, facecolors=face_color, edgecolors='black', alpha=0.6)
+    #     ax.add_collection3d(poly)
 
-        # Add ID label at the polygon's centroid
-        centroid = ellipse.centroid
-        ax.text(centroid.x, centroid.y, 0.02, f"{idx}", color='red', fontsize=8, ha='center', va='center')
+    #     # Add ID label at the polygon's centroid
+    #     centroid = ellipse.centroid
+    #     ax.text(centroid.x, centroid.y, 0.02, f"{idx}", color='red', fontsize=8, ha='center', va='center')
 
-    ax.set_xlim(0, base_width)
-    ax.set_ylim(0, base_height)
-    ax.set_zlim(0, 1)
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title("Generated ellipses on a z-plane")
-    plt.show()
+    # ax.set_xlim(0, base_width)
+    # ax.set_ylim(0, base_height)
+    # ax.set_zlim(0, 1)
+    # ax.set_xlabel('X')
+    # ax.set_ylabel('Y')
+    # ax.set_zlabel('Z')
+    # ax.set_title("Generated ellipses on a z-plane")
+    # plt.show()
 
     # Apply zoom to generated dataset
     zoomed_polys = zoom_polygons_to_window(
@@ -139,21 +139,21 @@ def main():
     # Extract polygons within subwindow (re-polygonizing edge polygons)
     extracted_polys, extracted_intensities = extract_polygons(zoomed_polys, transformed_intensities, base_width, base_height)
 
-    fig, ax = plt.subplots()
-    for idx, poly in enumerate(extracted_polys):
-        x, y = poly.exterior.xy
-        ax.fill(x, y, alpha=0.5, edgecolor='black')
+    # fig, ax = plt.subplots()
+    # for idx, poly in enumerate(extracted_polys):
+    #     x, y = poly.exterior.xy
+    #     ax.fill(x, y, alpha=0.5, edgecolor='black')
 
-        # Label with ID near centroid
-        centroid = poly.centroid
-        ax.text(centroid.x, centroid.y, f"{idx}", fontsize=8, ha='center', va='center', color='red')
+    #     # Label with ID near centroid
+    #     centroid = poly.centroid
+    #     ax.text(centroid.x, centroid.y, f"{idx}", fontsize=8, ha='center', va='center', color='red')
 
-    ax.set_aspect('equal')
-    ax.set_xlim(0, base_width)
-    ax.set_ylim(0, base_height)
-    ax.set_title("Zoomed Polygon View")
-    plt.grid(True)
-    plt.show()
+    # ax.set_aspect('equal')
+    # ax.set_xlim(0, base_width)
+    # ax.set_ylim(0, base_height)
+    # ax.set_title("Zoomed Polygon View")
+    # plt.grid(True)
+    # plt.show()
 
     # Modify new plane data to fit initial dataset - {z : {roi_id: {"coords" : [], "intensity": <int>} }}
     new_plane = {0: {}}
@@ -175,7 +175,7 @@ def main():
     plane_gen_params = {
         "anchor_intensity_threshold": 0.5,
         "align_intensity_threshold": 0.4,
-        "regenerate_planes" : False, # Set to regenerate + save planes
+        "regenerate_planes" : True, # Set to regenerate + save planes
         "z_threshold": 2,
         "max_tilt_deg": 40.0,
         "projection_dist_thresh":  0.5,
@@ -190,7 +190,8 @@ def main():
 
     match_plane_params = {
         "bin_match_params" : {
-            "min_matches" : 2
+            "min_matches" : 2,
+            "fixed_scale" : False #0.3333333 # TODO TESTING
         },
         "traits": {
             "angle" : {
