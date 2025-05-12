@@ -598,6 +598,11 @@ class ZStack:
 
             valid_mask = gpu_tilt_check(np.array(anchor_pos), pts1, pts2, max_tilt_rad)
 
+            proj_pts = {
+                (z, align_id) : align_pos 
+                for align_id, align_pos, z in local_alignments
+            }
+
             # for (i, j), valid in zip(combos, valid_mask):
             for (i, j), valid in tqdm(zip(combos, valid_mask), total=len(valid_mask), desc=f"Anchor {anchor_id}", leave=False):
                 if not valid:
@@ -627,21 +632,23 @@ class ZStack:
                 # Filter out alignment pts from projectable pts
                 z1 = round(point_pos[i][2], 3)
                 z2 = round(point_pos[j][2], 3)
-                id_tuples = [(az, anchor_id),(z1, id1), (z2, id2)]
+                
+                id_tuples = {(az, anchor_id), (z1, id1), (z2, id2)}
 
                 candidate_pts = [
                     (align_id, align_pos) 
-                    for align_id, align_pos, z in local_alignments
+                    for (z, align_id), align_pos in proj_pts.items()
                     if (z, align_id) not in id_tuples 
                 ]
-                point_projected = False
+
+                point_projected = False # Assume no projection
                 if candidate_pts:
                     ids, positions = zip(*candidate_pts)
                     projected_pts, mask = gpu_project_points(np.array(positions), normal, anchor_pos, params["projection_dist_thresh"])
 
                     for k, keep in enumerate(mask):
                         if keep:
-                            point_projected = True
+                            point_projected = True # Projection occurred
                             plane.plane_points[len(plane.plane_points)] = PlanePoint(ids[k], projected_pts[k])
                     if point_projected:
                         plane.angles_and_magnitudes() # Update circular list

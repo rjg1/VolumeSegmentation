@@ -193,7 +193,7 @@ def main():
     match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2,
-            "fixed_scale" : 0.33333 #0.3333333 # TODO TESTING
+            "fixed_scale" : None #0.3333333 # TODO TESTING
         },
         "traits": {
             "angle" : {
@@ -223,9 +223,9 @@ def main():
         "planes_b_read_file" : plane_b_file,
         "planes_a_write_file" : plane_a_file,
         "planes_b_write_file" : plane_b_file,
-        "plot_uoi" : True,
+        "plot_uoi" : False,
         "plot_match" : False,
-        "use_gpu" : True,
+        "use_gpu" : False,
         "min_uoi": 0.7,
         "seg_params": {
             "method" : "split",
