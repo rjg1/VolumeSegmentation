@@ -9,7 +9,7 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "z_threshold": 5, # max distance in z between two points in a plane
     "max_tilt_deg": 30.0, # max magnitude of tilt in the vector between two points in a plane
     "projection_dist_thresh":  0.5, # euclidean distance for a point considered close enough to a plane for it to be projected
-    "transform_intensity" : "quantile", # "quantile", "raw", "minmax" - transforms avg intensity per roi and compares to anchor/align intensity threshold
+    "transform_intensity" : "raw", # "quantile", "raw", "minmax" - transforms avg intensity per roi and compares to anchor/align intensity threshold
     "plane_boundaries" : [-np.inf, np.inf, -np.inf, np.inf],
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
@@ -18,7 +18,8 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to search for in z in both planes
-    "n_threads" : 4
+    "n_threads" : 4, # number of threads to spawn when generating planes
+    "anchor_dist_thresh": None  # acceptable euclidean distance between an anchor and an alignment point
 }
 
 # Default parameters for matching two planes
@@ -89,11 +90,13 @@ DEFAULT_2D_MATCH_PARAMS = {
 # Used for updating a parameter dict to overwrite a subset of defaults
 def deep_update(base, updates):
     for key, value in updates.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+        if key not in base:
+            raise KeyError(f"Unexpected parameter: '{key}'")
+
+        if isinstance(base[key], dict) and isinstance(value, dict):
             deep_update(base[key], value)  # Recurse
         else:
             base[key] = value
-
 # Establish a pattern for updating a default dictionary
 def create_param_dict(default, updates = None):
     params = copy.deepcopy(default)

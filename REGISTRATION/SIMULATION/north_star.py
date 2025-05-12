@@ -14,6 +14,7 @@ from registration_utils import compute_avg_uoi, match_zstacks_2d
 from zstack import ZStack
 from plane import Plane
 from scipy.optimize import linear_sum_assignment
+import time
 
 RANDOM_SEED = 10
 NUM_ELLIPSES = 50
@@ -185,13 +186,14 @@ def main():
         "match_anchors" : True,
         "fixed_basis" : True,
         "max_alignments" : 500,
-        "n_threads" : 10
+        "n_threads" : 10,
+        "anchor_dist_thresh": None
     }
 
     match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2,
-            "fixed_scale" : False #0.3333333 # TODO TESTING
+            "fixed_scale" : 0.33333 #0.3333333 # TODO TESTING
         },
         "traits": {
             "angle" : {
@@ -221,9 +223,9 @@ def main():
         "planes_b_read_file" : plane_b_file,
         "planes_a_write_file" : plane_a_file,
         "planes_b_write_file" : plane_b_file,
-        "plot_uoi" : False,
+        "plot_uoi" : True,
         "plot_match" : False,
-        "use_gpu" : False,
+        "use_gpu" : True,
         "min_uoi": 0.7,
         "seg_params": {
             "method" : "split",
@@ -232,7 +234,6 @@ def main():
         }
     }
 
-    import time
 
     start = time.perf_counter()
     uoi_match_data = match_zstacks_2d(zstack_a=z_stack_a, zstack_b=z_stack_b, match_params=match_params)

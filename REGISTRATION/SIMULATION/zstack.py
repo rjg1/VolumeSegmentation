@@ -7,12 +7,14 @@ from itertools import combinations
 from plane import Plane
 from planepoint import PlanePoint
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError, ProcessPoolExecutor, wait, FIRST_COMPLETED
 import random
 import copy
 import cupy as cp
 from tqdm import tqdm
 from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
+import threading
+import traceback
 
 def get_hull_boundary_points(hull):
     """Extract the list of boundary points of a 2D convex hull."""
@@ -32,8 +34,11 @@ class ZStack:
         # Parse input data
         if isinstance(data, str): # Assume string to csv path in local directory
             self.load_from_csv(data)
+            
         elif isinstance(data, dict): # Assume correctly formed dictionary for z_planes
             self.z_planes = self._from_zplane_dict(data)  
+        
+
 
 
     def _find_edge_rois(self, xmin, xmax, ymin, ymax, margin=5):
@@ -66,6 +71,7 @@ class ZStack:
                 }
             }
         """
+        print(f"Loading Z-stack from: Dict...")
         for z, roi_dict in z_planes.items():
             if not isinstance(roi_dict, dict):
                 raise ValueError(f"Expected dict for z={z}, got {type(roi_dict)}")
@@ -90,6 +96,8 @@ class ZStack:
                         raise ValueError(f"'volume' for ROI {roi_id} at z={z} must be int")
                     self.has_volume = True
 
+        print("Successfully loaded ZStack from dict.")
+
         return copy.deepcopy(z_planes)
     
     def generate_random_intensities(self, min_val=0.0, max_val=1.0):
@@ -109,6 +117,7 @@ class ZStack:
         self.has_intensity = True
 
     def load_from_csv(self, csv_path):
+        print(f"Loading ZStack from: {csv_path}...")
         df = pd.read_csv(csv_path)
         required_cols = {"x", "y", "z", "ROI_ID"}
         if not required_cols.issubset(df.columns):
@@ -126,6 +135,7 @@ class ZStack:
                 self.z_planes[z][roi_id]["volume"] = group["VOLUME_ID"].iloc[0]
 
         self.z_planes = dict(sorted(self.z_planes.items()))  # Sort z keys
+        print("Successfully loaded ZStack from csv.")
 
     def _build_xy_rois(self, parameters=None):
         self.xy_rois = {}
@@ -280,19 +290,44 @@ class ZStack:
                         return True
             return False
 
-        def process_anchor(z_anchor, anchor_id, anchor_roi):
+        
+
+        def process_anchor(z_anchor, anchor_id, anchor_roi, shutdown_flag):
             anchor_planes = []
             normals_seen = []
             anchor_pos = anchor_roi.get_centroid()
+            az = round(anchor_roi.get_centroid()[2], 3)
             anchor_point = PlanePoint(anchor_id, anchor_pos)
 
-            # Precompute local alignments once per z-slice
-            local_alignments = [
-                (align_id, align_roi)
-                for dz in range(-params["z_threshold"], params["z_threshold"] + 1)
-                for align_id, align_roi in align_by_z.get(z_anchor + dz, [])
-                if align_id != anchor_id
-            ]
+            if shutdown_flag.is_set():
+                return []
+
+            # Precompute local alignments once per anchor
+            anchor_volume = self.z_planes[z_anchor][anchor_id].get("volume", None)
+
+            local_alignments = []
+            for dz in range(-params["z_threshold"], params["z_threshold"] + 1):
+                for align_id, align_roi in align_by_z.get(z_anchor + dz, []):
+                    if align_id == anchor_id:
+                        continue
+
+                    align_pos = align_roi.get_centroid()
+
+                    # Distance check TODO
+                    if params.get("anchor_dist_thresh") is not None:
+                        dist = np.linalg.norm(np.array(anchor_pos) - np.array(align_pos))
+                        if dist > params["anchor_dist_thresh"]:
+                            continue
+
+                    # Volume check
+                    if self.has_volume:
+                        align_info = self.z_planes[z_anchor + dz].get(align_id, {})
+                        align_volume = align_info.get("volume", None)
+                        if align_volume == anchor_volume or align_volume is None or anchor_volume is None:
+                            continue
+
+                    local_alignments.append((align_id, align_roi, z_anchor + dz))
+
 
             tilt_cache = {}
             def tilt_valid(id_a, pos_a, id_b, pos_b):
@@ -303,7 +338,29 @@ class ZStack:
                 tilt_cache[key] = result
                 return result
 
-            for (id1, roi1), (id2, roi2) in combinations(local_alignments, 2):
+            # for (id1, roi1), (id2, roi2) in combinations(local_alignments, 2):
+            align_combos = []
+            for (id1, roi1, z1), (id2, roi2, z2) in combinations(local_alignments, 2):
+                if self.has_volume:
+                    a1_info = self.z_planes[z1].get(id1, {})
+                    v1 = a1_info.get("volume", None)
+                    a2_info = self.z_planes[z2].get(id2, {})
+                    v2 = a2_info.get("volume", None)
+                    if None in (anchor_volume, v1, v2): # Check for missing volume
+                        continue
+                    if len(set([anchor_volume, v1, v2])) < 3: # Check for volume uniqueness
+                        continue
+                align_combos.append(((id1, roi1), (id2, roi2)))
+
+  
+            for (id1, roi1), (id2, roi2) in tqdm(
+                align_combos,
+                desc=f"Anchor {anchor_id} [{len(align_combos)} combos]",
+                leave=False
+            ):
+                if shutdown_flag.is_set():
+                    return []
+
                 p1 = PlanePoint(id1, roi1.get_centroid())
                 p2 = PlanePoint(id2, roi2.get_centroid())
 
@@ -321,11 +378,17 @@ class ZStack:
 
                 normals_seen.append(plane.normal)
 
+                z1 = round(roi1.get_centroid()[2],3)
+                z2 = round(roi2.get_centroid()[2],3)
+                id_tuples = [(az, anchor_id), (z1, id1), (z2, id2)]
+
+
                 additional_points = [
                     PlanePoint(align_id, align_roi.get_centroid())
-                    for align_id, align_roi in local_alignments
-                    if align_id not in (id1, id2, anchor_id)
+                    for align_id, align_roi, z in local_alignments
+                    if (z, align_id) not in id_tuples
                 ]
+
                 plane.project_points(additional_points, threshold=params["projection_dist_thresh"])
 
                 anchor_planes.append(plane)
@@ -334,14 +397,30 @@ class ZStack:
 
         self.planes = []
         n_threads = params.get("n_threads", 4)
+
+        shutdown_flag = threading.Event() # Define a flag to allow threads to be exited
         with ThreadPoolExecutor(max_workers=n_threads) as executor:
-            futures = [executor.submit(process_anchor, *task) for task in tasks]
-            with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
-                for future in futures:
-                    self.planes.extend(future.result())
-                    pbar.update(1)
-            # for future in futures:
-            #     self.planes.extend(future.result())
+            futures = [executor.submit(process_anchor, *task, shutdown_flag) for task in tasks]
+            progress = tqdm(total=len(futures), desc="Generating Planes")
+            try:
+                while futures:
+                    done, futures = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        self.planes.extend(future.result())
+                        progress.update(1)
+            except KeyboardInterrupt:
+                print("\n[INTERRUPTED] Aborting plane generation...")
+                shutdown_flag.set()
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as e:
+                print(f"[UNCAUGHT ERROR] {e}")
+                traceback.print_exc()  # This prints the full traceback to the console
+                shutdown_flag.set()
+                executor.shutdown(wait=False, cancel_futures=True)
+            finally:
+                progress.close()
+                print("Executor shut down.")
+
 
 
         if params["save_filename"] is not None:
@@ -416,6 +495,13 @@ class ZStack:
         ]
 
         def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
+            if pair_pts1 is None or pair_pts2 is None:
+                return np.array([], dtype=bool)
+            if len(pair_pts1) == 0 or len(pair_pts2) == 0:
+                return np.array([], dtype=bool)
+            if pair_pts1.shape[0] != pair_pts2.shape[0]:
+                raise ValueError("Tilt check called with mismatched point pair arrays.")
+
             v1 = pair_pts1 - anchor_pos
             v2 = pair_pts2 - anchor_pos
             cp_v1 = cp.asarray(v1)
@@ -434,6 +520,8 @@ class ZStack:
             return np.any(angles <= angle_thresh_rad)
 
         def gpu_project_points(points, normal, anchor_pos, threshold):
+            if len(points) == 0:
+                return np.array([]), np.array([])
             points_gpu = cp.asarray(points)
             normal_gpu = cp.asarray(normal)
             anchor_gpu = cp.asarray(anchor_pos)
@@ -444,30 +532,79 @@ class ZStack:
 
             return projected.get(), within_thresh.get()
 
-        def process_anchor(z_anchor, anchor_id, anchor_roi):
+        def process_anchor(z_anchor, anchor_id, anchor_roi, shutdown_flag):
             anchor_planes = []
             normals_seen = []
             anchor_pos = anchor_roi.get_centroid()
+            az = round(anchor_roi.get_centroid()[2], 3)
             anchor_point = PlanePoint(anchor_id, anchor_pos)
 
-            local_alignments = [
-                (align_id, align_roi.get_centroid())
-                for dz in range(-params["z_threshold"], params["z_threshold"] + 1)
-                for align_id, align_roi in align_by_z.get(z_anchor + dz, [])
-                if align_id != anchor_id
-            ]
+            if shutdown_flag.is_set():
+                return []
 
-            point_ids, point_pos = zip(*local_alignments)
-            combos = list(combinations(range(len(point_pos)), 2))
+            anchor_volume = self.z_planes[z_anchor][anchor_id].get("volume", None)
+
+            # Find local alignment points for this anchor by scanning the z stack +- z_threshold
+            local_alignments = [] # List of [(align_id, (x,y,z), align_z)]
+            for dz in range(-params["z_threshold"], params["z_threshold"] + 1):
+                for align_id, align_roi in align_by_z.get(z_anchor + dz, []):
+                    if align_id == anchor_id:
+                        continue
+
+                    align_pos = align_roi.get_centroid()
+
+                    # Distance check
+                    if params.get("anchor_dist_thresh") is not None:
+                        dist = np.linalg.norm(np.array(anchor_pos) - np.array(align_pos))
+                        if dist > params["anchor_dist_thresh"]:
+                            continue
+
+                    # Volume check
+                    if self.has_volume:
+                        align_info = self.z_planes[z_anchor + dz].get(align_id, {})
+                        align_volume = align_info.get("volume", None)
+                        if align_volume == anchor_volume or align_volume is None or anchor_volume is None:
+                            continue
+
+                    local_alignments.append((align_id, align_pos, z_anchor + dz))
+            # If there are no local alignment points, there are no planes
+            if not local_alignments:
+                return []
+            point_ids, point_pos, point_zs = zip(*local_alignments) # Create 3 lists for each entry in a tuple in local alignments
+            combos = []
+
+            for i, j in combinations(range(len(point_pos)), 2):
+                if self.has_volume:
+                    v1 = self.z_planes[point_zs[i]].get(point_ids[i], {}).get("volume", None)
+                    v2 = self.z_planes[point_zs[j]].get(point_ids[j], {}).get("volume", None)
+                    if None in (anchor_volume, v1, v2):
+                        continue
+                    if len(set([anchor_volume, v1, v2])) < 3:
+                        continue
+
+                combos.append((i, j))
+
+                z1 = point_zs[i]
+                id1 = point_ids[i]
+                z2 = point_zs[j]
+                id2 = point_ids[j]
+
+            # If volume check filtered out matches, remove it
+            if len(combos) == 0:
+                return []
 
             pts1 = np.array([point_pos[i] for i, j in combos])
             pts2 = np.array([point_pos[j] for i, j in combos])
 
             valid_mask = gpu_tilt_check(np.array(anchor_pos), pts1, pts2, max_tilt_rad)
 
-            for (i, j), valid in zip(combos, valid_mask):
+            # for (i, j), valid in zip(combos, valid_mask):
+            for (i, j), valid in tqdm(zip(combos, valid_mask), total=len(valid_mask), desc=f"Anchor {anchor_id}", leave=False):
                 if not valid:
                     continue
+
+                if shutdown_flag.is_set():
+                    return []
 
                 id1, id2 = point_ids[i], point_ids[j]
                 p1 = PlanePoint(id1, point_pos[i])
@@ -487,19 +624,27 @@ class ZStack:
 
                 plane = Plane(anchor_point, [p1, p2], max_alignments=params["max_alignments"], fixed_basis=params["fixed_basis"])
 
-                candidate_pts = [
-                    (align_id, align_roi.get_centroid())
-                    for align_id, align_roi in align_by_z.get(z_anchor, [])
-                    if align_id not in (id1, id2, anchor_id)
-                ]
+                # Filter out alignment pts from projectable pts
+                z1 = round(point_pos[i][2], 3)
+                z2 = round(point_pos[j][2], 3)
+                id_tuples = [(az, anchor_id),(z1, id1), (z2, id2)]
 
+                candidate_pts = [
+                    (align_id, align_pos) 
+                    for align_id, align_pos, z in local_alignments
+                    if (z, align_id) not in id_tuples 
+                ]
+                point_projected = False
                 if candidate_pts:
                     ids, positions = zip(*candidate_pts)
                     projected_pts, mask = gpu_project_points(np.array(positions), normal, anchor_pos, params["projection_dist_thresh"])
 
                     for k, keep in enumerate(mask):
                         if keep:
+                            point_projected = True
                             plane.plane_points[len(plane.plane_points)] = PlanePoint(ids[k], projected_pts[k])
+                    if point_projected:
+                        plane.angles_and_magnitudes() # Update circular list
 
                 anchor_planes.append(plane)
                 normals_seen.append(normal)
@@ -507,14 +652,30 @@ class ZStack:
             return anchor_planes
 
         self.planes = []
-        n_threads = params.get("n_threads", 4)
-        with ThreadPoolExecutor(max_workers=n_threads) as executor:
-            futures = [executor.submit(process_anchor, *task) for task in tasks]
-            with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
-                for future in futures:
-                    self.planes.extend(future.result())
-                    pbar.update(1)
+        n_threads = params.get("n_threads")
 
+        shutdown_flag = threading.Event() # Define a flag to allow threads to be exited
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            futures = [executor.submit(process_anchor, *task, shutdown_flag) for task in tasks]
+            progress = tqdm(total=len(futures), desc="Generating Planes")
+            try:
+                while futures:
+                    done, futures = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        self.planes.extend(future.result())
+                        progress.update(1)
+            except KeyboardInterrupt:
+                print("\n[INTERRUPTED] Aborting plane generation...")
+                shutdown_flag.set()
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as e:
+                print(f"[UNCAUGHT ERROR] {e}")
+                traceback.print_exc()  # This prints the full traceback to the console
+                shutdown_flag.set()
+                executor.shutdown(wait=False, cancel_futures=True)
+            finally:
+                progress.close()
+                print("Executor shut down.")
 
         if params["save_filename"] is not None:
             try:

@@ -759,9 +759,9 @@ class Plane:
                     if num_matches > max_matches_observed:
                         max_matches_observed = num_matches
 
+
         # Re-scale scores based on matches
         scaled_results = {}
-        num_matches = len(match_result["matches"])
         min_matches = match_plane_params["bin_match_params"]["min_matches"]
         max_matches = min(params["max_matches"], max_matches_observed) # clamp to largest number of matches observed
         min_modifier = params["min_score_modifier"]
