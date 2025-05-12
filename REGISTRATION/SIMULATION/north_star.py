@@ -223,6 +223,7 @@ def main():
         "planes_b_write_file" : plane_b_file,
         "plot_uoi" : False,
         "plot_match" : False,
+        "use_gpu" : True,
         "min_uoi": 0.7,
         "seg_params": {
             "method" : "split",

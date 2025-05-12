@@ -202,6 +202,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         planes_b = zstack_a.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes
+    print(f"Beginning Matching")
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
     if len(matched_planes) > 0:

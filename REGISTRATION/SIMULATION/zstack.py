@@ -8,8 +8,10 @@ from plane import Plane
 from planepoint import PlanePoint
 import os
 from concurrent.futures import ThreadPoolExecutor
+import random
 import copy
 import cupy as cp
+from tqdm import tqdm
 from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 
 def get_hull_boundary_points(hull):
@@ -90,6 +92,22 @@ class ZStack:
 
         return copy.deepcopy(z_planes)
     
+    def generate_random_intensities(self, min_val=0.0, max_val=1.0):
+        """
+        Assigns a random intensity value between min_val and max_val
+        to each ROI in the z_planes dictionary that does not already have one.
+        Debug function - shouldn't be necessary in practice.
+        """
+        if not hasattr(self, 'z_planes'):
+            raise AttributeError("This class does not have a 'z_planes' attribute.")
+
+        for z, roi_dict in self.z_planes.items():
+            for roi_id, info in roi_dict.items():
+                if "intensity" not in info:
+                    info["intensity"] = random.uniform(min_val, max_val)
+
+        self.has_intensity = True
+
     def load_from_csv(self, csv_path):
         df = pd.read_csv(csv_path)
         required_cols = {"x", "y", "z", "ROI_ID"}
@@ -208,8 +226,6 @@ class ZStack:
             print("Using past save of planes...")
             return self.planes
 
-        print("Generating planes...")
-
         max_tilt_rad = np.radians(params["max_tilt_deg"])
         self.planes = []
         boundaries = params["plane_boundaries"]
@@ -320,8 +336,13 @@ class ZStack:
         n_threads = params.get("n_threads", 4)
         with ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures = [executor.submit(process_anchor, *task) for task in tasks]
+            # with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
+            #     for future in futures:
+            #         self.planes.extend(future.result())
+            #         pbar.update(1)
             for future in futures:
                 self.planes.extend(future.result())
+
 
         if params["save_filename"] is not None:
             try:
@@ -350,8 +371,6 @@ class ZStack:
         if len(self.planes) > 0 and not params['regenerate_planes']:
             print("Using past save of planes...")
             return self.planes
-
-        print("Generating planes...")
 
         max_tilt_rad = np.radians(params["max_tilt_deg"])
         self.planes = []
@@ -491,8 +510,11 @@ class ZStack:
         n_threads = params.get("n_threads", 4)
         with ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures = [executor.submit(process_anchor, *task) for task in tasks]
-            for future in futures:
-                self.planes.extend(future.result())
+            with tqdm(total=len(futures), desc="Generating planes", ncols=80) as pbar:
+                for future in futures:
+                    self.planes.extend(future.result())
+                    pbar.update(1)
+
 
         if params["save_filename"] is not None:
             try:
