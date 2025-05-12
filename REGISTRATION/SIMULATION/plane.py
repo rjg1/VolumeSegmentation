@@ -734,10 +734,12 @@ class Plane:
         results = {}
         max_matches_observed = 0
 
-        outer = tqdm(enumerate(planes_a), desc="Planes A", position=0)
-        for i, plane_a in outer:
-            inner = tqdm(enumerate(planes_b), desc=f"Planes B (A[{i}])", position=1, leave=False)
-            for j, plane_b in inner:
+        outer = tqdm(planes_a, desc="Planes A", position=0)
+        inner = tqdm(total=len(planes_b), position=1, leave=False, desc="Planes B")
+        for i, plane_a in enumerate(outer):
+            inner.set_description(f"Planes B (A[{i}])")
+            inner.reset() # Reset plane B progress bar
+            for plane_b in planes_b:
                 match_result = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
 
@@ -759,6 +761,7 @@ class Plane:
                     if num_matches > max_matches_observed:
                         max_matches_observed = num_matches
 
+                inner.update(1)
 
         # Re-scale scores based on matches
         scaled_results = {}
