@@ -193,7 +193,7 @@ def main():
     match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2,
-            "fixed_scale" : None #0.3333333 # TODO TESTING
+            "fixed_scale" : 0.3333333
         },
         "traits": {
             "angle" : {

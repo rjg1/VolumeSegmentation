@@ -11,9 +11,11 @@ from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from planepoint import PlanePoint
 from scipy.spatial.distance import cdist
+from collections import defaultdict
 import copy
 from sklearn.cluster import DBSCAN, KMeans
 from scipy.spatial import ConvexHull
+import random
 
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
@@ -216,6 +218,9 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     # Stores full records including planes
     unique_transformations = []
 
+    # DEBUG
+    seen_transformations_count = {}
+
     for match in matched_planes.values():
         plane_a = match["plane_a"]
         plane_b = match["plane_b"]
@@ -241,8 +246,13 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         if rounded not in seen_transformations:
             seen_transformations.add(rounded)
             unique_transformations.append((rotation_2d, scale_2d, translation_2d[0], translation_2d[1], match_data, plane_a, plane_b))
+            seen_transformations_count[rounded] = 1
+        else:
+            seen_transformations_count[rounded] += 1
 
     print(f"Unique transformations found (rot, scale, t_x, t_y): {[(rot, scale, tx, ty) for rot, scale, tx, ty, _, _, _ in unique_transformations]}")
+
+    print(seen_transformations_count)
 
     # Calculate UoIs of all unique 2D transformations
     UoIs = []
@@ -413,21 +423,37 @@ def project_angled_plane_points(
     # Project ROI points
     projected_pts_2d = []
     original_pts_3d = []
+    volume_ids = []
 
     for z in z_stack.z_planes:
         for roi_id, roi_data in z_stack.z_planes[z].items():
             coords = roi_data["coords"]
+            vol_id = roi_data.get("volume", None)
             for (x, y) in coords:
                 pt3d = np.array([x, y, z])
                 if angled_plane._distance_to_plane(pt3d) < threshold:
                     proj2d = angled_plane._project_point_2d(pt3d)
                     projected_pts_2d.append(proj2d)
                     original_pts_3d.append((x, y, z))
+                    volume_ids.append(vol_id)
 
     if not projected_pts_2d:
         return {}
 
     projected_pts_2d = np.array(projected_pts_2d)
+
+    if method == "volume":
+        # Group by volume ID
+        clusters = defaultdict(list)
+        for i, vol_id in enumerate(volume_ids):
+            clusters[vol_id].append((projected_pts_2d[i], original_pts_3d[i]))
+        pid_mapping = {}  # No remapping done in volume mode
+        output_regions = {
+            vol_id: [pt3d for _, pt3d in cluster]
+            for vol_id, cluster in clusters.items()
+            if vol_id is not None
+        }
+        return output_regions, pid_mapping
 
     # Cluster projected points
     clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(projected_pts_2d)
@@ -457,7 +483,11 @@ def project_angled_plane_points(
         cluster_pts_2d = np.array([pt2d for pt2d, pt3d in points])
 
         if len(cluster_pts_2d) >= 3:
+            if cluster_pts_2d.shape[0] < 3 or np.linalg.matrix_rank(cluster_pts_2d - cluster_pts_2d[0]) < 2:
+                # Not enough distinct points or not full rank -> skip
+                continue  
             hull = ConvexHull(cluster_pts_2d)
+
             cluster_polygon = Polygon(cluster_pts_2d[hull.vertices])
         else:
             cluster_polygon = None
@@ -575,3 +605,92 @@ def plot_regions_and_alignment_points(
     ax.legend(fontsize=6, loc='best')
     plt.tight_layout()
     plt.show()
+
+# # Extract all points of a z-stack that coincide with a plane into a new z-stack
+# def extract_zstack_plane(z_stack, plane, threshold = 0.5):
+
+#     new_z_planes = defaultdict(lambda: defaultdict(dict))  # {z: {roi_id: {'coords': [...], 'intensity': ...}}}
+#     for z in z_stack.z_planes:
+#         for roi_id, roi_data in z_stack.z_planes[z].items():
+#             coords = roi_data["coords"]
+#             point_projected = False
+#             for (x, y) in coords:
+#                 pt3d = np.array([x, y, z])
+#                 if plane._distance_to_plane(pt3d) < threshold:
+#                     if not new_z_planes[z][roi_id].get('coords', None):
+#                         new_z_planes[z][roi_id]['coords'] = []
+#                     # Add this point to this ROI in the new z-stack
+#                     new_z_planes[z][roi_id]['coords'].append((x,y))
+#                     point_projected = True
+#             # Data from this ROI was used
+#             if point_projected:
+#                 # Add intensity if it is available
+#                 if z_stack.z_planes[z][roi_id].get('intensity', None):
+#                     new_z_planes[z][roi_id]['intensity'] = z_stack.z_planes[z][roi_id]['intensity']
+#                 # Add volume if it is available
+#                 if z_stack.z_planes[z][roi_id].get('volume', None):
+#                     new_z_planes[z][roi_id]['volume'] = z_stack.z_planes[z][roi_id]['volume']
+#     # Create a z-stack using this dict
+#     new_z_stack = ZStack(new_z_planes)
+#     # # Add its plane - Not sure if this is necessary
+#     new_z_stack.planes.append(plane)
+#     return new_z_stack
+
+def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, method="split"):
+    """
+    Extracts all points near a plane from the ZStack and returns a new ZStack.
+    If the plane is angled (not flat in Z), the function:
+      - Projects points onto the plane
+      - Clusters projected points into ROIs
+      - Assigns them fixed z=0
+    If the plane is flat, it behaves as before.
+
+    Args:
+        z_stack: The source ZStack
+        plane: A Plane object
+        threshold: Distance threshold to consider points "on" the plane
+        eps: DBSCAN epsilon for projected clustering (angled mode)
+        min_samples: DBSCAN min_samples (angled mode)
+        method: "split" or "merge" for assigning anchor points in ambiguous clusters
+
+    Returns:
+        ZStack with a single plane of projected ROIs at z=0
+    """
+    print("[INFO] Extracting plane from z-stack")
+    new_z_planes = defaultdict(lambda: defaultdict(dict))
+    is_flat = np.allclose(plane.normal, [0, 0, 1])
+    
+    if is_flat: # Simply copy points from the original z-dict
+        z = plane.anchor_point.position[2]
+        print(f"Anchor point z: {z}")
+        for roi_id, roi_data in z_stack.z_planes[z].items():
+            coords = roi_data["coords"]
+            for (x, y) in coords:
+                new_z_planes[z][roi_id].setdefault("coords", []).append((x, y))
+            if "intensity" in roi_data:
+                new_z_planes[z][roi_id]["intensity"] = roi_data["intensity"]
+            if "volume" in roi_data:
+                new_z_planes[z][roi_id]["volume"] = int(roi_data["volume"])
+        new_stack = ZStack(new_z_planes)
+
+        return new_stack
+
+    # Angled plane: project + cluster
+    output_regions, _ = project_angled_plane_points(
+        z_stack, plane, threshold=threshold, method=method, eps=eps, min_samples=min_samples
+    ) # Project to 2d
+
+    z_fixed = 0 # Set an arbitrary z for projected plane
+    for roi_id, points in output_regions.items():
+        if not points:
+            continue
+        coords_2d = [(x, y) for (x, y, z) in points]
+        new_z_planes[z_fixed][roi_id]["coords"] = coords_2d
+
+        # Just assign a random intensity -- TODO could be improved later
+        new_z_planes[z_fixed][roi_id]["intensity"] =  random.uniform(0.8, 1)
+
+    new_stack = ZStack(new_z_planes)
+    new_stack.planes.append(plane)
+    print("[INFO] Successfully extracted plane from z-stack")
+    return new_stack

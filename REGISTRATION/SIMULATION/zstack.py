@@ -40,6 +40,10 @@ class ZStack:
         
 
 
+    def _average_roi_area(self):
+        self._build_xy_rois()  # builds `xy_rois` dictionary
+        areas = [roi.get_area() for roi in self.xy_rois.values()]
+        return np.mean(areas) if areas else 0
 
     def _find_edge_rois(self, xmin, xmax, ymin, ymax, margin=5):
         """
@@ -92,8 +96,8 @@ class ZStack:
                         raise ValueError(f"'intensity' for ROI {roi_id} at z={z} must be float or int")
                     self.has_intensity = True
                 if "volume" in info:
-                    if not isinstance(info["intensity"], int):
-                        raise ValueError(f"'volume' for ROI {roi_id} at z={z} must be int")
+                    if not isinstance(info["volume"], (int, np.integer)):
+                        raise ValueError(f"'volume' for ROI {roi_id} at z={z} must be int. Volume value is: {info['volume']}")
                     self.has_volume = True
 
         print("Successfully loaded ZStack from dict.")
@@ -225,7 +229,6 @@ class ZStack:
             read_path = params["read_filename"]
             if os.path.exists(read_path):
                 try:
-                    print(f"[INFO] Attempting to load planes from: {read_path}")
                     return self.read_planes_from_csv(read_path)
                 except Exception as e:
                     print(f"[WARN] Failed to parse plane file '{read_path}': {e}")
@@ -273,6 +276,8 @@ class ZStack:
             z_min = params["z_guess"] - params["z_range"]
 
         anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"], z_max=z_max, z_min=z_min)
+
+        print(anchor_by_z.values()) # TODO DEBUG
 
         tasks = [
             (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
@@ -752,6 +757,7 @@ class ZStack:
 
     # Remakes planes saved from a previous csv
     def read_planes_from_csv(self, filename):
+        print(f"[INFO] Attempting to load planes from: {filename}")
         required_columns = {"plane_id", "pid", "x", "y", "z", "type"}
         try:
             df = pd.read_csv(filename)
@@ -794,6 +800,7 @@ class ZStack:
                 plane = Plane(anchor, alignment_points)
                 self.planes.append(plane)
 
+        print("[INFO] Successfully loaded planes")
         return self.planes
 
 
