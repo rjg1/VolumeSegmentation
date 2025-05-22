@@ -1,5 +1,5 @@
 from zstack import *
-from registration_utils import extract_zstack_plane, match_zstacks_2d
+from registration_utils import extract_zstack_plane, match_zstacks_2d, filter_region_by_shape
 import random
 import time
 
@@ -84,7 +84,7 @@ match_params = {
     "use_gpu" : True,
     "min_uoi": -1,
     "seg_params": {
-        "method" : "split",
+        "method" : "volume",
         "eps": 1.5,
         "min_samples" : 5
     }
@@ -149,19 +149,28 @@ def main():
     #     max_eccentricity=0.95
     # )
 
-    filtered_stack = filter_zstack_by_shape(
-        zstack=new_stack,
-        min_area=35,
-        max_area=1000,
-        max_eccentricity=0.7
-    )
+    # filtered_stack = filter_zstack_by_shape(
+    #     zstack=new_stack,
+    #     min_area=35,
+    #     max_area=1000,
+    #     max_eccentricity=0.7
+    # )
 
-    plot_zstack_rois(filtered_stack)
+    # filtered_stack = filter_region_by_shape(
+    #     new_stack,
+    #     selected_plane,
+    #     min_area=40,
+    #     max_area=1000,
+    #     max_eccentricity=0.69,
+    #     preserve_anchor_regions=False
+    # )
+
+    # plot_zstack_rois(new_stack)
+    # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
-    return
 
-    # Extract data points close to this plane for the new z-stack
-    new_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'])
+    # # Extract data points close to this plane for the new z-stack
+    # new_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'])
     # Generate planes within this plane
     plane_gen_params['read_filename'] = None
     plane_gen_params['save_filename'] = None
@@ -301,6 +310,7 @@ def filter_zstack_by_shape(
         if b == 0:
             continue
         eccentricity = np.sqrt(1 - (a ** 2) / (b ** 2))
+        print(f"RID={roi_id}, eccentricity={eccentricity:.4f}")
         if max_eccentricity is not None and eccentricity > max_eccentricity:
             continue
 

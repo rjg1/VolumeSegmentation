@@ -77,7 +77,7 @@ DEFAULT_2D_MATCH_PARAMS = {
     "plane_list_params" : PLANE_LIST_PARAM_DEFAULTS,
     "match_plane_params" : MATCH_PLANE_PARAM_DEFAULTS,
     "seg_params": {
-        "method" : "split",
+        "method" : "volume",
         "eps": 3.0,
         "min_samples" : 5
     },

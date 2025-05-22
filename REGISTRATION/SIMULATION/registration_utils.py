@@ -16,7 +16,7 @@ import copy
 from sklearn.cluster import DBSCAN, KMeans
 from scipy.spatial import ConvexHull
 import random
-
+from skimage.measure import EllipseModel
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
 def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
@@ -263,6 +263,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         # Determine whether either plane is flat
         flat_plane_a = np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=0.05)
         flat_plane_b = np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=0.05)
+        print(f"Plane A normal: {plane_a.normal}")
+        print(f"Plane B normal: {plane_b.normal}")
         translation_2d = (tx, ty)
 
         # Get dicts of {idx : [x,y,z]}
@@ -273,11 +275,28 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
             rois_a_2d, pid_mapping_a = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
-
         if flat_plane_b:
             rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
             rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+        
+        # TEST FILTERING TODO
+        rois_b_2d = filter_region_by_shape(
+            rois_b_2d,
+            plane_b,
+            min_area=40,
+            max_area=1000,
+            max_eccentricity=0.69,
+            preserve_anchor_regions=True
+        )
+        rois_a_2d = filter_region_by_shape(
+                rois_a_2d,
+                plane_a,
+                min_area=40,
+                max_area=1000,
+                max_eccentricity=0.69,
+                preserve_anchor_regions=True
+            )
 
         matches = match_data["og_matches"]
         updated_matches = []
@@ -302,9 +321,9 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
         regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
 
-        # Debug code
-        # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
-        # plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
+        # Debug code TODO
+        plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
+        plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
 
         # Filter matches to only those where both PIDs survived projection
         filtered_matches = [
@@ -442,18 +461,60 @@ def project_angled_plane_points(
 
     projected_pts_2d = np.array(projected_pts_2d)
 
-    if method == "volume":
+    if method == "volume" and z_stack.has_volume:
         # Group by volume ID
         clusters = defaultdict(list)
         for i, vol_id in enumerate(volume_ids):
             clusters[vol_id].append((projected_pts_2d[i], original_pts_3d[i]))
-        pid_mapping = {}  # No remapping done in volume mode
-        output_regions = {
-            vol_id: [pt3d for _, pt3d in cluster]
-            for vol_id, cluster in clusters.items()
-            if vol_id is not None
+
+        # Get all pts (anchor/alignment) on the plane and project them into 2D
+        projected_anchors = {
+            pt.id: angled_plane._project_point_2d(pt.position)
+            for pt in angled_plane.plane_points.values()
         }
+        output_regions = {}
+        pid_mapping = {}
+        next_pid = max([pt.id for pt in angled_plane.plane_points.values() if isinstance(pt.id, int)], default=0) + 1
+        # Iterate through all ROI clusters (clustered by volume id)
+        for vol_id, points in clusters.items():
+            cluster_pts_2d = np.array([pt2d for pt2d, _ in points])
+            cluster_polygon = None
+            # Make each ROI into a shapely polygon
+            if len(cluster_pts_2d) >= 3:
+                # Remove duplicate points first
+                cluster_pts_2d_unique = np.unique(cluster_pts_2d, axis=0)
+                if cluster_pts_2d_unique.shape[0] >= 3 and np.linalg.matrix_rank(cluster_pts_2d_unique - cluster_pts_2d_unique[0]) >= 2:
+                    try:
+                        hull = ConvexHull(cluster_pts_2d_unique)
+                        cluster_polygon = Polygon(cluster_pts_2d_unique[hull.vertices])
+                    except Exception as e:
+                        print(f"[Warning] ConvexHull failed: {e}")
+                        cluster_polygon = None
+
+            # Determine which regions belong to anchors/alignment points - retains original plane point mapping
+            anchors_inside = []
+            if cluster_polygon:
+                for pid, anchor_pt in projected_anchors.items():
+                    point = Point(anchor_pt)
+                    if cluster_polygon.contains(point):
+                        anchors_inside.append(pid)
+
+            if len(anchors_inside) == 1: # A single anchor/alignment point is inside this ROI - the output region gets the ROI id of that point
+                pid = anchors_inside[0]
+                output_regions[pid] = [pt3d for _, pt3d in points]
+            elif len(anchors_inside) > 1:
+                # Pick first as master, map rest to it
+                master_pid = anchors_inside[0]
+                output_regions[master_pid] = [pt3d for _, pt3d in points]
+                for other_pid in anchors_inside[1:]:
+                    pid_mapping[other_pid] = master_pid
+            else: # No anchor/alignment points inside
+                output_regions[next_pid] = [pt3d for pt2d, pt3d in points]
+                next_pid += 1
+
         return output_regions, pid_mapping
+    elif method == "volume": # Default to split method if volume labels not in z-stack
+        method = "split"
 
     # Cluster projected points
     clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(projected_pts_2d)
@@ -590,7 +651,7 @@ def plot_regions_and_alignment_points(
             ax.scatter(centroid[0], centroid[1], color='black', s=10)
 
         except Exception as e:
-            print(f"Warning: Could not form polygon for region {pid}: {e}")
+            # print(f"Warning: Could not form polygon for region {pid}: {e}")
             continue
 
     # Now project alignment points and plot
@@ -606,37 +667,8 @@ def plot_regions_and_alignment_points(
     plt.tight_layout()
     plt.show()
 
-# # Extract all points of a z-stack that coincide with a plane into a new z-stack
-# def extract_zstack_plane(z_stack, plane, threshold = 0.5):
 
-#     new_z_planes = defaultdict(lambda: defaultdict(dict))  # {z: {roi_id: {'coords': [...], 'intensity': ...}}}
-#     for z in z_stack.z_planes:
-#         for roi_id, roi_data in z_stack.z_planes[z].items():
-#             coords = roi_data["coords"]
-#             point_projected = False
-#             for (x, y) in coords:
-#                 pt3d = np.array([x, y, z])
-#                 if plane._distance_to_plane(pt3d) < threshold:
-#                     if not new_z_planes[z][roi_id].get('coords', None):
-#                         new_z_planes[z][roi_id]['coords'] = []
-#                     # Add this point to this ROI in the new z-stack
-#                     new_z_planes[z][roi_id]['coords'].append((x,y))
-#                     point_projected = True
-#             # Data from this ROI was used
-#             if point_projected:
-#                 # Add intensity if it is available
-#                 if z_stack.z_planes[z][roi_id].get('intensity', None):
-#                     new_z_planes[z][roi_id]['intensity'] = z_stack.z_planes[z][roi_id]['intensity']
-#                 # Add volume if it is available
-#                 if z_stack.z_planes[z][roi_id].get('volume', None):
-#                     new_z_planes[z][roi_id]['volume'] = z_stack.z_planes[z][roi_id]['volume']
-#     # Create a z-stack using this dict
-#     new_z_stack = ZStack(new_z_planes)
-#     # # Add its plane - Not sure if this is necessary
-#     new_z_stack.planes.append(plane)
-#     return new_z_stack
-
-def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, method="split"):
+def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, method="volume"):
     """
     Extracts all points near a plane from the ZStack and returns a new ZStack.
     If the plane is angled (not flat in Z), the function:
@@ -691,6 +723,172 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
         new_z_planes[z_fixed][roi_id]["intensity"] =  random.uniform(0.8, 1)
 
     new_stack = ZStack(new_z_planes)
-    new_stack.planes.append(plane)
+    # new_stack.planes.append(plane)
     print("[INFO] Successfully extracted plane from z-stack")
     return new_stack
+
+
+def filter_region_by_shape(
+    data,
+    plane,
+    min_area=None,
+    max_area=None,
+    max_eccentricity=None,
+    preserve_anchor_regions=True
+):
+    """
+    Filters either a ZStack or a dictionary of regions by shape, area, and overlap.
+
+    Args:
+        data: ZStack or output_regions dict from project_angled_plane_points
+        plane: Plane object used to check anchor/alignment point IDs and projection
+        min_area: Minimum ROI area
+        max_area: Maximum ROI area
+        max_eccentricity: Maximum allowed eccentricity (0=circle, 1=line)
+        preserve_anchor_regions: If True, keeps any region with an anchor or alignment point
+
+    Returns:
+        Same type as input: filtered ZStack or filtered dict
+    """
+
+    def get_zstack_coords(z, rid):
+        region = data.z_planes[z][rid]
+        if isinstance(region, dict) and "coords" in region:
+            return region["coords"]
+        raise ValueError(f"[ERROR] Missing 'coords' for z={z}, rid={rid}")
+    
+    def get_ordered_boundary(coords_2d):
+        if len(coords_2d) < 3:
+            return coords_2d
+        try:
+            hull = ConvexHull(coords_2d)
+            return [coords_2d[i] for i in hull.vertices]
+        except:
+            return coords_2d
+
+    is_zstack = isinstance(data, ZStack) # Detect if input is a ZStack or region dict
+    if is_zstack:
+        data._build_xy_rois()
+        region_items = list(data.xy_rois.keys())
+        get_coords = lambda z, rid: get_zstack_coords(z, rid)
+        get_z = lambda z, rid: z
+    else:
+        region_items = list(data.keys())
+        get_coords = lambda _, rid: data[rid]
+        get_z = lambda _, rid: np.median([pt[2] for pt in data[rid]])
+
+    region_data = []
+
+    for key in region_items:
+        z, rid = key if is_zstack else (None, key)
+        coords = get_coords(z, rid)
+        if len(coords) < 5:
+            continue
+
+        # Ensure coords are 2D
+        if len(coords[0]) == 3:
+            coords_2d = [(x, y) for x, y, _ in coords]
+        else:
+            coords_2d = coords
+
+        coords_2d = get_ordered_boundary(coords_2d)
+        if len(coords_2d) < 5:
+            continue
+
+        x, y = zip(*coords_2d)
+        x = np.array(x)
+        y = np.array(y)
+
+        poly = Polygon(coords_2d)
+        if not poly.is_valid or poly.area == 0:
+            continue
+
+        area = poly.area
+        is_anchor = any(
+            (pt.id == rid and np.isclose(get_z(z, rid), pt.position[2]))
+            for pt in plane.plane_points.values()
+        )
+
+        if min_area is not None and area < min_area and not (preserve_anchor_regions and is_anchor):
+            continue
+        if max_area is not None and area > max_area and not (preserve_anchor_regions and is_anchor):
+            continue
+
+        # print(f"ROI ID:{key} passed area check with area = {area}")
+
+        # Shape filtering
+        model = EllipseModel()
+        if not model.estimate(np.column_stack([x, y])):
+            continue
+
+        _, _, a_axis, b_axis, _ = model.params
+        a, b = sorted([a_axis, b_axis])  # Ensure a ≤ b
+        if b == 0:
+            continue
+        eccentricity = np.sqrt(1 - (a ** 2) / (b ** 2))
+
+        if max_eccentricity is not None and eccentricity > max_eccentricity and not (preserve_anchor_regions and is_anchor):
+            continue
+
+        region_data.append({
+            "rid": rid,
+            "z": z,
+            "coords": coords,
+            "polygon": poly,
+            "area": area,
+            "is_anchor": is_anchor
+        })
+
+    # Overlap filtering
+    kept_ids = set()
+    kept_regions = []
+    region_data.sort(key=lambda r: -r["area"])  # Sort by area descending to help prioritization
+
+    for i, reg_i in enumerate(region_data):
+        poly_i = reg_i["polygon"]
+        rid_i = reg_i["rid"]
+        if rid_i in kept_ids:
+            continue
+        overlaps_existing = any(poly_i.intersects(reg_j["polygon"]) for reg_j in kept_regions)
+        if overlaps_existing:
+            continue  # Skip reg_i if it overlaps anything already accepted
+        keep = True
+        for j in range(i + 1, len(region_data)):
+            reg_j = region_data[j]
+            if reg_j["rid"] in kept_ids:
+                continue
+
+            if reg_i["polygon"].intersects(reg_j["polygon"]):
+                # Decide which to keep -> Filter by anchor pt inside > area > distance to plane
+                if reg_i["is_anchor"] and not reg_j["is_anchor"]:
+                    kept_ids.add(reg_i["rid"])
+                    kept_regions.append(reg_i)
+                    continue
+                elif reg_j["is_anchor"] and not reg_i["is_anchor"]:
+                    keep = False
+                    break
+                elif reg_j["is_anchor"] and reg_i["is_anchor"] and preserve_anchor_regions: # Keep both and allow overlap if both anchor regions
+                    keep = True
+                    break
+
+                # Keep the roi with the highest area
+                keep = True if region_data[i]["area"] >= region_data[j]["area"] else False
+        if keep:
+            kept_ids.add(reg_i["rid"])
+            kept_regions.append(reg_i)
+
+    # Build output
+    if is_zstack:
+        new_zplanes = defaultdict(lambda: defaultdict(dict))
+        for reg in region_data:
+            if reg["rid"] not in kept_ids:
+                continue
+            original = data.z_planes[reg["z"]][reg["rid"]]
+            new_zplanes[reg["z"]][reg["rid"]]["coords"] = original["coords"]
+            if "intensity" in original:
+                new_zplanes[reg["z"]][reg["rid"]]["intensity"] = original["intensity"]
+            if "volume" in original:
+                new_zplanes[reg["z"]][reg["rid"]]["volume"] = int(original["volume"])
+        return ZStack(new_zplanes)
+    else:
+        return {rid: data[rid] for rid in kept_ids}
