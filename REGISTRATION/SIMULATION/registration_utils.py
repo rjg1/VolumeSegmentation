@@ -296,7 +296,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 max_area=1000,
                 max_eccentricity=0.69,
                 preserve_anchor_regions=True
-            )
+        )
 
         matches = match_data["og_matches"]
         updated_matches = []
@@ -322,7 +322,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
 
         # Debug code TODO
-        plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
+        # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
         plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
 
         # Filter matches to only those where both PIDs survived projection
@@ -360,6 +360,41 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         plot_uoi_match_data(sorted_data, zstack_a, zstack_b)
     
     return sorted_data
+
+# Test
+from matplotlib.patches import Polygon as MplPolygon
+def plot_projected_rois(rois_a, rois_b, title="Projected Regions A vs B"):
+    fig, ax = plt.subplots(figsize=(8, 10))
+    colors = {}
+
+    # Plot A regions
+    for rid, pts in rois_a.items():
+        if len(pts) < 3:
+            continue
+        # Extract XY only
+        pts_2d = [(pt[0], pt[1]) for pt in pts if len(pt) >= 2]
+        color = colors.get(rid, plt.cm.tab20(random.randint(0, 19)))
+        colors[rid] = color
+        poly = MplPolygon(pts_2d, closed=True, edgecolor=color, fill=False, linewidth=1.5, label=f"A {rid}")
+        ax.add_patch(poly)
+
+    # Plot B regions
+    for rid, pts in rois_b.items():
+        if len(pts) < 3:
+            continue
+        pts_2d = [(pt[0], pt[1]) for pt in pts if len(pt) >= 2]
+        color = colors.get(rid, plt.cm.tab20b(random.randint(0, 19)))
+        colors[rid] = color
+        poly = MplPolygon(pts_2d, closed=True, edgecolor=color, fill=False, linestyle='--', linewidth=1.2, label=f"B {rid}")
+        ax.add_patch(poly)
+
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    # ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    plt.tight_layout()
+    plt.show()
 
 def plot_uoi_match_data(sorted_data, zstack_a, zstack_b):
     for entry in sorted_data:
