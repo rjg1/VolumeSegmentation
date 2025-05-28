@@ -13,18 +13,18 @@ from skimage.measure import EllipseModel
 from collections import defaultdict
 import numpy as np
 
-# STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
-STACK_IN_FILE = "drg_complete_2_algo_VOLUMES.csv"
+STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
+# STACK_IN_FILE = "drg_complete_2s_algo_VOLUMES.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
 NEW_PLANE_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "new_planes.csv"
-USE_FLAT_PLANE = False
+USE_FLAT_PLANE = True
 AREA_THRESHOLD = 20  
 MAX_ATTEMPTS = 50   
 
 
 plane_gen_params = {
     "read_filename" : PLANE_OUT_FILE, # file to read plane parameters from
-    "save_filename" : None, # file to save plane parameters to 
+    "save_filename" : PLANE_OUT_FILE, # file to save plane parameters to 
     "anchor_intensity_threshold": 0.5, # threshold to compare transformed intensity to for a point to be considered an anchor pt (see transform_intensity)
     "align_intensity_threshold": 0.4, # as above, but for alignment points
     "z_threshold": 5, # max distance in z between two points in a plane
@@ -38,9 +38,9 @@ plane_gen_params = {
     "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
-    "z_range": 0, # +- tolerance to search for in z in both planes
+    "z_range": 0, # +- tolerance to generate for in z
     "n_threads" : 10, # Number of threads to spawn when generating planes
-    "anchor_dist_thresh": 10 # acceptable euclidean distance between an anchor and an alignment point
+    "anchor_dist_thresh": None # acceptable euclidean distance between an anchor and an alignment point
 }
 
 
@@ -62,7 +62,7 @@ match_plane_params = {
     }
 
 plane_list_params = {
-    "min_score" : 0.97,
+    "min_score" : 0.5,
     "max_matches" : 4, # max matches to scale score between
     "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
     "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
@@ -106,7 +106,7 @@ def main():
 
     print("Starting plane selection")
 
-    random.seed(11) # Re-seed random...
+    random.seed(15) # Re-seed random...
     attempt = 0
     plane_pool = (
         [p for p in z_stack.planes if np.allclose(p.normal, [0, 0, 1], atol=1e-6)]
@@ -165,9 +165,10 @@ def main():
     #     preserve_anchor_regions=False
     # )
 
-    # plot_zstack_rois(new_stack)
+    plot_zstack_rois(new_stack)
     # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
+
 
     # # Extract data points close to this plane for the new z-stack
     # new_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'])

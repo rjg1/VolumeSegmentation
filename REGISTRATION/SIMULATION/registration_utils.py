@@ -281,22 +281,22 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
         # TEST FILTERING TODO
-        rois_b_2d = filter_region_by_shape(
-            rois_b_2d,
-            plane_b,
-            min_area=40,
-            max_area=1000,
-            max_eccentricity=0.69,
-            preserve_anchor_regions=True
-        )
-        rois_a_2d = filter_region_by_shape(
-                rois_a_2d,
-                plane_a,
-                min_area=40,
-                max_area=1000,
-                max_eccentricity=0.69,
-                preserve_anchor_regions=True
-        )
+        # rois_b_2d = filter_region_by_shape(
+        #     rois_b_2d,
+        #     plane_b,
+        #     min_area=40,
+        #     max_area=1000,
+        #     max_eccentricity=0.69,
+        #     preserve_anchor_regions=True
+        # )
+        # rois_a_2d = filter_region_by_shape(
+        #         rois_a_2d,
+        #         plane_a,
+        #         min_area=40,
+        #         max_area=1000,
+        #         max_eccentricity=0.69,
+        #         preserve_anchor_regions=True
+        # )
 
         matches = match_data["og_matches"]
         updated_matches = []
@@ -323,7 +323,10 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
 
         # Debug code TODO
         # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
-        plot_regions_and_alignment_points(regions_b, plane_a, title="Projected Regions B")
+        # plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
+        plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B",
+                                   transform=(rotation_2d, scale_2d, translation_2d), reference_plane=plane_a)
+
 
         # Filter matches to only those where both PIDs survived projection
         filtered_matches = [
@@ -654,7 +657,9 @@ import numpy as np
 def plot_regions_and_alignment_points(
     regions, 
     plane, 
-    title="Regions + Alignment Points"
+    title="Regions + Alignment Points",
+    transform=None,
+    reference_plane=None
 ):
     """
     Plot boundary polygons of projected regions alongside projected anchor/alignment points.
@@ -691,11 +696,23 @@ def plot_regions_and_alignment_points(
 
     # Now project alignment points and plot
     for _, plane_point in plane.plane_points.items():
-        proj2d = plane._project_point_2d(plane_point.position)
-        og_id = plane_point.id  # original ID (real ROI id)
+        pos = plane_point.position
 
+        if transform is not None and reference_plane is not None:
+            # Apply the same transformation used on rois_b_2d
+            transformed_2d = reference_plane.project_and_transform_points(
+                [pos], plane, rotation_deg=transform[0], scale=transform[1], translation=transform[2]
+            )[0]
+            # Convert to 3D by appending z = 0.0
+            pos = np.array([transformed_2d[0], transformed_2d[1], 0.0])
+
+        proj2d = reference_plane._project_point_2d(pos) if reference_plane else plane._project_point_2d(pos)
+
+        og_id = plane_point.id
         ax.scatter(proj2d[0], proj2d[1], color='red', s=30, marker='x')
         ax.text(proj2d[0] + 0.5, proj2d[1] + 0.5, f"{og_id}", color='red', fontsize=7)
+
+
 
     ax.grid(True)
     ax.legend(fontsize=6, loc='best')
