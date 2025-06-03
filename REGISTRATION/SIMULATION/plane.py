@@ -739,7 +739,7 @@ class Plane:
         for i, plane_a in enumerate(outer):
             inner.set_description(f"Planes B (A[{i}])")
             inner.reset() # Reset plane B progress bar
-            for plane_b in planes_b:
+            for j, plane_b in enumerate(planes_b):
                 match_result = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
 
@@ -754,7 +754,9 @@ class Plane:
                     results[score] = {
                         "plane_a": plane_a,
                         "plane_b": plane_b,
-                        "result": match_result
+                        "result": match_result,
+                        "plane_a_idx": i,
+                        "plane_b_idx": j
                     }
 
                     num_matches = len(match_result['matches'])

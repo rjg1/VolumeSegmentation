@@ -17,7 +17,7 @@ STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 # STACK_IN_FILE = "drg_complete_2s_algo_VOLUMES.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
 NEW_PLANE_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "new_planes.csv"
-USE_FLAT_PLANE = True
+USE_FLAT_PLANE = False
 AREA_THRESHOLD = 20  
 MAX_ATTEMPTS = 50   
 
@@ -35,7 +35,7 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
@@ -165,16 +165,25 @@ def main():
     #     preserve_anchor_regions=False
     # )
 
-    plot_zstack_rois(new_stack)
+    # plot_zstack_rois(new_stack)
     # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
 
 
     # # Extract data points close to this plane for the new z-stack
-    # new_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'])
     # Generate planes within this plane
     plane_gen_params['read_filename'] = None
     plane_gen_params['save_filename'] = None
+    # DEBUG STEP ugh
+    planes_b = new_stack.generate_planes_gpu(plane_gen_params)
+    matches = compare_planes_by_geometry(selected_plane, planes_b)
+
+    if matches:
+        print(f"Found matching reconstructed plane(s): {matches}")
+    else:
+        print("No exact reconstructed plane match found in B planes.")
+    # return
+    # END DEBUG
     # Attempt to match planes
     match_start = time.perf_counter()
     uoi_match_data = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
@@ -221,8 +230,62 @@ def plot_zstack_rois(zstack, title="ZStack ROI Areas"):
     plt.tight_layout()
     plt.show()
 
-import matplotlib.pyplot as plt
-import numpy as np
+
+
+def compare_planes_by_geometry(reference_plane, candidate_planes, tol=1e-6):
+    """
+    Compare a reference plane to a list of candidate planes by:
+    - Anchor ID
+    - Alignment IDs
+    - Corresponding point positions
+
+    Args:
+        reference_plane: Plane object to compare against
+        candidate_planes: list of Plane objects
+        tol: numerical tolerance for position matching
+
+    Returns:
+        List of tuples: (candidate_idx, match_reason)
+    """
+    results = []
+
+    ref_anchor_id = reference_plane.anchor_point.id
+    ref_anchor_pos = reference_plane.anchor_point.position
+    ref_alignments = {
+        pt.id: pt.position for i, pt in reference_plane.plane_points.items() if i != 0
+    }
+
+    for i, candidate in enumerate(candidate_planes):
+        cand_anchor_id = candidate.anchor_point.id
+        cand_anchor_pos = candidate.anchor_point.position
+
+        if cand_anchor_id != ref_anchor_id:
+            continue  # anchor ID must match
+
+        if not np.allclose(ref_anchor_pos, cand_anchor_pos, atol=tol):
+            continue  # anchor position must match
+
+        cand_alignments = {
+            pt.id: pt.position for j, pt in candidate.plane_points.items() if j != 0
+        }
+
+        if set(cand_alignments.keys()) != set(ref_alignments.keys()):
+            continue  # alignment IDs must match exactly
+
+        # Check all alignment point positions
+        positions_match = all(
+            np.allclose(ref_alignments[aid], cand_alignments[aid], atol=tol)
+            for aid in ref_alignments
+        )
+
+        if not positions_match:
+            continue
+
+        # Passed all checks
+        results.append((i, f"Match with candidate plane index {i}"))
+
+    return results
+
 
 def plot_zstack_points(zstack, title="ZStack ROI Points (Colored by ROI_ID)"):
     colors = []
@@ -324,6 +387,66 @@ def filter_zstack_by_shape(
             filtered_z_planes[z][roi_id]["volume"] = int(original["volume"])
 
     return ZStack(filtered_z_planes)
+
+# more debugging
+import numpy as np
+
+def compare_planes_by_geometry(reference_plane, candidate_planes, tol=1e-6):
+    """
+    Compare a reference plane to a list of candidate planes by:
+    - Anchor ID
+    - Alignment IDs
+    - Corresponding point positions
+
+    Args:
+        reference_plane: Plane object to compare against
+        candidate_planes: list of Plane objects
+        tol: numerical tolerance for position matching
+
+    Returns:
+        List of tuples: (candidate_idx, match_reason)
+    """
+    results = []
+
+    ref_anchor_id = reference_plane.anchor_point.id
+    ref_anchor_pos = reference_plane.anchor_point.position
+    ref_alignments = {
+        pt.id: pt.position for i, pt in reference_plane.plane_points.items() if i != 0
+    }
+
+    for i, candidate in enumerate(candidate_planes):
+        cand_anchor_id = candidate.anchor_point.id
+        cand_anchor_pos = candidate.anchor_point.position
+
+        if cand_anchor_id != ref_anchor_id:
+            continue  # anchor ID must match
+
+        if not np.allclose(ref_anchor_pos, cand_anchor_pos, atol=tol):
+            continue  # anchor position must match
+
+        cand_alignments = {
+            pt.id: pt.position for j, pt in candidate.plane_points.items() if j != 0
+        }
+
+        if set(cand_alignments.keys()) != set(ref_alignments.keys()):
+            continue  # alignment IDs must match exactly
+
+        # Check all alignment point positions
+        positions_match = all(
+            np.allclose(ref_alignments[aid], cand_alignments[aid], atol=tol)
+            for aid in ref_alignments
+        )
+
+        if not positions_match:
+            continue
+
+        # Passed all checks
+        results.append((i, f"Match with candidate plane index {i}"))
+
+    return results
+
+# end debug
+
 
 if __name__ == "__main__":
     main()

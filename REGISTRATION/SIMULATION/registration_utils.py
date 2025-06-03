@@ -18,6 +18,15 @@ from scipy.spatial import ConvexHull
 import random
 from skimage.measure import EllipseModel
 
+def safe_polygon(region):
+    pts = region.get_boundary_points()
+    if len(pts) < 3:
+        return None
+    poly = Polygon(pts)
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    return poly if poly.is_valid else None
+
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
 def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
     """
@@ -45,15 +54,10 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
 
         for i_idx, a in enumerate(unmatched_ids_a):
             for j_idx, b in enumerate(unmatched_ids_b):
-                poly_a = Polygon(regions_a[a].get_boundary_points())
-                poly_b = Polygon(regions_b[b].get_boundary_points())
+                poly_a = safe_polygon(regions_a[a])
+                poly_b = safe_polygon(regions_b[b])
 
-                if not poly_a.is_valid:
-                    poly_a = poly_a.buffer(0)
-                if not poly_b.is_valid:
-                    poly_b = poly_b.buffer(0)
-
-                if not poly_a.is_valid or not poly_b.is_valid:
+                if poly_a is None or poly_b is None:
                     uoi = 0.0
                 else:
                     inter = poly_a.intersection(poly_b)
@@ -212,6 +216,9 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     if len(matched_planes) > 0:
         print(f"Best plane match score: {list(matched_planes.keys())[0]}")
 
+    # TEST DEBUG
+    print(matched_planes)
+
     # Stores just (rounded) values for uniqueness checking
     seen_transformations = set()
 
@@ -317,16 +324,64 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
             )
 
+        # TEST DEBUG
+        expected_points = []
+        projected_points = []
+        for z, roi_dict in zstack_b.z_planes.items():
+            for roi_id, roi_data in roi_dict.items():
+                key = roi_id
+                coords_3d = [(x, y, z) for x, y in roi_data["coords"]]
+
+                # Check if ROI exists in rois_b_2d
+                if key not in rois_b_2d:
+                    print(f"[MISSING] ROI {key} not found in rois_b_2d")
+                    continue
+                else:
+                    print(f"[FOUND] ROI {key} found in rois_b_2d")
+
+
+                # Re-project coords_3d and compare
+                coords_2d_expected = np.array(plane_a.project_and_transform_points(
+                    coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d
+                ))
+
+                coords_2d_projected = np.array(rois_b_2d[key])[:, :2]
+                
+                expected_points.append(coords_2d_expected)           # shape (N, 2)
+                projected_points.append(coords_2d_projected)         # shape (N, 2)
+
+
+        plt.figure(figsize=(8, 8))
+        plt.title("All ROI Points – Before vs After Transformation")
+        plt.axis("equal")
+        plt.grid(True)
+
+        # Stack all into single arrays
+        expected_points_np = np.vstack(expected_points)
+        projected_points_np = np.vstack(projected_points)
+
+        # Plot recomputed (expected) transformed projections
+        plt.scatter(expected_points_np[:, 0], expected_points_np[:, 1], color='blue', alpha=0.6, s=10, label="Expected (Recomputed)")
+
+        # Plot stored projections (from rois_b_2d)
+        plt.scatter(projected_points_np[:, 0], projected_points_np[:, 1], color='red', alpha=0.6, s=10, label="Stored (rois_b_2d)")
+
+        plt.legend()
+        plt.tight_layout()
+        plt.show()        
+        # END TEST DEBUG
+
+
         # Calculate UoI for all unique transformations
         regions_a = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_a_2d_proj[pid]]) for pid in rois_a_2d_proj}
         regions_b = {pid : BoundaryRegion([(x, y, 0) for x,y in rois_b_2d_proj[pid]]) for pid in rois_b_2d_proj}
 
-        # Debug code TODO
+        # TEST DEBUG
         # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
         # plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
         plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B",
                                    transform=(rotation_2d, scale_2d, translation_2d), reference_plane=plane_a)
-
+        # END TEST DEBUG
 
         # Filter matches to only those where both PIDs survived projection
         filtered_matches = [
