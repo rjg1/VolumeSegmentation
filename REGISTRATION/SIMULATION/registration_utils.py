@@ -14,18 +14,22 @@ from scipy.spatial.distance import cdist
 from collections import defaultdict
 import copy
 from sklearn.cluster import DBSCAN, KMeans
+from shapely.errors import TopologicalError
 from scipy.spatial import ConvexHull
 import random
 from skimage.measure import EllipseModel
 
 def safe_polygon(region):
     pts = region.get_boundary_points()
-    if len(pts) < 3:
+    if len(pts) < 4:
         return None
-    poly = Polygon(pts)
-    if not poly.is_valid:
-        poly = poly.buffer(0)
-    return poly if poly.is_valid else None
+    try:
+        poly = Polygon(pts)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        return poly if poly.is_valid else None
+    except (ValueError, TopologicalError):
+        return None
 
 # Takes a dict of {roi id: region} for each set of regions, and an existing match list
 def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
@@ -93,16 +97,23 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
         if i not in grouped_a or j not in grouped_b:
             continue
 
-        # Merge polygons
-        poly_a = unary_union([
-            Polygon(region.get_boundary_points()) for region in grouped_a[i]
-        ])
+        # Use safe_polygon to clean and validate
+        polygons_a = [safe_polygon(region) for region in grouped_a[i]]
+        polygons_b = [safe_polygon(region) for region in grouped_b[j]]
+
+        # Filter out None entries
+        polygons_a = [p for p in polygons_a if p is not None]
+        polygons_b = [p for p in polygons_b if p is not None]
+
+        if not polygons_a or not polygons_b:
+            print(f"Skipping match ({i}, {j}) due to invalid polygons.")
+            continue
+
+        poly_a = unary_union(polygons_a)
         if not poly_a.is_valid:
             poly_a = poly_a.buffer(0)
 
-        poly_b = unary_union([
-            Polygon(region.get_boundary_points()) for region in grouped_b[j]
-        ])
+        poly_b = unary_union(polygons_b)
         if not poly_b.is_valid:
             poly_b = poly_b.buffer(0)
 
@@ -110,10 +121,10 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
             print(f"Skipping invalid merged match ({i}, {j})")
             continue
 
-        # Compute intersection & union
+        # Proceed with valid UoI computation
         inter = poly_a.intersection(poly_b)
         union = poly_a.union(poly_b)
-        uoi = inter.area / union.area if union.area > 0 else 0
+        uoi = inter.area / union.area if union.area > 0 else 0.0
         uoi_scores.append(uoi)
 
         if plot:
