@@ -299,22 +299,24 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
         # TEST FILTERING TODO
-        # rois_b_2d = filter_region_by_shape(
-        #     rois_b_2d,
-        #     plane_b,
-        #     min_area=40,
-        #     max_area=1000,
-        #     max_eccentricity=0.69,
-        #     preserve_anchor_regions=True
-        # )
-        # rois_a_2d = filter_region_by_shape(
-        #         rois_a_2d,
-        #         plane_a,
-        #         min_area=40,
-        #         max_area=1000,
-        #         max_eccentricity=0.69,
-        #         preserve_anchor_regions=True
-        # )
+        print(f"Filtering B Regions")
+        rois_b_2d = filter_region_by_shape(
+            rois_b_2d,
+            plane_b,
+            min_area=40,
+            max_area=1000,
+            max_eccentricity=0.69,
+            preserve_anchor_regions=True
+        )
+        print(f"Filtering A Regions")
+        rois_a_2d = filter_region_by_shape(
+                rois_a_2d,
+                plane_a,
+                min_area=40,
+                max_area=1000,
+                max_eccentricity=0.69,
+                preserve_anchor_regions=True
+        )
 
         matches = match_data["og_matches"]
         updated_matches = []
@@ -344,7 +346,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 coords_3d = [(x, y, z) for x, y in roi_data["coords"]]
 
                 # Check if ROI exists in rois_b_2d
-                if key not in rois_b_2d:
+                if key not in rois_b_2d_proj:
                     print(f"[MISSING] ROI {key} not found in rois_b_2d")
                     continue
                 else:
@@ -356,7 +358,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                     coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d
                 ))
 
-                coords_2d_projected = np.array(rois_b_2d[key])[:, :2]
+                coords_2d_projected = np.array(rois_b_2d_proj[key])[:, :2]
                 
                 expected_points.append(coords_2d_expected)           # shape (N, 2)
                 projected_points.append(coords_2d_projected)         # shape (N, 2)
@@ -390,8 +392,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         # TEST DEBUG
         # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
         # plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
-        plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B",
-                                   transform=(rotation_2d, scale_2d, translation_2d), reference_plane=plane_a)
+        plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
         # END TEST DEBUG
 
         # Filter matches to only those where both PIDs survived projection
@@ -911,6 +912,7 @@ def filter_region_by_shape(
 
         coords_2d = get_ordered_boundary(coords_2d)
         if len(coords_2d) < 5:
+            print(f"Skipped low point roi: {rid}")
             continue
 
         x, y = zip(*coords_2d)
@@ -919,6 +921,7 @@ def filter_region_by_shape(
 
         poly = Polygon(coords_2d)
         if not poly.is_valid or poly.area == 0:
+            print(f"Skipped invalid poly roi: {rid}")
             continue
 
         area = poly.area
@@ -926,10 +929,14 @@ def filter_region_by_shape(
             (pt.id == rid and np.isclose(get_z(z, rid), pt.position[2]))
             for pt in plane.plane_points.values()
         )
+        if is_anchor:
+            print(f"Found anchor/alignment point ID: {rid}")
 
         if min_area is not None and area < min_area and not (preserve_anchor_regions and is_anchor):
+            print(f"Skipped small area roi: {rid}")
             continue
         if max_area is not None and area > max_area and not (preserve_anchor_regions and is_anchor):
+            print(f"Skipped high area roi: {rid}")
             continue
 
         # print(f"ROI ID:{key} passed area check with area = {area}")
@@ -937,11 +944,13 @@ def filter_region_by_shape(
         # Shape filtering
         model = EllipseModel()
         if not model.estimate(np.column_stack([x, y])):
+            print(f"Failed to estimate ellipsemodel for roi: {rid}")
             continue
 
         _, _, a_axis, b_axis, _ = model.params
         a, b = sorted([a_axis, b_axis])  # Ensure a ≤ b
         if b == 0:
+            print(f"Failed to calculate eccentricity for roi: {rid}")
             continue
         eccentricity = np.sqrt(1 - (a ** 2) / (b ** 2))
 
@@ -969,6 +978,7 @@ def filter_region_by_shape(
             continue
         overlaps_existing = any(poly_i.intersects(reg_j["polygon"]) for reg_j in kept_regions)
         if overlaps_existing:
+            print(f"Skipping overlapped roi: {rid_i}")
             continue  # Skip reg_i if it overlaps anything already accepted
         keep = True
         for j in range(i + 1, len(region_data)):
