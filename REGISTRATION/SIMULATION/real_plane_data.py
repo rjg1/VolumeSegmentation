@@ -193,10 +193,11 @@ def main():
     # Generate planes within this plane
     plane_gen_params['read_filename'] = None
     plane_gen_params['save_filename'] = None
-    # Generate more planes
+
+    # # DEBUG STEP ugh
+    # # Generate more planes
     # plane_gen_params['align_intensity_threshold'] = 0
     # plane_gen_params['anchor_intensity_threshold'] = 0
-    # # DEBUG STEP ugh
     # planes_b = new_stack.generate_planes_gpu(plane_gen_params)
     # plane_gen_params['align_intensity_threshold'] = 0.4
     # plane_gen_params['anchor_intensity_threshold'] = 0.5
@@ -207,7 +208,7 @@ def main():
     # else:
     #     print("No exact reconstructed plane match found in B planes.")
     # return
-    # END DEBUG
+    # # END DEBUG
     # Attempt to match planes
     match_start = time.perf_counter()
     uoi_match_data = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
