@@ -106,7 +106,7 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
         polygons_b = [p for p in polygons_b if p is not None]
 
         if not polygons_a or not polygons_b:
-            print(f"Skipping match ({i}, {j}) due to invalid polygons.")
+            # print(f"Skipping match ({i}, {j}) due to invalid polygons.")
             continue
 
         poly_a = unary_union(polygons_a)
@@ -118,7 +118,7 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
             poly_b = poly_b.buffer(0)
 
         if not poly_a.is_valid or not poly_b.is_valid:
-            print(f"Skipping invalid merged match ({i}, {j})")
+            # print(f"Skipping invalid merged match ({i}, {j})")
             continue
 
         # Proceed with valid UoI computation
@@ -912,7 +912,7 @@ def filter_region_by_shape(
 
         coords_2d = get_ordered_boundary(coords_2d)
         if len(coords_2d) < 5:
-            print(f"Skipped low point roi: {rid}")
+            # print(f"Skipped low point roi: {rid}")
             continue
 
         x, y = zip(*coords_2d)
@@ -921,7 +921,7 @@ def filter_region_by_shape(
 
         poly = Polygon(coords_2d)
         if not poly.is_valid or poly.area == 0:
-            print(f"Skipped invalid poly roi: {rid}")
+            # print(f"Skipped invalid poly roi: {rid}")
             continue
 
         area = poly.area
@@ -929,28 +929,28 @@ def filter_region_by_shape(
             (pt.id == rid and np.isclose(get_z(z, rid), pt.position[2]))
             for pt in plane.plane_points.values()
         )
-        if is_anchor:
-            print(f"Found anchor/alignment point ID: {rid}")
+        # if is_anchor:
+        #     # print(f"Found anchor/alignment point ID: {rid}")
 
         if min_area is not None and area < min_area and not (preserve_anchor_regions and is_anchor):
-            print(f"Skipped small area roi: {rid}")
+            # print(f"Skipped small area roi: {rid}")
             continue
         if max_area is not None and area > max_area and not (preserve_anchor_regions and is_anchor):
-            print(f"Skipped high area roi: {rid}")
+            # print(f"Skipped high area roi: {rid}")
             continue
 
         # print(f"ROI ID:{key} passed area check with area = {area}")
 
         # Shape filtering
         model = EllipseModel()
-        if not model.estimate(np.column_stack([x, y])):
-            print(f"Failed to estimate ellipsemodel for roi: {rid}")
+        if not model.estimate(np.column_stack([x, y])) and not is_anchor:
+            # print(f"Failed to estimate ellipsemodel for roi: {rid}")
             continue
 
         _, _, a_axis, b_axis, _ = model.params
         a, b = sorted([a_axis, b_axis])  # Ensure a ≤ b
-        if b == 0:
-            print(f"Failed to calculate eccentricity for roi: {rid}")
+        if b == 0 and not is_anchor:
+            # print(f"Failed to calculate eccentricity for roi: {rid}")
             continue
         eccentricity = np.sqrt(1 - (a ** 2) / (b ** 2))
 
@@ -974,11 +974,12 @@ def filter_region_by_shape(
     for i, reg_i in enumerate(region_data):
         poly_i = reg_i["polygon"]
         rid_i = reg_i["rid"]
+        is_anchor = reg_i["is_anchor"]
         if rid_i in kept_ids:
             continue
         overlaps_existing = any(poly_i.intersects(reg_j["polygon"]) for reg_j in kept_regions)
-        if overlaps_existing:
-            print(f"Skipping overlapped roi: {rid_i}")
+        if overlaps_existing and not is_anchor:
+            # print(f"Skipping overlapped roi: {rid_i}")
             continue  # Skip reg_i if it overlaps anything already accepted
         keep = True
         for j in range(i + 1, len(region_data)):

@@ -174,6 +174,9 @@ def main():
     # Generate planes within this plane
     plane_gen_params['read_filename'] = None
     plane_gen_params['save_filename'] = None
+    # Generate more planes
+    # plane_gen_params['align_intensity_threshold'] = 0
+    # plane_gen_params['anchor_intensity_threshold'] = 0
     # DEBUG STEP ugh
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
     matches = compare_planes_by_geometry(selected_plane, planes_b)
