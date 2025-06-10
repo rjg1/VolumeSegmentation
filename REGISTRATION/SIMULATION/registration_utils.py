@@ -9,7 +9,6 @@ from plane import Plane
 from zstack import ZStack
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
-from planepoint import PlanePoint
 from scipy.spatial.distance import cdist
 from collections import defaultdict
 import copy
@@ -299,24 +298,26 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
             rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
         # TEST FILTERING TODO
-        print(f"Filtering B Regions")
-        rois_b_2d = filter_region_by_shape(
-            rois_b_2d,
-            plane_b,
-            min_area=40,
-            max_area=1000,
-            max_eccentricity=0.69,
-            preserve_anchor_regions=True
-        )
-        print(f"Filtering A Regions")
-        rois_a_2d = filter_region_by_shape(
-                rois_a_2d,
-                plane_a,
-                min_area=40,
-                max_area=1000,
-                max_eccentricity=0.69,
-                preserve_anchor_regions=True
-        )
+        filter_params = params["filter_params"]
+        if not filter_params["disable_filtering"]:
+            print(f"Filtering B Regions")
+            rois_b_2d = filter_region_by_shape(
+                rois_b_2d,
+                plane_b,
+                min_area=filter_params["min_area"],
+                max_area=filter_params["max_area"],
+                max_eccentricity=filter_params["max_eccentricity"],
+                preserve_anchor_regions=filter_params["preserve_anchor"]
+            )
+            print(f"Filtering A Regions")
+            rois_a_2d = filter_region_by_shape(
+                    rois_a_2d,
+                    plane_a,
+                    min_area=filter_params["min_area"],
+                    max_area=filter_params["max_area"],
+                    max_eccentricity=filter_params["max_eccentricity"],
+                    preserve_anchor_regions=filter_params["preserve_anchor"]
+            )
 
         matches = match_data["og_matches"]
         updated_matches = []
@@ -822,6 +823,8 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
                 new_z_planes[z][roi_id]["intensity"] = roi_data["intensity"]
             if "volume" in roi_data:
                 new_z_planes[z][roi_id]["volume"] = int(roi_data["volume"])
+            if "traits" in roi_data:
+                new_z_planes[z][roi_id]["traits"] = roi_data["traits"]
         new_stack = ZStack(new_z_planes)
 
         return new_stack

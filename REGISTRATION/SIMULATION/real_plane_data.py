@@ -16,8 +16,8 @@ import numpy as np
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 # STACK_IN_FILE = "drg_complete_2s_algo_VOLUMES.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
-NEW_PLANE_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "new_planes.csv"
 USE_FLAT_PLANE = True
+PLOT_PLANE_COMPARISON = True
 AREA_THRESHOLD = 20  
 MAX_ATTEMPTS = 50   
 
@@ -35,12 +35,12 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
     "n_threads" : 10, # Number of threads to spawn when generating planes
-    "anchor_dist_thresh": None # acceptable euclidean distance between an anchor and an alignment point
+    "anchor_dist_thresh": 100 # acceptable euclidean distance between an anchor and an alignment point
 }
 
 
@@ -51,11 +51,23 @@ match_plane_params = {
         },
         "traits": {
             "angle" : {
-                "weight": 0.6,
+                "weight": 0.4,
                 "max_value" : 0.1
             },
             "magnitude" : {
-                "weight": 0.4,
+                "weight": 0.3,
+                "max_value" : 0.1
+            },
+            "avg_radius": {
+                "weight": 0.1,
+                "max_value" : 0.1
+            },
+            "circularity": {
+                "weight": 0.1,
+                "max_value" : 0.1
+            },
+            "area": {
+                "weight": 0.1,
                 "max_value" : 0.1
             }
         }
@@ -77,7 +89,7 @@ match_params = {
     "plane_list_params" : plane_list_params,
     "planes_a_read_file" : PLANE_OUT_FILE,
     "planes_b_read_file" : None,
-    "planes_a_write_file" : None,
+    "planes_a_write_file" : PLANE_OUT_FILE,
     "planes_b_write_file" : None,
     "plot_uoi" : True,
     "plot_match" : False,
@@ -87,7 +99,14 @@ match_params = {
         "method" : "volume",
         "eps": 1.5,
         "min_samples" : 5
-    }
+    },
+    "filter_params": {
+        "disable_filtering": True,
+        "min_area": 40,
+        "max_area": 1000,
+        "max_eccentricity": 0.69,
+        "preserve_anchor": True
+    },
 }
 
 # Test plane generation for z-stack data
@@ -177,14 +196,16 @@ def main():
     # Generate more planes
     # plane_gen_params['align_intensity_threshold'] = 0
     # plane_gen_params['anchor_intensity_threshold'] = 0
-    # DEBUG STEP ugh
-    planes_b = new_stack.generate_planes_gpu(plane_gen_params)
-    matches = compare_planes_by_geometry(selected_plane, planes_b)
+    # # DEBUG STEP ugh
+    # planes_b = new_stack.generate_planes_gpu(plane_gen_params)
+    # plane_gen_params['align_intensity_threshold'] = 0.4
+    # plane_gen_params['anchor_intensity_threshold'] = 0.5
+    # matches = compare_planes_by_geometry_2d(selected_plane, planes_b)
 
-    if matches:
-        print(f"Found matching reconstructed plane(s): {matches}")
-    else:
-        print("No exact reconstructed plane match found in B planes.")
+    # if matches:
+    #     print(f"Found matching reconstructed plane(s): {matches}")
+    # else:
+    #     print("No exact reconstructed plane match found in B planes.")
     # return
     # END DEBUG
     # Attempt to match planes
@@ -259,6 +280,7 @@ def compare_planes_by_geometry(reference_plane, candidate_planes, tol=1e-6):
     }
 
     for i, candidate in enumerate(candidate_planes):
+        print("")
         cand_anchor_id = candidate.anchor_point.id
         cand_anchor_pos = candidate.anchor_point.position
 
@@ -392,49 +414,54 @@ def filter_zstack_by_shape(
     return ZStack(filtered_z_planes)
 
 # more debugging
-import numpy as np
 
-def compare_planes_by_geometry(reference_plane, candidate_planes, tol=1e-6):
+def compare_planes_by_geometry_2d(reference_plane, candidate_planes, tol=1e-4):
     """
     Compare a reference plane to a list of candidate planes by:
     - Anchor ID
-    - Alignment IDs
-    - Corresponding point positions
+    - Alignment Point IDs
+    - 2D projected positions (into local plane basis)
 
     Args:
-        reference_plane: Plane object to compare against
+        reference_plane: Plane object
         candidate_planes: list of Plane objects
-        tol: numerical tolerance for position matching
+        tol: position matching tolerance (in 2D)
 
     Returns:
         List of tuples: (candidate_idx, match_reason)
     """
     results = []
 
+    # Project ref plane points to 2D
+    ref_proj = reference_plane.get_local_2d_coordinates()
     ref_anchor_id = reference_plane.anchor_point.id
-    ref_anchor_pos = reference_plane.anchor_point.position
     ref_alignments = {
-        pt.id: pt.position for i, pt in reference_plane.plane_points.items() if i != 0
+        ppt.id: ref_proj[i]
+        for i, ppt in reference_plane.plane_points.items()
+        if i != 0
     }
 
     for i, candidate in enumerate(candidate_planes):
-        cand_anchor_id = candidate.anchor_point.id
-        cand_anchor_pos = candidate.anchor_point.position
+        if candidate.anchor_point.id != ref_anchor_id:
+            continue
+        else:
+            print(f"Found matching anchors in b plane idx: {i}")
+        if PLOT_PLANE_COMPARISON:
+            plot_plane_comparison_2d(reference_plane, candidate)
+        cand_proj = candidate.get_local_2d_coordinates()
 
-        if cand_anchor_id != ref_anchor_id:
-            continue  # anchor ID must match
-
-        if not np.allclose(ref_anchor_pos, cand_anchor_pos, atol=tol):
-            continue  # anchor position must match
+        if not np.allclose(ref_proj[0], cand_proj[0], atol=tol):
+            continue  # anchor positions don't match
 
         cand_alignments = {
-            pt.id: pt.position for j, pt in candidate.plane_points.items() if j != 0
+            ppt.id: cand_proj[j]
+            for j, ppt in candidate.plane_points.items()
+            if j != 0
         }
 
         if set(cand_alignments.keys()) != set(ref_alignments.keys()):
-            continue  # alignment IDs must match exactly
+            continue
 
-        # Check all alignment point positions
         positions_match = all(
             np.allclose(ref_alignments[aid], cand_alignments[aid], atol=tol)
             for aid in ref_alignments
@@ -443,10 +470,45 @@ def compare_planes_by_geometry(reference_plane, candidate_planes, tol=1e-6):
         if not positions_match:
             continue
 
-        # Passed all checks
-        results.append((i, f"Match with candidate plane index {i}"))
+        results.append((i, f"2D projected match with candidate plane index {i}"))
 
     return results
+
+
+def plot_plane_comparison_2d(ref_plane, cand_plane, tol=1e-4):
+    """
+    Plot 2D projections of reference and candidate planes to visually compare geometry.
+    Anchor is shown in red, alignments in blue (ref) and green (cand).
+    Matching point IDs are labeled.
+    """
+    ref_proj = ref_plane.get_local_2d_coordinates()
+    cand_proj = cand_plane.get_local_2d_coordinates()
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_title("2D Plane Comparison")
+
+    # Plot reference plane (anchor = red, alignments = blue)
+    for i, (x, y) in ref_proj.items():
+        if i == 0:
+            ax.scatter(x, y, color='red', label='Ref Anchor', s=60)
+            ax.text(x + 0.2, y + 0.2, f"A{ref_plane.plane_points[i].id}", color='red')
+        else:
+            ax.scatter(x, y, color='blue')
+            ax.text(x + 0.2, y + 0.2, f"P{ref_plane.plane_points[i].id}", color='blue')
+
+    # Plot candidate plane (anchor = orange, alignments = green)
+    for j, (x, y) in cand_proj.items():
+        if j == 0:
+            ax.scatter(x, y, color='orange', label='Cand Anchor', s=60)
+            ax.text(x + 0.2, y + 0.2, f"A{cand_plane.plane_points[j].id}", color='orange')
+        else:
+            ax.scatter(x, y, color='green')
+            ax.text(x + 0.2, y + 0.2, f"P{cand_plane.plane_points[j].id}", color='green')
+
+    ax.set_aspect("equal")
+    ax.grid(True)
+    ax.legend()
+    plt.show()
 
 # end debug
 

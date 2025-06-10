@@ -5,6 +5,7 @@ from region import BoundaryRegion
 from scipy.spatial import ConvexHull
 from itertools import combinations
 from plane import Plane
+from scipy.spatial import ConvexHull
 from planepoint import PlanePoint
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError, ProcessPoolExecutor, wait, FIRST_COMPLETED
@@ -38,7 +39,8 @@ class ZStack:
         elif isinstance(data, dict): # Assume correctly formed dictionary for z_planes
             self.z_planes = self._from_zplane_dict(data)  
         
-
+        # Add traits to ROIs
+        self._calculate_roi_traits()
 
     def _average_roi_area(self):
         self._build_xy_rois()  # builds `xy_rois` dictionary
@@ -302,7 +304,7 @@ class ZStack:
             normals_seen = []
             anchor_pos = anchor_roi.get_centroid()
             az = round(anchor_roi.get_centroid()[2], 3)
-            anchor_point = PlanePoint(anchor_id, anchor_pos)
+            anchor_point = self.construct_planepoint(anchor_id, anchor_pos)
 
             if shutdown_flag.is_set():
                 return []
@@ -365,9 +367,9 @@ class ZStack:
             ):
                 if shutdown_flag.is_set():
                     return []
-
-                p1 = PlanePoint(id1, roi1.get_centroid())
-                p2 = PlanePoint(id2, roi2.get_centroid())
+                
+                p1 = self.construct_planepoint(id1, roi1.get_centroid())
+                p2 = self.construct_planepoint(id2, roi2.get_centroid())
 
                 if not tilt_valid(anchor_id, anchor_pos, id1, p1.position):
                     continue
@@ -387,9 +389,8 @@ class ZStack:
                 z2 = round(roi2.get_centroid()[2],3)
                 id_tuples = [(az, anchor_id), (z1, id1), (z2, id2)]
 
-
                 additional_points = [
-                    PlanePoint(align_id, align_roi.get_centroid())
+                    self.construct_planepoint(align_id, align_roi.get_centroid())
                     for align_id, align_roi, z in local_alignments
                     if (z, align_id) not in id_tuples
                 ]
@@ -542,7 +543,7 @@ class ZStack:
             normals_seen = []
             anchor_pos = anchor_roi.get_centroid()
             az = round(anchor_roi.get_centroid()[2], 3)
-            anchor_point = PlanePoint(anchor_id, anchor_pos)
+            anchor_point = self.construct_planepoint(anchor_id, anchor_pos)
 
             if shutdown_flag.is_set():
                 return []
@@ -617,8 +618,8 @@ class ZStack:
                     return []
 
                 id1, id2 = point_ids[i], point_ids[j]
-                p1 = PlanePoint(id1, point_pos[i])
-                p2 = PlanePoint(id2, point_pos[j])
+                p1 = self.construct_planepoint(id1, point_pos[i])
+                p2 = self.construct_planepoint(id2, point_pos[j])
 
                 v1 = p1.position - anchor_pos
                 v2 = p2.position - anchor_pos
@@ -654,7 +655,7 @@ class ZStack:
                     for k, keep in enumerate(mask):
                         if keep:
                             point_projected = True # Projection occurred
-                            plane.plane_points[len(plane.plane_points)] = PlanePoint(ids[k], projected_pts[k])
+                            plane.plane_points[len(plane.plane_points)] = self.construct_planepoint(ids[k], projected_pts[k])
                     if point_projected:
                         plane.angles_and_magnitudes() # Update circular list
 
@@ -719,6 +720,7 @@ class ZStack:
                 all_traits.update(ppt.traits.keys())
 
         sorted_traits = sorted(all_traits)  # consistent column ordering
+        print(f"Found traits: {sorted_traits}")
 
         # Step 2: Build rows for each plane in plane list of z stack
         for plane_id, plane in enumerate(self.planes):
@@ -753,6 +755,63 @@ class ZStack:
         # Step 3: Save to CSV
         df = pd.DataFrame(rows)
         df.to_csv(filename, index=False)
+
+
+    def _calculate_roi_traits(self):
+        """
+        For each ROI in the z_planes dictionary, calculate:
+        - area: number of points
+        - avg_radius: average distance from centroid
+        - circularity: 4π * area / perimeter² (approximate using convex hull)
+
+        The traits will be stored in the "traits" key of each ROI dictionary.
+        """
+
+
+        def centroid(coords):
+            coords = np.array(coords)
+            return np.mean(coords, axis=0)
+
+        def perimeter(coords):
+            hull = ConvexHull(coords)
+            return np.sum([
+                np.linalg.norm(coords[simplex[0]] - coords[simplex[1]])
+                for simplex in hull.simplices
+            ])
+
+        for z, roi_dict in self.z_planes.items():
+            for roi_id, info in roi_dict.items():
+                coords = info.get("coords", [])
+                if not coords:
+                    continue
+
+                coords_arr = np.array(coords)
+                traits = {}
+                traits["area"] = len(coords_arr)
+
+                # Centroid and avg radius
+                c = centroid(coords_arr)
+                distances = np.linalg.norm(coords_arr - c, axis=1)
+                traits["avg_radius"] = float(np.mean(distances))
+
+                # Circularity (approximate with convex hull)
+                if len(coords_arr) >= 3:
+                    try:
+                        p = perimeter(coords_arr)
+                        a = traits["area"]
+                        traits["circularity"] = float(4 * np.pi * a / (p ** 2)) if p > 0 else 0.0
+                    except Exception:
+                        traits["circularity"] = 0.0
+                else:
+                    traits["circularity"] = 0.0
+
+                info["traits"] = traits 
+
+    def construct_planepoint(self, roi_id, position):
+        z = round(position[2], 3)
+        roi_info = self.z_planes.get(z, {}).get(roi_id, {})
+        traits = roi_info.get("traits", {}) if roi_info else {}
+        return PlanePoint(roi_id, position, traits = traits)
 
 
     # Remakes planes saved from a previous csv

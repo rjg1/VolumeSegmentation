@@ -81,6 +81,13 @@ DEFAULT_2D_MATCH_PARAMS = {
         "eps": 3.0,
         "min_samples" : 5
     },
+    "filter_params": {
+        "disable_filtering": False,
+        "min_area": 40,
+        "max_area": 1000,
+        "max_eccentricity": 0.69,
+        "preserve_anchor": True
+    },
     "min_uoi" : 0.5, # min uoi for a match between planes + transformations
     "plot_uoi" : False, # plot the matched rois and their intersection
     "plot_match" : False, # plot the matched rois only
@@ -91,9 +98,9 @@ DEFAULT_2D_MATCH_PARAMS = {
 def deep_update(base, updates):
     for key, value in updates.items():
         if key not in base:
-            raise KeyError(f"Unexpected parameter: '{key}'")
-
-        if isinstance(base[key], dict) and isinstance(value, dict):
+            #raise KeyError(f"Unexpected parameter: '{key}'")
+            base[key] = value
+        elif isinstance(base[key], dict) and isinstance(value, dict):
             deep_update(base[key], value)  # Recurse
         else:
             base[key] = value
