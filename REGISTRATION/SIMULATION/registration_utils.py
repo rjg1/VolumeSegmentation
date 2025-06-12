@@ -563,7 +563,7 @@ def project_angled_plane_points(
                     volume_ids.append(vol_id)
 
     if not projected_pts_2d:
-        return {}
+        return {}, {}
 
     projected_pts_2d = np.array(projected_pts_2d)
 

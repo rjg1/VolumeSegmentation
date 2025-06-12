@@ -24,9 +24,11 @@ def calculate_area_of_roi(boundary_points):
     return polygon.area
 
 def find_centroid_3d(points):
-    """Calculate the centroid of a list of points (x, y, z)."""
+    """Calculate the geometric center (bounding box midpoint) of a list of 3D points."""
     points = np.array(points)
-    centroid = np.mean(points, axis=0)  # [mean_x, mean_y, mean_z]
+    min_xyz = np.min(points, axis=0)
+    max_xyz = np.max(points, axis=0)
+    centroid = (min_xyz + max_xyz) / 2
     return centroid
 
 def calculate_avg_radius(boundary_points, centroid, num_samples, random_generator):

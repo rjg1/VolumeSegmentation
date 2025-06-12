@@ -32,6 +32,10 @@ class Plane:
         self.magnitudes = []
         self.angles_and_magnitudes()
 
+        # Test debug (ensure consistent plane direction)
+        if self.normal[2] < 0:
+            self.normal = -self.normal
+
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
             self.angles_and_magnitudes()
@@ -736,6 +740,11 @@ class Plane:
 
         outer = tqdm(planes_a, desc="Planes A", position=0)
         inner = tqdm(total=len(planes_b), position=1, leave=False, desc="Planes B")
+
+        # test debug:
+        plane_20_matches_debug = []
+        # end test debug
+
         for i, plane_a in enumerate(outer):
             inner.set_description(f"Planes B (A[{i}])")
             inner.reset() # Reset plane B progress bar
@@ -743,12 +752,22 @@ class Plane:
                 match_result = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
 
+                # test debug
+                if i == 20:
+                    plane_20_matches_debug.append({
+                        "plane_a": plane_a,
+                        "plane_b": plane_b,
+                        "result": match_result,
+                        "plane_a_idx": i,
+                        "plane_b_idx": j
+                    })
+                # end test debug
+
                 # Set if early termination specified for specific traits, or if less than min_matches between planes
                 if not match_result["match"]:
                     continue
 
                 score = match_result["score"]
-
 
                 if score >= params["min_score"]:
                     results[score] = {
@@ -764,6 +783,11 @@ class Plane:
                         max_matches_observed = num_matches
 
                 inner.update(1)
+
+        # TEST DEBUG
+        print(plane_20_matches_debug)
+        plot_projected_plane_match(plane_20_matches_debug)
+        #END TEST DEBUG
 
         # Re-scale scores based on matches
         scaled_results = {}
@@ -845,3 +869,63 @@ def filter_planes_by_z(planes, z_guess, z_range):
             filtered.append(plane)
 
     return filtered
+
+# TEST DEBUG
+def plot_projected_plane_match(debug_matches, target_idx=0, y_offset=5):
+    """
+    Plot anchor and alignment points of Plane A and translated Plane B in 2D.
+    Projects all points using each plane's own 2D projection method and aligns Plane B's anchor to A's.
+    """
+    for entry in debug_matches:
+        if entry["plane_b_idx"] == target_idx:
+            plane_a = entry["plane_a"]
+            plane_b = entry["plane_b"]
+            break
+    else:
+        print(f"[WARN] No entry found with plane_b_idx == {target_idx}")
+        return
+
+    def project_all_points(plane):
+        projected = []
+        ids = []
+        for _, pt in plane.plane_points.items():
+            x, y = plane._project_point_2d(pt.position)
+            projected.append((x, y))
+            ids.append(pt.id)
+        return projected, ids
+
+    # Get Plane A projected points
+    a_points, a_ids = project_all_points(plane_a)
+
+    # Get Plane B projected points
+    b_points, b_ids = project_all_points(plane_b)
+
+    # Translate B points so its anchor matches Plane A
+    a_anchor = a_points[0]  # anchor is always index 0
+    b_anchor = b_points[0]
+    dx, dy = a_anchor[0] - b_anchor[0], a_anchor[1] - b_anchor[1]
+    b_points_translated = [(x + dx, y + dy) for x, y in b_points]
+
+    # Plot
+    plt.figure(figsize=(10, 8))
+
+    # Plane A
+    ax_a_x, ax_a_y = zip(*a_points)
+    plt.scatter(ax_a_x, ax_a_y, c='blue', label='Plane A')
+    for (x, y), pid in zip(a_points, a_ids):
+        plt.text(x, y + y_offset, str(pid), color='blue', fontsize=9, ha='center')
+
+    # Plane B (translated)
+    ax_b_x, ax_b_y = zip(*b_points_translated)
+    plt.scatter(ax_b_x, ax_b_y, c='green', label='Plane B')
+    for (x, y), pid in zip(b_points_translated, b_ids):
+        plt.text(x, y - y_offset, str(pid), color='green', fontsize=9, ha='center')
+
+    plt.title(f"2D Projection: Plane A vs Plane B (idx {target_idx})")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.axis('equal')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

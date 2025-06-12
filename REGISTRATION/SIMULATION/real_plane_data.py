@@ -18,7 +18,7 @@ STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
 USE_FLAT_PLANE = False
 PLOT_PLANE_COMPARISON = True
-AREA_THRESHOLD = 20  
+AREA_THRESHOLD = 50
 MAX_ATTEMPTS = 50   
 
 
@@ -51,7 +51,7 @@ match_plane_params = {
         },
         "traits": {
             "angle" : {
-                "weight": 0.4,
+                "weight": 0.5,
                 "max_value" : 0.1
             },
             "magnitude" : {
@@ -59,11 +59,11 @@ match_plane_params = {
                 "max_value" : 0.1
             },
             "avg_radius": {
-                "weight": 0.1,
+                "weight": 0.05,
                 "max_value" : 0.1
             },
             "circularity": {
-                "weight": 0.1,
+                "weight": 0.05,
                 "max_value" : 0.1
             },
             "area": {
@@ -74,7 +74,7 @@ match_plane_params = {
     }
 
 plane_list_params = {
-    "min_score" : 0.9,
+    "min_score" : 0.7,
     "max_matches" : 4, # max matches to scale score between
     "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
     "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
@@ -94,7 +94,7 @@ match_params = {
     "plot_uoi" : True,
     "plot_match" : False,
     "use_gpu" : True,
-    "min_uoi": -1,
+    "min_uoi": 0.7,
     "seg_params": {
         "method" : "volume",
         "eps": 1.5,
@@ -125,7 +125,7 @@ def main():
 
     print("Starting plane selection")
 
-    random.seed(15) # Re-seed random...
+    random.seed(21) # Re-seed random...
     attempt = 0
     plane_pool = (
         [p for p in z_stack.planes if np.allclose(p.normal, [0, 0, 1], atol=1e-6)]
@@ -198,7 +198,7 @@ def main():
     plane_gen_params['save_filename'] = None
 
     # DEBUG STEP
-    # Generate more planes
+    # Generate b planes
     plane_gen_params['align_intensity_threshold'] = 0
     plane_gen_params['anchor_intensity_threshold'] = 0
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)

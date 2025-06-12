@@ -436,6 +436,8 @@ class ZStack:
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
+        self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+
         return self.planes
 
 
@@ -697,6 +699,9 @@ class ZStack:
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
+        # More deterministic ordering for simulations
+        self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+
         return self.planes
 
 
@@ -770,7 +775,9 @@ class ZStack:
 
         def centroid(coords):
             coords = np.array(coords)
-            return np.mean(coords, axis=0)
+            min_xy = np.min(coords, axis=0)
+            max_xy = np.max(coords, axis=0)
+            return (min_xy + max_xy) / 2
 
         def perimeter(coords):
             hull = ConvexHull(coords)
