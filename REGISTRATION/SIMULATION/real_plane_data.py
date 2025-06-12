@@ -1,5 +1,5 @@
 from zstack import *
-from registration_utils import extract_zstack_plane, match_zstacks_2d, filter_region_by_shape
+from registration_utils import extract_zstack_plane, match_zstacks_2d, filter_region_by_shape, project_angled_plane_points, project_flat_plane_points
 import random
 import time
 
@@ -16,7 +16,7 @@ import numpy as np
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 # STACK_IN_FILE = "drg_complete_2s_algo_VOLUMES.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
-USE_FLAT_PLANE = True
+USE_FLAT_PLANE = False
 PLOT_PLANE_COMPARISON = True
 AREA_THRESHOLD = 20  
 MAX_ATTEMPTS = 50   
@@ -35,7 +35,7 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
@@ -101,7 +101,7 @@ match_params = {
         "min_samples" : 5
     },
     "filter_params": {
-        "disable_filtering": True,
+        "disable_filtering": False,
         "min_area": 40,
         "max_area": 1000,
         "max_eccentricity": 0.69,
@@ -184,7 +184,10 @@ def main():
     #     preserve_anchor_regions=False
     # )
 
-    # plot_zstack_rois(new_stack)
+    # Debug - view 2d projection of new stack
+    plot_zstack_rois(new_stack)
+    # Debug - view 2d projection of original points
+    plot_projected_regions_with_plane_points(z_stack, selected_plane)
     # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
 
@@ -194,21 +197,21 @@ def main():
     plane_gen_params['read_filename'] = None
     plane_gen_params['save_filename'] = None
 
-    # # DEBUG STEP ugh
-    # # Generate more planes
-    # plane_gen_params['align_intensity_threshold'] = 0
-    # plane_gen_params['anchor_intensity_threshold'] = 0
-    # planes_b = new_stack.generate_planes_gpu(plane_gen_params)
-    # plane_gen_params['align_intensity_threshold'] = 0.4
-    # plane_gen_params['anchor_intensity_threshold'] = 0.5
-    # matches = compare_planes_by_geometry_2d(selected_plane, planes_b)
+    # DEBUG STEP
+    # Generate more planes
+    plane_gen_params['align_intensity_threshold'] = 0
+    plane_gen_params['anchor_intensity_threshold'] = 0
+    planes_b = new_stack.generate_planes_gpu(plane_gen_params)
+    plane_gen_params['align_intensity_threshold'] = 0.4
+    plane_gen_params['anchor_intensity_threshold'] = 0.5
+    matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
-    # if matches:
-    #     print(f"Found matching reconstructed plane(s): {matches}")
-    # else:
-    #     print("No exact reconstructed plane match found in B planes.")
-    # return
-    # # END DEBUG
+    if matches:
+        print(f"Found matching reconstructed plane(s): {matches}")
+    else:
+        print("No exact reconstructed plane match found in B planes.")
+    return
+    # END DEBUG
     # Attempt to match planes
     match_start = time.perf_counter()
     uoi_match_data = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
@@ -415,63 +418,52 @@ def filter_zstack_by_shape(
     return ZStack(filtered_z_planes)
 
 # more debugging
-
-def compare_planes_by_geometry_2d(reference_plane, candidate_planes, tol=1e-4):
+def compare_planes_by_geometry_2d(reference_plane, candidate_planes, z_stack, tol=1e-4, min_matches=2):
     """
     Compare a reference plane to a list of candidate planes by:
-    - Anchor ID
-    - Alignment Point IDs
-    - 2D projected positions (into local plane basis)
+    - Anchor position (3D)
+    - Alignment point 2D projections (geometry-based, not ID-based)
 
     Args:
         reference_plane: Plane object
         candidate_planes: list of Plane objects
         tol: position matching tolerance (in 2D)
+        min_matches: minimum number of 2D-aligned points that must match to consider a plane valid
 
     Returns:
         List of tuples: (candidate_idx, match_reason)
     """
     results = []
 
-    # Project ref plane points to 2D
+    # Project reference plane points to 2D
     ref_proj = reference_plane.get_local_2d_coordinates()
-    ref_anchor_id = reference_plane.anchor_point.id
-    ref_alignments = {
-        ppt.id: ref_proj[i]
-        for i, ppt in reference_plane.plane_points.items()
-        if i != 0
-    }
+    ref_anchor_pos = reference_plane.anchor_point.position
+    ref_alignment_pts = np.array([ref_proj[i] for i in range(1, len(ref_proj))])
 
     for i, candidate in enumerate(candidate_planes):
-        if candidate.anchor_point.id != ref_anchor_id:
-            continue
-        else:
-            print(f"Found matching anchors in b plane idx: {i}")
-        if PLOT_PLANE_COMPARISON:
-            plot_plane_comparison_2d(reference_plane, candidate)
         cand_proj = candidate.get_local_2d_coordinates()
+        cand_anchor_pos = candidate.anchor_point.position
 
-        if not np.allclose(ref_proj[0], cand_proj[0], atol=tol):
-            continue  # anchor positions don't match
+        # Check anchor positions match
+        if not np.allclose(ref_anchor_pos, cand_anchor_pos, atol=tol):
+            pass
+            #continue
 
-        cand_alignments = {
-            ppt.id: cand_proj[j]
-            for j, ppt in candidate.plane_points.items()
-            if j != 0
-        }
+        if PLOT_PLANE_COMPARISON:
+            plot_projected_regions_with_plane_points(z_stack, candidate, datatype="flat")
+            plot_plane_comparison_2d(reference_plane, candidate)
 
-        if set(cand_alignments.keys()) != set(ref_alignments.keys()):
-            continue
 
-        positions_match = all(
-            np.allclose(ref_alignments[aid], cand_alignments[aid], atol=tol)
-            for aid in ref_alignments
-        )
+        cand_alignment_pts = np.array([cand_proj[j] for j in range(1, len(cand_proj))])
 
-        if not positions_match:
-            continue
+        # Compare geometric similarity (how many 2D points match)
+        matched = 0
+        for ref_pt in ref_alignment_pts:
+            if any(np.allclose(ref_pt, cand_pt, atol=tol) for cand_pt in cand_alignment_pts):
+                matched += 1
 
-        results.append((i, f"2D projected match with candidate plane index {i}"))
+        if matched >= min_matches:
+            results.append((i, f"{matched} matching 2D alignment points at candidate index {i}"))
 
     return results
 
@@ -509,6 +501,78 @@ def plot_plane_comparison_2d(ref_plane, cand_plane, tol=1e-4):
     ax.set_aspect("equal")
     ax.grid(True)
     ax.legend()
+    plt.show()
+
+import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
+from matplotlib.patches import Polygon as MplPolygon
+def plot_projected_regions_with_plane_points(z_stack, plane, threshold=0.5, method="volume", eps=5.0, min_samples=5, datatype="angled"):
+    """
+    Projects the ZStack onto a given plane, clusters regions, and visualizes:
+    - Colored 2D projected regions (from DBSCAN or volume)
+    - Anchor/alignment points (overlaid as markers)
+
+    Args:
+        z_stack: the ZStack object
+        plane: the Plane object (angled)
+        threshold: max distance to consider point part of the plane
+        method: 'split' or 'merge'
+    """
+    from matplotlib.colors import to_rgba
+    if datatype == "angled":
+        output_regions, pid_mapping = project_angled_plane_points(
+            z_stack,
+            angled_plane=plane,
+            threshold=threshold,
+            method=method,
+            eps=eps,
+            min_samples=min_samples
+        )
+    else:
+        output_regions = project_flat_plane_points(z_stack, plane.anchor_point)
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # Colormap for visual variety
+    cmap = get_cmap('tab20')
+    region_colors = {}
+
+    for idx, (pid, pts3d) in enumerate(output_regions.items()):
+        # Project each point to 2D
+        projected_pts = [plane._project_point_2d(np.array(pt)) for pt in pts3d]
+        projected_pts = np.array(projected_pts)
+
+        color = cmap(idx % 20)
+        region_colors[pid] = color
+
+        ax.scatter(projected_pts[:, 0], projected_pts[:, 1], s=8, color=color, label=f"Region {pid}")
+
+        # Draw convex hull if possible
+        if len(projected_pts) >= 3:
+            try:
+                hull = ConvexHull(projected_pts)
+                polygon = projected_pts[hull.vertices]
+                patch = MplPolygon(polygon, closed=True, fill=False, edgecolor=to_rgba(color, 0.8), linewidth=1.5)
+                ax.add_patch(patch)
+            except:
+                pass  # Fallback if ConvexHull fails
+
+    # Overlay anchor and alignment points
+    projected_plane_pts = {
+        pt.id: plane._project_point_2d(pt.position)
+        for pt in plane.plane_points.values()
+    }
+
+    for pid, pt2d in projected_plane_pts.items():
+        ax.scatter(pt2d[0], pt2d[1], s=80, marker='x', color='black')
+        ax.text(pt2d[0] + 0.5, pt2d[1] + 0.5, f"PID {pid}", fontsize=8)
+
+    ax.set_title("Projected Regions and Plane Points")
+    ax.set_xlabel("u-axis")
+    ax.set_ylabel("v-axis")
+    ax.set_aspect('equal')
+    # ax.legend(loc='upper right', fontsize='x-small', markerscale=1.5)
+    plt.tight_layout()
     plt.show()
 
 # end debug
