@@ -700,7 +700,8 @@ class ZStack:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
         # More deterministic ordering for simulations
-        self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+        # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+        self.planes.sort(key=lambda p: (p.anchor_point.id, p.normal[0], p.normal[1], p.normal[2]))
 
         return self.planes
 
@@ -839,7 +840,8 @@ class ZStack:
         trait_names = [col[3:] for col in trait_columns]  # remove 'tr_' prefix
 
         # Step 2: Group by plane_id
-        for plane_id, group in df.groupby("plane_id"):
+        for plane_id in sorted(df['plane_id'].unique(), key=int):
+            group = df[df["plane_id"] == plane_id]
             # Extract anchor row
             anchor_row = group[group["type"] == "anchor"].iloc[0]
             anchor_traits = {

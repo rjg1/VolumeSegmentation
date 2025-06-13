@@ -742,7 +742,7 @@ class Plane:
         inner = tqdm(total=len(planes_b), position=1, leave=False, desc="Planes B")
 
         # test debug:
-        plane_20_matches_debug = []
+        plane_x_matches_debug = []
         # end test debug
 
         for i, plane_a in enumerate(outer):
@@ -753,8 +753,8 @@ class Plane:
                                                     match_plane_params = match_params)
 
                 # test debug
-                if i == 20:
-                    plane_20_matches_debug.append({
+                if i == 1248:
+                    plane_x_matches_debug.append({
                         "plane_a": plane_a,
                         "plane_b": plane_b,
                         "result": match_result,
@@ -785,8 +785,8 @@ class Plane:
                 inner.update(1)
 
         # TEST DEBUG
-        print(plane_20_matches_debug)
-        plot_projected_plane_match(plane_20_matches_debug)
+        print(plane_x_matches_debug)
+        plot_projected_plane_match(plane_x_matches_debug)
         #END TEST DEBUG
 
         # Re-scale scores based on matches

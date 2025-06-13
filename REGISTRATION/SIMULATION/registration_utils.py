@@ -201,6 +201,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_a"]
     plane_gen_params["read_filename"] = params["planes_a_read_file"]
     plane_gen_params["save_filename"] = params["planes_a_write_file"]
+    print(f"Generating A planes")
     if params["use_gpu"]:
         planes_a = zstack_a.generate_planes_gpu(plane_gen_params)
     else:
@@ -212,6 +213,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     plane_gen_params["z_guess"] = params["plane_list_params"]["z_guess_b"]
     plane_gen_params["read_filename"] = params["planes_b_read_file"]
     plane_gen_params["save_filename"] = params["planes_b_write_file"]
+    print(f"Generating B planes")
     if params["use_gpu"]:
         planes_b = zstack_b.generate_planes_gpu(plane_gen_params)
     else:

@@ -19,6 +19,7 @@ PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
 USE_FLAT_PLANE = False
 PLOT_PLANE_COMPARISON = True
 AREA_THRESHOLD = 50
+MIN_ROI_NUMBER = 8
 MAX_ATTEMPTS = 50   
 
 
@@ -123,31 +124,37 @@ def main():
     # z_stack_subset.generate_planes(plane_gen_params) # CPU Version debug
     # Choose a random plane to make a new z-stack
 
-    print("Starting plane selection")
+    print(f"Starting plane selection: {len(z_stack.planes)} planes identified")
 
-    random.seed(21) # Re-seed random...
+    random.seed(17) # Re-seed random...
     attempt = 0
-    plane_pool = (
-        [p for p in z_stack.planes if np.allclose(p.normal, [0, 0, 1], atol=1e-6)]
-        if USE_FLAT_PLANE
-        else [p for p in z_stack.planes if not np.allclose(p.normal, [0, 0, 1], atol=1e-6)]
-    )
+    plane_ids = []
+    for idx, plane in enumerate(z_stack.planes):
+        if USE_FLAT_PLANE and np.allclose(plane.normal, [0,0,1], atol=1e-6):
+            plane_ids.append(idx)
+        elif not USE_FLAT_PLANE and not np.allclose(plane.normal, [0,0,1], atol=1e-6):
+            plane_ids.append(idx)
     new_stack = None
 
-    if not plane_pool:
+    if not plane_ids:
         raise ValueError("No suitable planes found in the z-stack.")
     
     while attempt < MAX_ATTEMPTS:
-        selected_plane = random.choice(plane_pool)
+        # selected_idx = random.choice(plane_ids)
+        selected_idx = 1248
+        selected_plane = z_stack.planes[selected_idx]
+        print(f"Plane anchor point position: {selected_plane.anchor_point.position}. Anchor ID: {selected_plane.anchor_point.id}")
         temp_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'], method="volume")
         mean_area = temp_stack._average_roi_area()
+        num_rois = len(list(temp_stack.z_planes[list(temp_stack.z_planes.keys())[0]].keys()))
 
-        if mean_area > AREA_THRESHOLD:
+        if mean_area > AREA_THRESHOLD and num_rois >= MIN_ROI_NUMBER:
             new_stack = temp_stack
-            print(f"Selected plane ID {selected_plane.anchor_point.id} with mean ROI area {mean_area:.2f}")
+            print(f"Selected plane ID {selected_idx} with mean ROI area {mean_area:.2f}")
             break
 
         attempt += 1
+
 
     if new_stack is None:
         raise RuntimeError(f"Could not find a suitable plane with average ROI area > {AREA_THRESHOLD} after {MAX_ATTEMPTS} attempts.")
@@ -204,13 +211,14 @@ def main():
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
     plane_gen_params['align_intensity_threshold'] = 0.4
     plane_gen_params['anchor_intensity_threshold'] = 0.5
-    matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
-    if matches:
-        print(f"Found matching reconstructed plane(s): {matches}")
-    else:
-        print("No exact reconstructed plane match found in B planes.")
-    return
+    # matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
+
+    # if matches:
+    #     print(f"Found matching reconstructed plane(s): {matches}")
+    # else:
+    #     print("No exact reconstructed plane match found in B planes.")
+    # return
     # END DEBUG
     # Attempt to match planes
     match_start = time.perf_counter()
