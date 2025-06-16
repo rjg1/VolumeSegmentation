@@ -436,7 +436,7 @@ class ZStack:
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
-        self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+        self.planes.sort(key=lambda p: (p.anchor_point.id[1], sorted(p.plane_points.keys())))
 
         return self.planes
 
@@ -694,8 +694,10 @@ class ZStack:
                 print("Executor shut down.")
 
         # More deterministic ordering for simulations
+        for plane in self.planes:
+            print(plane.anchor_point.id)
         # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
-        self.planes.sort(key=lambda p: (p.anchor_point.id, p.normal[0], p.normal[1], p.normal[2]))
+        self.planes.sort(key=lambda p: (p.anchor_point.id[1], p.normal[0], p.normal[1], p.normal[2]))
 
         if params["save_filename"] is not None:
             try:
@@ -737,7 +739,7 @@ class ZStack:
             anchor = plane.anchor_point
             row = {
                 "plane_id": plane_id,
-                "pid": anchor.id,
+                "pid": anchor.id[1],
                 "x": anchor.position[0],
                 "y": anchor.position[1],
                 "z": anchor.position[2],
@@ -751,7 +753,7 @@ class ZStack:
             for _, ppt in list(plane.plane_points.items())[1:]: # skips anchor at index 0
                 row = {
                     "plane_id": plane_id,
-                    "pid": ppt.id,
+                    "pid": ppt.id[1],
                     "x": ppt.position[0],
                     "y": ppt.position[1],
                     "z": ppt.position[2],
@@ -823,7 +825,7 @@ class ZStack:
         z = round(position[2], 3)
         roi_info = self.z_planes.get(z, {}).get(roi_id, {})
         traits = roi_info.get("traits", {}) if roi_info else {}
-        return PlanePoint(roi_id, position, traits = traits)
+        return PlanePoint((z, roi_id), position, traits = traits)
 
 
     # Remakes planes saved from a previous csv
@@ -853,7 +855,7 @@ class ZStack:
                 for tr in trait_names
                 if not pd.isna(anchor_row[f"tr_{tr}"])
             }
-            anchor = PlanePoint(int(anchor_row.pid), (anchor_row.x, anchor_row.y, anchor_row.z), traits=anchor_traits)
+            anchor = PlanePoint((anchor_row.z, int(anchor_row.pid)), (anchor_row.x, anchor_row.y, anchor_row.z), traits=anchor_traits)
 
             # Extract alignment rows
             alignment_points = []
@@ -864,7 +866,7 @@ class ZStack:
                     for tr in trait_names
                     if not pd.isna(row[f"tr_{tr}"])
                 }
-                ppt = PlanePoint(int(row.pid), (row.x, row.y, row.z), traits=traits)
+                ppt = PlanePoint((row.z, int(row.pid)), (row.x, row.y, row.z), traits=traits)
                 alignment_points.append(ppt)
 
             # Only add planes with enough alignment points

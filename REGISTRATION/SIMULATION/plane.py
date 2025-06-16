@@ -187,6 +187,7 @@ class Plane:
         best_magnitude_diffs = []
 
         for match_set in match_sets:
+            print(f"Considering match set:{match_set}")
             mags_a_sel = np.array([mags_a[i] for (i, j, pida, pidb) in match_set])
             mags_b_sel = np.array([mags_b[j] for (i, j, pida, pidb) in match_set])
 
@@ -761,6 +762,9 @@ class Plane:
                         "plane_a_idx": i,
                         "plane_b_idx": j
                     })
+                    print(f"Plane A points: {plane_a.plane_points}")
+                    for idx, point in plane_a.plane_points.items():
+                        print(f"Plane point idx: {idx}, OG idx: {point.id}, Position: {point.position}")
                 # end test debug
 
                 # Set if early termination specified for specific traits, or if less than min_matches between planes

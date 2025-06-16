@@ -48,7 +48,9 @@ plane_gen_params = {
 match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2,
-            "fixed_scale" : 1 # Using same scale at the moment
+            "fixed_scale" : 1, # Using same scale at the moment
+            "outlier_thresh" : 2,
+            "mse_threshold": 0.3,
         },
         "traits": {
             "angle" : {
@@ -75,7 +77,7 @@ match_plane_params = {
     }
 
 plane_list_params = {
-    "min_score" : 0.7,
+    "min_score" : 0.5,
     "max_matches" : 4, # max matches to scale score between
     "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
     "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
@@ -92,17 +94,17 @@ match_params = {
     "planes_b_read_file" : None,
     "planes_a_write_file" : PLANE_OUT_FILE,
     "planes_b_write_file" : None,
-    "plot_uoi" : True,
-    "plot_match" : False,
+    "plot_uoi" : False,
+    "plot_match" : True,
     "use_gpu" : True,
-    "min_uoi": 0.7,
+    "min_uoi": 0,
     "seg_params": {
         "method" : "volume",
         "eps": 1.5,
         "min_samples" : 5
     },
     "filter_params": {
-        "disable_filtering": False,
+        "disable_filtering": True,
         "min_area": 40,
         "max_area": 1000,
         "max_eccentricity": 0.69,
@@ -143,6 +145,11 @@ def main():
         # selected_idx = random.choice(plane_ids)
         selected_idx = 1248
         selected_plane = z_stack.planes[selected_idx]
+
+        # Debug plane viewing:
+        for idx, point in selected_plane.plane_points.items():
+            print(f"Plane point idx: {idx}, OG idx: {point.id}, Position: {point.position}")
+
         print(f"Plane anchor point position: {selected_plane.anchor_point.position}. Anchor ID: {selected_plane.anchor_point.id}")
         temp_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'], method="volume")
         mean_area = temp_stack._average_roi_area()
@@ -194,10 +201,13 @@ def main():
     #     preserve_anchor_regions=False
     # )
 
-    # Debug - view 2d projection of new stack
+    # # Debug - view 2d projection of new stack
     plot_zstack_rois(new_stack)
-    # Debug - view 2d projection of original points
+    # # Debug - view 2d projection of original points
     plot_projected_regions_with_plane_points(z_stack, selected_plane)
+    
+    
+    
     # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
 
@@ -225,7 +235,7 @@ def main():
     plane_gen_params['read_filename'] = PLANE_OUT_FILE
     plane_gen_params['save_filename'] = PLANE_OUT_FILE
     plane_gen_params['regenerate_planes'] = False
-    # matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
+    matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
     # if matches:
     #     print(f"Found matching reconstructed plane(s): {matches}")
@@ -580,11 +590,12 @@ def plot_projected_regions_with_plane_points(z_stack, plane, threshold=0.5, meth
 
     # Overlay anchor and alignment points
     projected_plane_pts = {
-        pt.id: plane._project_point_2d(pt.position)
+        (pt.id, pt.position[2]): plane._project_point_2d(pt.position)
         for pt in plane.plane_points.values()
     }
 
-    for pid, pt2d in projected_plane_pts.items():
+    for (pid, z), pt2d in projected_plane_pts.items():
+        print(f"Processing (z, pid): ({z},{pid})")
         ax.scatter(pt2d[0], pt2d[1], s=80, marker='x', color='black')
         ax.text(pt2d[0] + 0.5, pt2d[1] + 0.5, f"PID {pid}", fontsize=8)
 

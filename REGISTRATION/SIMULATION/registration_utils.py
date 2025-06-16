@@ -340,52 +340,52 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
             )
 
-        # TEST DEBUG
-        expected_points = []
-        projected_points = []
-        for z, roi_dict in zstack_b.z_planes.items():
-            for roi_id, roi_data in roi_dict.items():
-                key = roi_id
-                coords_3d = [(x, y, z) for x, y in roi_data["coords"]]
+        # # TEST DEBUG
+        # expected_points = []
+        # projected_points = []
+        # for z, roi_dict in zstack_b.z_planes.items():
+        #     for roi_id, roi_data in roi_dict.items():
+        #         key = roi_id
+        #         coords_3d = [(x, y, z) for x, y in roi_data["coords"]]
 
-                # Check if ROI exists in rois_b_2d
-                if key not in rois_b_2d_proj:
-                    print(f"[MISSING] ROI {key} not found in rois_b_2d")
-                    continue
-                else:
-                    print(f"[FOUND] ROI {key} found in rois_b_2d")
+        #         # Check if ROI exists in rois_b_2d
+        #         if key not in rois_b_2d_proj:
+        #             print(f"[MISSING] ROI {key} not found in rois_b_2d")
+        #             continue
+        #         else:
+        #             print(f"[FOUND] ROI {key} found in rois_b_2d")
 
 
-                # Re-project coords_3d and compare
-                coords_2d_expected = np.array(plane_a.project_and_transform_points(
-                    coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d
-                ))
+        #         # Re-project coords_3d and compare
+        #         coords_2d_expected = np.array(plane_a.project_and_transform_points(
+        #             coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d
+        #         ))
 
-                coords_2d_projected = np.array(rois_b_2d_proj[key])[:, :2]
+        #         coords_2d_projected = np.array(rois_b_2d_proj[key])[:, :2]
                 
-                expected_points.append(coords_2d_expected)           # shape (N, 2)
-                projected_points.append(coords_2d_projected)         # shape (N, 2)
+        #         expected_points.append(coords_2d_expected)           # shape (N, 2)
+        #         projected_points.append(coords_2d_projected)         # shape (N, 2)
 
 
-        plt.figure(figsize=(8, 8))
-        plt.title("All ROI Points – Before vs After Transformation")
-        plt.axis("equal")
-        plt.grid(True)
+        # plt.figure(figsize=(8, 8))
+        # plt.title("All ROI Points – Before vs After Transformation")
+        # plt.axis("equal")
+        # plt.grid(True)
 
-        # Stack all into single arrays
-        expected_points_np = np.vstack(expected_points)
-        projected_points_np = np.vstack(projected_points)
+        # # Stack all into single arrays
+        # expected_points_np = np.vstack(expected_points)
+        # projected_points_np = np.vstack(projected_points)
 
-        # Plot recomputed (expected) transformed projections
-        plt.scatter(expected_points_np[:, 0], expected_points_np[:, 1], color='blue', alpha=0.6, s=10, label="Expected (Recomputed)")
+        # # Plot recomputed (expected) transformed projections
+        # plt.scatter(expected_points_np[:, 0], expected_points_np[:, 1], color='blue', alpha=0.6, s=10, label="Expected (Recomputed)")
 
-        # Plot stored projections (from rois_b_2d)
-        plt.scatter(projected_points_np[:, 0], projected_points_np[:, 1], color='red', alpha=0.6, s=10, label="Stored (rois_b_2d)")
+        # # Plot stored projections (from rois_b_2d)
+        # plt.scatter(projected_points_np[:, 0], projected_points_np[:, 1], color='red', alpha=0.6, s=10, label="Stored (rois_b_2d)")
 
-        plt.legend()
-        plt.tight_layout()
-        plt.show()        
-        # END TEST DEBUG
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()        
+        # # END TEST DEBUG
 
 
         # Calculate UoI for all unique transformations
@@ -395,7 +395,6 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         # TEST DEBUG
         # plot_regions_and_alignment_points(regions_a, plane_a, title="Projected Regions A")
         # plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
-        plot_regions_and_alignment_points(regions_b, plane_b, title="Projected Regions B")
         # END TEST DEBUG
 
         # Filter matches to only those where both PIDs survived projection
@@ -492,13 +491,13 @@ def plot_uoi_match_data(sorted_data, zstack_a, zstack_b):
         for pid, points in rois_a_2d_proj.items():
             if len(points) > 0:
                 ax.plot(points[:, 0], points[:, 1], 'o', markersize=2, color='blue')
-                centroid = points.mean(axis=0)
+                centroid = points.mean(axis=0) # TODO fix this
                 ax.text(centroid[0], centroid[1], f"A{pid}", fontsize=8, color='blue')
 
         for pid, points in rois_b_2d_proj.items():
             if len(points) > 0:
                 ax.plot(points[:, 0], points[:, 1], 'x', markersize=2, color='green')
-                centroid = points.mean(axis=0)
+                centroid = points.mean(axis=0)# TODO fix this
                 ax.text(centroid[0], centroid[1], f"B{pid}", fontsize=8, color='green')
 
         ax.grid(True)
@@ -582,7 +581,6 @@ def project_angled_plane_points(
         }
         output_regions = {}
         pid_mapping = {}
-        next_pid = max([pt.id for pt in angled_plane.plane_points.values() if isinstance(pt.id, int)], default=0) + 1
         # Iterate through all ROI clusters (clustered by volume id)
         for vol_id, points in clusters.items():
             cluster_pts_2d = np.array([pt2d for pt2d, _ in points])
@@ -607,7 +605,7 @@ def project_angled_plane_points(
                     if cluster_polygon.contains(point):
                         anchors_inside.append(pid)
 
-            if len(anchors_inside) == 1: # A single anchor/alignment point is inside this ROI - the output region gets the ROI id of that point
+            if len(anchors_inside) >= 1: # A single anchor/alignment point is inside this ROI - the output region gets the ROI id of that point
                 pid = anchors_inside[0]
                 output_regions[pid] = [pt3d for _, pt3d in points]
             elif len(anchors_inside) > 1:
@@ -617,8 +615,7 @@ def project_angled_plane_points(
                 for other_pid in anchors_inside[1:]:
                     pid_mapping[other_pid] = master_pid
             else: # No anchor/alignment points inside
-                output_regions[next_pid] = [pt3d for pt2d, pt3d in points]
-                next_pid += 1
+                output_regions[(-1, vol_id)] = [pt3d for pt2d, pt3d in points]
 
         return output_regions, pid_mapping
     elif method == "volume": # Default to split method if volume labels not in z-stack
@@ -834,20 +831,49 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
     # Angled plane: project + cluster
     output_regions, _ = project_angled_plane_points(
         z_stack, plane, threshold=threshold, method=method, eps=eps, min_samples=min_samples
-    ) # Project to 2d
+    ) 
+    
+    # Project 3D points to 2d TODO
+    print(f"Num output regions for extraction: {len(output_regions)}")
 
     z_fixed = 0 # Set an arbitrary z for projected plane
-    for roi_id, points in output_regions.items():
+    remap_rois = []
+    for (z, roi_id), points in output_regions.items():
+        print(f"Processing roi: ({z},{roi_id})")
         if not points:
+            print(f"No points found")
             continue
         coords_2d = [(x, y) for (x, y, z) in points]
+        
+        # Skip volume segmented rois for now
+        if (z == -1) or roi_id in new_z_planes[z_fixed]:
+            remap_rois.append((z, roi_id))
+            print(f"Volume segmented, skipping")
+            continue
+
         new_z_planes[z_fixed][roi_id]["coords"] = coords_2d
 
         # Just assign a random intensity -- TODO could be improved later
         new_z_planes[z_fixed][roi_id]["intensity"] =  random.uniform(0.8, 1)
+    
+    # Bandaid fix for volume segmented labels
+    print(f"Remap step, number of remap rois: {len(remap_rois)} Number of rois in new stack presently: {len(new_z_planes[z_fixed])}")
+    print(remap_rois)
+
+    existing_ids = list(new_z_planes[z_fixed].keys())
+    new_id = max(existing_ids) + 1 if existing_ids else 0
+    for z, roi_id in remap_rois:
+        points = output_regions[(z, roi_id)]
+
+        if not points:
+            continue
+        coords_2d = [(x, y) for (x, y, z) in points]
+        new_z_planes[z_fixed][new_id]["coords"] = coords_2d
+        new_z_planes[z_fixed][new_id]["intensity"] =  random.uniform(0.8, 1)
+        new_id += 1
 
     new_stack = ZStack(new_z_planes)
-    # new_stack.planes.append(plane)
+    print(f"Final number of rois in new stack: {len(new_z_planes[z_fixed])}")
     print("[INFO] Successfully extracted plane from z-stack")
     return new_stack
 
