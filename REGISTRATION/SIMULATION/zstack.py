@@ -443,6 +443,9 @@ class ZStack:
 
     def generate_planes_gpu(self, plane_gen_params=None):
         params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
+        if len(self.planes) > 0 and not params['regenerate_planes']:
+            print("Using past save of planes...")
+            return self.planes
 
         if params["read_filename"] is not None and not params["regenerate_planes"]:
             read_path = params["read_filename"]
@@ -455,9 +458,7 @@ class ZStack:
             else:
                 print(f"[WARN] Plane file '{read_path}' does not exist. Regenerating planes.")
 
-        if len(self.planes) > 0 and not params['regenerate_planes']:
-            print("Using past save of planes...")
-            return self.planes
+
 
         max_tilt_rad = np.radians(params["max_tilt_deg"])
         self.planes = []
@@ -702,10 +703,6 @@ class ZStack:
                 self.write_planes_to_csv(params["save_filename"])
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
-
-        
-
-        
 
         return self.planes
 

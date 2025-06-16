@@ -753,7 +753,7 @@ class Plane:
                                                     match_plane_params = match_params)
 
                 # test debug
-                if i == 1248:
+                if i == 0: #1248 # without filtering
                     plane_x_matches_debug.append({
                         "plane_a": plane_a,
                         "plane_b": plane_b,

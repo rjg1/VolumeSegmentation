@@ -146,7 +146,10 @@ def main():
         print(f"Plane anchor point position: {selected_plane.anchor_point.position}. Anchor ID: {selected_plane.anchor_point.id}")
         temp_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'], method="volume")
         mean_area = temp_stack._average_roi_area()
-        num_rois = len(list(temp_stack.z_planes[list(temp_stack.z_planes.keys())[0]].keys()))
+        if len(list(temp_stack.z_planes.keys())) > 0:
+            num_rois = len(list(temp_stack.z_planes[list(temp_stack.z_planes.keys())[0]].keys()))
+        else:
+            num_rois = 0
 
         if mean_area > AREA_THRESHOLD and num_rois >= MIN_ROI_NUMBER:
             new_stack = temp_stack
@@ -210,13 +213,18 @@ def main():
     plane_gen_params['anchor_intensity_threshold'] = 0      # Any point can be an anchor point
     plane_gen_params['regenerate_planes'] = True            # Always regenerate b-planes
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
+    # DEBUG - extract all non-tested planes
+    planes_b = [planes_b[0]] # Extract first plane of planes_b
+    new_stack.planes = planes_b
+    planes_a = [z_stack.planes[1248]]
+    z_stack.planes = planes_a
+    # DEBUG
     # Restore params for other plane gen step
     plane_gen_params['align_intensity_threshold'] = 0.4
     plane_gen_params['anchor_intensity_threshold'] = 0.5
     plane_gen_params['read_filename'] = PLANE_OUT_FILE
     plane_gen_params['save_filename'] = PLANE_OUT_FILE
     plane_gen_params['regenerate_planes'] = False
-    return
     # matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
     # if matches:
