@@ -200,18 +200,23 @@ def main():
 
 
     # # Extract data points close to this plane for the new z-stack
-    # Generate planes within this plane
-    plane_gen_params['read_filename'] = None
-    plane_gen_params['save_filename'] = None
+
 
     # DEBUG STEP
-    # Generate b planes
-    plane_gen_params['align_intensity_threshold'] = 0
-    plane_gen_params['anchor_intensity_threshold'] = 0
+    # Generate planes within this plane
+    plane_gen_params['read_filename'] = None
+    plane_gen_params['save_filename'] = None                # Never load/save B-planes
+    plane_gen_params['align_intensity_threshold'] = 0       # Any point can be an alignment point
+    plane_gen_params['anchor_intensity_threshold'] = 0      # Any point can be an anchor point
+    plane_gen_params['regenerate_planes'] = True            # Always regenerate b-planes
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
+    # Restore params for other plane gen step
     plane_gen_params['align_intensity_threshold'] = 0.4
     plane_gen_params['anchor_intensity_threshold'] = 0.5
-
+    plane_gen_params['read_filename'] = PLANE_OUT_FILE
+    plane_gen_params['save_filename'] = PLANE_OUT_FILE
+    plane_gen_params['regenerate_planes'] = False
+    return
     # matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
     # if matches:

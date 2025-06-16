@@ -692,6 +692,10 @@ class ZStack:
                 progress.close()
                 print("Executor shut down.")
 
+        # More deterministic ordering for simulations
+        # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
+        self.planes.sort(key=lambda p: (p.anchor_point.id, p.normal[0], p.normal[1], p.normal[2]))
+
         if params["save_filename"] is not None:
             try:
                 print(f"[INFO] Saving planes to: {params['save_filename']}")
@@ -699,9 +703,9 @@ class ZStack:
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
-        # More deterministic ordering for simulations
-        # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
-        self.planes.sort(key=lambda p: (p.anchor_point.id, p.normal[0], p.normal[1], p.normal[2]))
+        
+
+        
 
         return self.planes
 
@@ -730,6 +734,8 @@ class ZStack:
 
         # Step 2: Build rows for each plane in plane list of z stack
         for plane_id, plane in enumerate(self.planes):
+            if plane_id == 1248:
+                print(f"Plane id 1248 anchor position = {plane.anchor_point.position}")
             # Anchor point
             anchor = plane.anchor_point
             row = {
@@ -760,6 +766,7 @@ class ZStack:
 
         # Step 3: Save to CSV
         df = pd.DataFrame(rows)
+        print(f"Writing {len(df.groupby(['plane_id']))} rows to csv")
         df.to_csv(filename, index=False)
 
 
