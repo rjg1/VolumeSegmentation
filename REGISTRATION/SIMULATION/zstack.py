@@ -499,24 +499,65 @@ class ZStack:
             (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
             for anchor_id, anchor_roi in anchor_by_z[z]
         ]
-        print(tasks)
+
+        # def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
+        #     if pair_pts1 is None or pair_pts2 is None:
+        #         return np.array([], dtype=bool)
+        #     if len(pair_pts1) == 0 or len(pair_pts2) == 0:
+        #         return np.array([], dtype=bool)
+        #     if pair_pts1.shape[0] != pair_pts2.shape[0]:
+        #         raise ValueError("Tilt check called with mismatched point pair arrays.")
+
+        #     v1 = pair_pts1 - anchor_pos
+        #     v2 = pair_pts2 - anchor_pos
+        #     cp_v1 = cp.asarray(v1)
+        #     cp_v2 = cp.asarray(v2)
+        #     dot = cp.sum(cp_v1 * cp_v2, axis=1)
+        #     norms = cp.linalg.norm(cp_v1, axis=1) * cp.linalg.norm(cp_v2, axis=1)
+        #     angles = cp.arccos(cp.clip(dot / norms, -1.0, 1.0))
+        #     return (angles <= max_angle).get()
 
         def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
             if pair_pts1 is None or pair_pts2 is None:
                 return np.array([], dtype=bool)
+
             if len(pair_pts1) == 0 or len(pair_pts2) == 0:
                 return np.array([], dtype=bool)
-            if pair_pts1.shape[0] != pair_pts2.shape[0]:
-                raise ValueError("Tilt check called with mismatched point pair arrays.")
 
+            if pair_pts1.shape != pair_pts2.shape:
+                raise ValueError(f"Tilt check called with mismatched point pair shapes: {pair_pts1.shape} vs {pair_pts2.shape}")
+
+            # Compute vectors
             v1 = pair_pts1 - anchor_pos
             v2 = pair_pts2 - anchor_pos
-            cp_v1 = cp.asarray(v1)
-            cp_v2 = cp.asarray(v2)
-            dot = cp.sum(cp_v1 * cp_v2, axis=1)
-            norms = cp.linalg.norm(cp_v1, axis=1) * cp.linalg.norm(cp_v2, axis=1)
-            angles = cp.arccos(cp.clip(dot / norms, -1.0, 1.0))
-            return (angles <= max_angle).get()
+
+            # Check validity of inputs before sending to GPU
+            if not np.all(np.isfinite(v1)) or not np.all(np.isfinite(v2)):
+                raise ValueError(f"v1 or v2 contains NaN or Inf\nv1: {v1}\nv2: {v2}")
+
+            if v1.ndim != 2 or v1.shape[1] != 3:
+                raise ValueError(f"v1 must be Nx3, got shape {v1.shape}")
+            if v2.ndim != 2 or v2.shape[1] != 3:
+                raise ValueError(f"v2 must be Nx3, got shape {v2.shape}")
+
+            # GPU computation
+            try:
+                cp_v1 = cp.asarray(v1)
+                cp_v2 = cp.asarray(v2)
+
+                dot = cp.sum(cp_v1 * cp_v2, axis=1)
+                norms = cp.linalg.norm(cp_v1, axis=1) * cp.linalg.norm(cp_v2, axis=1)
+
+                # Avoid divide-by-zero (norms == 0)
+                norms = cp.where(norms == 0, 1e-8, norms)
+                angles = cp.arccos(cp.clip(dot / norms, -1.0, 1.0))
+                return (angles <= max_angle).get()
+            
+            except cp.cuda.runtime.CUDARuntimeError as e:
+                print(f"[CUDA ERROR] {e}")
+                print(f"anchor_pos: {anchor_pos}")
+                print(f"v1: {v1}\nv2: {v2}")
+                return np.array([], dtype=bool)
 
         def is_coplanar(normal, normals_list, angle_thresh_rad=0.017):
             if not normals_list:

@@ -223,8 +223,13 @@ def main():
     plane_gen_params['regenerate_planes'] = True            # Always regenerate b-planes
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
     # DEBUG - extract all non-tested planes
-    planes_b = [planes_b[0]] # Extract first plane of planes_b
-    new_stack.planes = planes_b
+    if len(planes_b) > 0:
+        planes_b = [planes_b[0]] # Extract first plane of planes_b
+        new_stack.planes = planes_b
+    else:
+        print(f"No b planes generated... check that out maybe")
+        return
+    
     planes_a = [z_stack.planes[1248]]
     z_stack.planes = planes_a
     # DEBUG
