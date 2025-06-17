@@ -94,7 +94,7 @@ match_params = {
     "planes_b_read_file" : None,
     "planes_a_write_file" : PLANE_OUT_FILE,
     "planes_b_write_file" : None,
-    "plot_uoi" : False,
+    "plot_uoi" : True,
     "plot_match" : True,
     "use_gpu" : True,
     "min_uoi": 0,
@@ -202,10 +202,9 @@ def main():
     # )
 
     # # Debug - view 2d projection of new stack
-    plot_zstack_rois(new_stack)
+    # plot_zstack_rois(new_stack)
     # # Debug - view 2d projection of original points
-    plot_projected_regions_with_plane_points(z_stack, selected_plane)
-    
+    # plot_projected_regions_with_plane_points(z_stack, selected_plane)
     
     
     # plot_zstack_rois(filtered_stack)
@@ -235,7 +234,7 @@ def main():
     plane_gen_params['read_filename'] = PLANE_OUT_FILE
     plane_gen_params['save_filename'] = PLANE_OUT_FILE
     plane_gen_params['regenerate_planes'] = False
-    matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
+    # matches = compare_planes_by_geometry_2d(selected_plane, planes_b, new_stack)
 
     # if matches:
     #     print(f"Found matching reconstructed plane(s): {matches}")
@@ -595,7 +594,6 @@ def plot_projected_regions_with_plane_points(z_stack, plane, threshold=0.5, meth
     }
 
     for (pid, z), pt2d in projected_plane_pts.items():
-        print(f"Processing (z, pid): ({z},{pid})")
         ax.scatter(pt2d[0], pt2d[1], s=80, marker='x', color='black')
         ax.text(pt2d[0] + 0.5, pt2d[1] + 0.5, f"PID {pid}", fontsize=8)
 

@@ -279,8 +279,6 @@ class ZStack:
 
         anchor_by_z, align_by_z = self._build_z_indexed_rois(params["anchor_intensity_threshold"], params["align_intensity_threshold"], z_max=z_max, z_min=z_min)
 
-        print(anchor_by_z.values()) # TODO DEBUG
-
         tasks = [
             (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
             for anchor_id, anchor_roi in anchor_by_z[z]
@@ -427,7 +425,7 @@ class ZStack:
                 progress.close()
                 print("Executor shut down.")
 
-
+        self.planes.sort(key=lambda p: (p.anchor_point.id[1], sorted(p.plane_points.keys())))
 
         if params["save_filename"] is not None:
             try:
@@ -436,7 +434,6 @@ class ZStack:
             except Exception as e:
                 print(f"[WARN] Could not save planes to '{params['save_filename']}': {e}")
 
-        self.planes.sort(key=lambda p: (p.anchor_point.id[1], sorted(p.plane_points.keys())))
 
         return self.planes
 
@@ -502,6 +499,7 @@ class ZStack:
             (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
             for anchor_id, anchor_roi in anchor_by_z[z]
         ]
+        print(tasks)
 
         def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
             if pair_pts1 is None or pair_pts2 is None:
