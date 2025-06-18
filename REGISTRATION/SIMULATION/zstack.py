@@ -697,7 +697,8 @@ class ZStack:
                     for k, keep in enumerate(mask):
                         if keep:
                             point_projected = True # Projection occurred
-                            plane.plane_points[len(plane.plane_points)] = self.construct_planepoint(ids[k], projected_pts[k])
+                            original_z = candidate_pts[k][1][2] # Index into the kth candidate pts position ([1]), and extract z coordinate ([2])
+                            plane.plane_points[len(plane.plane_points)] = self.construct_planepoint(ids[k], projected_pts[k], idx_z = original_z)
                     if point_projected:
                         plane.angles_and_magnitudes() # Update circular list
 
@@ -860,9 +861,12 @@ class ZStack:
 
                 info["traits"] = traits 
 
-    def construct_planepoint(self, roi_id, position):
+    def construct_planepoint(self, roi_id, position, idx_z = None):
         z = round(position[2], 3)
-        roi_info = self.z_planes.get(z, {}).get(roi_id, {})
+        if not idx_z: # Non-projected plane point z
+            idx_z = z
+        
+        roi_info = self.z_planes.get(idx_z, {}).get(roi_id, {})
         traits = roi_info.get("traits", {}) if roi_info else {}
         return PlanePoint((z, roi_id), position, traits = traits)
 

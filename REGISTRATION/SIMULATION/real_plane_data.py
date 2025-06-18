@@ -36,7 +36,7 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
@@ -58,12 +58,12 @@ match_plane_params = {
                 "max_value" : 0.1
             },
             "magnitude" : {
-                "weight": 0.3,
-                "max_value" : 0.1
+                "weight": 0.1,
+                "max_value" : 0.8
             },
             "avg_radius": {
                 "weight": 0.05,
-                "max_value" : 0.1
+                "max_value" : 1
             },
             "circularity": {
                 "weight": 0.05,
@@ -71,7 +71,7 @@ match_plane_params = {
             },
             "area": {
                 "weight": 0.1,
-                "max_value" : 0.1
+                "max_value" : 5
             }
         }
     }

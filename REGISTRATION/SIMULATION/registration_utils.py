@@ -139,41 +139,67 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
             # Plot Region A
             if not poly_a.is_empty:
                 try:
+                    if not poly_a.is_valid:
+                        poly_a = poly_a.buffer(0)  # Fix minor invalidities
                     if poly_a.geom_type == "Polygon":
                         x, y = poly_a.exterior.xy
-                        ax.fill(x, y, color="blue", alpha=0.15, label="Region A" if i == matches[0][0] else "")
+                        if len(x) >= 3:
+                            ax.fill(x, y, color="blue", alpha=0.15, zorder=1,
+                                    label="Region A" if f"A{i}" not in [t.get_text() for t in ax.texts] else "")
+                            ax.plot(x, y, 'b--', linewidth=1, zorder=2)  # Optional outline
                     elif poly_a.geom_type == "MultiPolygon":
                         for subpoly in poly_a.geoms:
+                            if not subpoly.is_valid:
+                                subpoly = subpoly.buffer(0)
                             x, y = subpoly.exterior.xy
-                            ax.fill(x, y, color="blue", alpha=0.15)
-                except:
-                    pass
+                            if len(x) >= 3:
+                                ax.fill(x, y, color="blue", alpha=0.15, zorder=1)
+                                ax.plot(x, y, 'b--', linewidth=1, zorder=2)
+                except Exception as e:
+                    print(f"[Polygon A Error] {e}")
 
             # Plot Region B
             if not poly_b.is_empty:
                 try:
+                    if not poly_b.is_valid:
+                        poly_b = poly_b.buffer(0)
                     if poly_b.geom_type == "Polygon":
                         x, y = poly_b.exterior.xy
-                        ax.fill(x, y, color="green", alpha=0.15, label="Region B" if i == matches[0][0] else "")
+                        if len(x) >= 3:
+                            ax.fill(x, y, color="green", alpha=0.15, zorder=1,
+                                    label="Region B" if f"B{j}" not in [t.get_text() for t in ax.texts] else "")
+                            ax.plot(x, y, 'g--', linewidth=1, zorder=2)
                     elif poly_b.geom_type == "MultiPolygon":
                         for subpoly in poly_b.geoms:
+                            if not subpoly.is_valid:
+                                subpoly = subpoly.buffer(0)
                             x, y = subpoly.exterior.xy
-                            ax.fill(x, y, color="green", alpha=0.15)
-                except:
-                    pass
+                            if len(x) >= 3:
+                                ax.fill(x, y, color="green", alpha=0.15, zorder=1)
+                                ax.plot(x, y, 'g--', linewidth=1, zorder=2)
+                except Exception as e:
+                    print(f"[Polygon B Error] {e}")
 
             # Plot Intersection
             if not inter.is_empty:
                 try:
+                    if not inter.is_valid:
+                        inter = inter.buffer(0)
                     if inter.geom_type == "Polygon":
                         x, y = inter.exterior.xy
-                        ax.fill(x, y, color="purple", alpha=0.3, label="Intersection" if i == matches[0][0] else "")
+                        if len(x) >= 3:
+                            ax.fill(x, y, color="purple", alpha=0.3, zorder=3,
+                                    label="Intersection" if "Intersection" not in [t.get_text() for t in ax.texts] else "")
                     elif inter.geom_type == "MultiPolygon":
                         for subpoly in inter.geoms:
+                            if not subpoly.is_valid:
+                                subpoly = subpoly.buffer(0)
                             x, y = subpoly.exterior.xy
-                            ax.fill(x, y, color="purple", alpha=0.3)
-                except:
-                    pass
+                            if len(x) >= 3:
+                                ax.fill(x, y, color="purple", alpha=0.3, zorder=3)
+                except Exception as e:
+                    print(f"[Intersection Error] {e}")
+
 
     uoi = sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
 
@@ -299,7 +325,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         else:
             rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
-        # TEST FILTERING TODO
+        # Filtering for angled planes
         filter_params = params["filter_params"]
         if not filter_params["disable_filtering"]:
             print(f"Filtering B Regions")

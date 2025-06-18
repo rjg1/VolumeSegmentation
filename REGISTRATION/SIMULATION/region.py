@@ -63,12 +63,15 @@ class Region:
         self.avg_radius = None
         self.original_index = original_index
         if points is not None and len(points) > 0:
-            self.points = points
+            # Attempt to order points using convexhull
+            self.points = [(x,y,z) for x,y,z in order_points_convex_hull(points)]
             # Update max and min points
             for point in points:
                 self.check_point_values(point)
         else:
             self.points = []
+
+
 
         # Pre-calc area if applicable
         if precalc_area:
@@ -244,14 +247,29 @@ class ClusterRegion(Region):
             self.add_point(point)
 
 # TESTING
-
 def order_points_convex_hull(points):
-    hull = ConvexHull(points)
-    ordered_points = points[hull.vertices]
-    if not np.array_equal(ordered_points[0], ordered_points[-1]):
-        # If not, append the first point to the end
-        ordered_points = np.vstack([ordered_points, ordered_points[0]])
-    return ordered_points
+    if len(points) < 3:
+        return points  # Can't form a polygon
+
+    try:
+        points = np.array(points)  # Ensure NumPy for indexing
+        points_2d = points[:, :2]  # Take x and y
+        zs = points[:, 2]          # Save z separately
+
+        hull = ConvexHull(points_2d)
+        ordered_xy = points_2d[hull.vertices]
+        ordered_z = zs[hull.vertices]
+
+        ordered = np.column_stack((ordered_xy, ordered_z))
+
+        # Ensure closed polygon
+        if not np.array_equal(ordered[0], ordered[-1]):
+            ordered = np.vstack([ordered, ordered[0]])
+
+        return ordered
+    except Exception as e:
+        print(f"[ConvexHull ordering failed]: {e}")
+        return points
 
 def create_polygon_from_points(points):
     if len(points >= 4):
