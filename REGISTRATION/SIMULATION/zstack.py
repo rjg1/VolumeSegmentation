@@ -448,7 +448,6 @@ class ZStack:
             read_path = params["read_filename"]
             if os.path.exists(read_path):
                 try:
-                    print(f"[INFO] Attempting to load planes from: {read_path}")
                     return self.read_planes_from_csv(read_path)
                 except Exception as e:
                     print(f"[WARN] Failed to parse plane file '{read_path}': {e}")
@@ -868,7 +867,7 @@ class ZStack:
         
         roi_info = self.z_planes.get(idx_z, {}).get(roi_id, {})
         traits = roi_info.get("traits", {}) if roi_info else {}
-        return PlanePoint((z, roi_id), position, traits = traits)
+        return PlanePoint((idx_z, roi_id), position, traits = traits)
 
 
     # Remakes planes saved from a previous csv

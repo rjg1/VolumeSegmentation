@@ -78,8 +78,8 @@ match_plane_params = {
 
 plane_list_params = {
     "min_score" : 0.5,
-    "max_matches" : 4, # max matches to scale score between
-    "min_score_modifier" : 0.8, # if matches for a plane = min_matches, score is modified by min score
+    "max_matches" : 2, # max number of alignment point matches - score scaled up with more matches
+    "min_score_modifier" : 1.0, # if num align matches for a plane = min_matches, score is modified by min score
     "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
     "z_guess_a": -1, #114, # guess at the z-level where the plane match is located in plane list a -> -1 means no guess -> used for optimization in time here for a pre-generated plane list
     "z_guess_b": -1, # guess at the z-level where the plane match is located in plane list k b -> -1 means no guess
@@ -110,6 +110,7 @@ match_params = {
         "max_eccentricity": 0.69,
         "preserve_anchor": True
     },
+    "match_planes_only": True # Do not perform UoI comparison and only return the coarse match results
 }
 
 # Test plane generation for z-stack data
@@ -146,11 +147,6 @@ def main():
         selected_idx = 1248
         selected_plane = z_stack.planes[selected_idx]
 
-        # Debug plane viewing:
-        for idx, point in selected_plane.plane_points.items():
-            print(f"Plane point idx: {idx}, OG idx: {point.id}, Position: {point.position}")
-
-        print(f"Plane anchor point position: {selected_plane.anchor_point.position}. Anchor ID: {selected_plane.anchor_point.id}")
         temp_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'], method="volume")
         mean_area = temp_stack._average_roi_area()
         if len(list(temp_stack.z_planes.keys())) > 0:
@@ -170,49 +166,16 @@ def main():
         raise RuntimeError(f"Could not find a suitable plane with average ROI area > {AREA_THRESHOLD} after {MAX_ATTEMPTS} attempts.")
     print("Finished plane selection")
 
-    # Test z-stack filtering
-    # filtered_stack = filter_zstack_by_shape(
-    #     zstack=new_stack,
-    #     min_area=10,
-    #     max_area=1000,
-    #     max_eccentricity=0.95
-    # )
-
-    # filtered_stack = filter_zstack_by_shape(
-    #     zstack=new_stack,
-    #     min_area=35,
-    #     max_area=1000,
-    #     max_eccentricity=0.95
-    # )
-
-    # filtered_stack = filter_zstack_by_shape(
-    #     zstack=new_stack,
-    #     min_area=35,
-    #     max_area=1000,
-    #     max_eccentricity=0.7
-    # )
-
-    # filtered_stack = filter_region_by_shape(
-    #     new_stack,
-    #     selected_plane,
-    #     min_area=40,
-    #     max_area=1000,
-    #     max_eccentricity=0.69,
-    #     preserve_anchor_regions=False
-    # )
-
     # # Debug - view 2d projection of new stack
     # plot_zstack_rois(new_stack)
+    
     # # Debug - view 2d projection of original points
     # plot_projected_regions_with_plane_points(z_stack, selected_plane)
-    
-    
+
     # plot_zstack_rois(filtered_stack)
     # plot_zstack_points(new_stack)
 
-
-    # # Extract data points close to this plane for the new z-stack
-
+    # End debug
 
     # DEBUG STEP
     # Generate planes within this plane
@@ -249,14 +212,89 @@ def main():
     # END DEBUG
     # Attempt to match planes
     match_start = time.perf_counter()
-    uoi_match_data = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
+    result = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
     # Stop the clock
     end = time.perf_counter()
 
-    print(uoi_match_data)
-    print(f"Total time taken: {end - start:.4f} seconds")
-    print(f"Plane generation time taken: {generation_end - generation_start:.4f} seconds")
-    print(f"Match time taken: {end - match_start:.4f} seconds")
+    print(result)
+    # print(f"Total time taken: {end - start:.4f} seconds")
+    # print(f"Plane generation time taken: {generation_end - generation_start:.4f} seconds")
+    # print(f"Match time taken: {end - match_start:.4f} seconds")
+
+    # DEBUG - work out how well coarse step worked
+    if match_params["match_planes_only"]:
+        ratio_list = evaluate_volume_overlap(result, z_stack, new_stack)
+        # Apply binary mask - 1 if perfect vol match else 0
+        filtered_list = [ratio if ratio == 1.0 else 0.0 for ratio in ratio_list]
+
+        # Determine ratio of correct to incorrect matches
+        num_ones = filtered_list.count(1.0)
+        num_zeros = filtered_list.count(0.0)
+        ratio_correct_matches = num_ones / len(filtered_list) if num_zeros != 0 else 1.0
+        print(f"{ratio_correct_matches * 100}% correct match rate in coarse plane matching in simulation ({num_ones}/{len(filtered_list)})")
+
+        # Visualise the distribution of error per trait
+        plot_trait_mse_by_match(result, filtered_list)
+    
+
+def plot_trait_mse_by_match(results_dict, filtered_list, exclude_traits=("angle", "magnitude")):
+    """
+    Plot trait MSEs across plane matches using results dictionary and correctness list.
+
+    Args:
+        results_dict (dict): dictionary where each value contains a "result" key with "trait_values".
+        filtered_list (list): list of 1.0 or 0.0 indicating correct (1.0) or incorrect (0.0) match.
+        exclude_traits (tuple): traits to exclude from the plot (default: angle, magnitude).
+    """
+    if not results_dict or not filtered_list:
+        print("[WARN] Empty results or correctness list.")
+        return
+
+    # Extract ordered list of trait dictionaries from the results
+    trait_mse_data = [v["result"]["trait_values"] for v in results_dict.values()]
+    all_traits = [k for k in trait_mse_data[0].keys() if k not in exclude_traits]
+
+    for trait in all_traits:
+        correct_vals = [entry[trait] for entry, correct in zip(trait_mse_data, filtered_list) if correct == 1.0]
+        incorrect_vals = [entry[trait] for entry, correct in zip(trait_mse_data, filtered_list) if correct == 0.0]
+
+        plt.figure()
+        plt.boxplot([correct_vals, incorrect_vals], labels=["Correct", "Incorrect"])
+        plt.title(f"MSE Distribution for Trait: '{trait}'")
+        plt.ylabel("MSE")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+
+
+def evaluate_volume_overlap(matched_planes, zstack_a, zstack_b):
+    """
+    For each matched plane, compute the percentage of matched (z, roi_id) pairs
+    whose volume ids match in zstack_a and zstack_b.
+    """
+    ratio_list = []
+    for score, match_data in matched_planes.items():
+        og_matches = match_data["result"].get("og_matches", [])
+        if not og_matches:
+            match_data["result"]["volume_match_ratio"] = 0.0
+            continue
+
+        match_count = 0
+        total = 0
+
+        for (z_a, id_a), (z_b, id_b) in og_matches:
+            vol_a = zstack_a.z_planes.get(z_a, {}).get(id_a, {}).get("volume")
+            vol_b = zstack_b.z_planes.get(z_b, {}).get(id_b, {}).get("volume")
+            if vol_a is not None and vol_b is not None:
+                total += 1
+                if vol_a == vol_b:
+                    match_count += 1
+
+        ratio_list.append((match_count / total) if total > 0 else 0.0)
+    
+    return ratio_list
+
 
 def plot_zstack_rois(zstack, title="ZStack ROI Areas"):
     zstack._build_xy_rois()  # Ensure ROI data is built

@@ -82,7 +82,7 @@ DEFAULT_2D_MATCH_PARAMS = {
         "min_samples" : 5
     },
     "filter_params": {
-        "disable_filtering": False,
+        "disable_filtering": True,
         "min_area": 40,
         "max_area": 1000,
         "max_eccentricity": 0.69,
@@ -91,7 +91,8 @@ DEFAULT_2D_MATCH_PARAMS = {
     "min_uoi" : 0.5, # min uoi for a match between planes + transformations
     "plot_uoi" : False, # plot the matched rois and their intersection
     "plot_match" : False, # plot the matched rois only
-    "use_gpu" : False
+    "use_gpu" : False, # use GPU optimization where possible/implemented
+    "match_planes_only": False # Do not perform UoI comparison and only return the coarse match results - mainly for simulation purposes
 }
 
 # Used for updating a parameter dict to overwrite a subset of defaults

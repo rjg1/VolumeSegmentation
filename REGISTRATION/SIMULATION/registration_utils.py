@@ -231,15 +231,18 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         planes_b = zstack_b.generate_planes(plane_gen_params)
 
     # Perform the grid-search matching between generated planes
-    print(f"[DEBUG] Generated {len(planes_a)} planes in A")
-    print(f"[DEBUG] Generated {len(planes_b)} planes in B")
+    print(f"[DEBUG] Generated/loaded {len(planes_a)} planes in A")
+    print(f"[DEBUG] Generated/loaded {len(planes_b)} planes in B")
     print(f"Beginning Matching")
     matched_planes = Plane.match_plane_lists(planes_a, planes_b, plane_list_params=params["plane_list_params"], match_plane_params=params["match_plane_params"])
 
     if len(matched_planes) > 0:
         print(f"Best plane match score: {list(matched_planes.keys())[0]}")
 
-    # Stores full records including planes
+    if params["match_planes_only"]:
+        return matched_planes
+
+    # Determine required 2D transformations per plane match
     unique_transformations = []
 
     for plane_match in tqdm(matched_planes.values(), desc="Calculating 2D transforms"):
@@ -247,7 +250,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         plane_b = plane_match["plane_b"]
         match_data = plane_match["result"]
 
-        proj_a, proj_b_aligned, transform_info = plane_a.get_aligned_2d_projection(
+        _, _, transform_info = plane_a.get_aligned_2d_projection(
             plane_b,
             offset_deg=match_data["offset"],
             scale_factor=match_data["scale_factor"]
@@ -268,8 +271,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         # Determine whether either plane is flat
         flat_plane_a = np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=1e-6)
         flat_plane_b = np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=1e-6)
-        # print(f"Plane A normal: {plane_a.normal}")
-        # print(f"Plane B normal: {plane_b.normal}")
+        
         translation_2d = (tx, ty)
 
         # Get dicts of {idx : [x,y,z]}
@@ -279,11 +281,11 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         if flat_plane_a:
             rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
-            rois_a_2d, pid_mapping_a = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_a_2d, pid_mapping_a, _ = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         if flat_plane_b:
             rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
-            rois_b_2d, pid_mapping_b = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_b_2d, pid_mapping_b, _ = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
         # Filtering for angled planes
         filter_params = params["filter_params"]
@@ -436,7 +438,7 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     if params["plot_match"]:
         plot_uoi_match_data(sorted_data, zstack_a, zstack_b)
     
-    return sorted_data
+    return sorted_data, matched_planes
 
 # Test
 from matplotlib.patches import Polygon as MplPolygon
@@ -497,12 +499,12 @@ def plot_uoi_match_data(sorted_data, zstack_a, zstack_b, threshold=0.5, seg_para
         if flat_plane_a:
             rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
-            rois_a_2d, _ = project_angled_plane_points(zstack_a, plane_a, threshold=threshold, **seg_params)
+            rois_a_2d, _, _ = project_angled_plane_points(zstack_a, plane_a, threshold=threshold, **seg_params)
 
         if flat_plane_b:
             rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
-            rois_b_2d, _ = project_angled_plane_points(zstack_b, plane_b, threshold=threshold, **seg_params)
+            rois_b_2d, _, _ = project_angled_plane_points(zstack_b, plane_b, threshold=threshold, **seg_params)
 
         # Project each 3D ROI onto plane A’s 2D space
         rois_a_2d_proj = {
@@ -597,7 +599,7 @@ def project_angled_plane_points(
                     volume_ids.append(vol_id)
 
     if not projected_pts_2d:
-        return {}, {}
+        return {}, {}, {}
 
     projected_pts_2d = np.array(projected_pts_2d)
 
@@ -613,6 +615,7 @@ def project_angled_plane_points(
             for pt in angled_plane.plane_points.values()
         }
         output_regions = {}
+        output_volumes = {}
         pid_mapping = {}
         # Iterate through all ROI clusters (clustered by volume id)
         for vol_id, points in clusters.items():
@@ -638,19 +641,23 @@ def project_angled_plane_points(
                     if cluster_polygon.contains(point):
                         anchors_inside.append(pid)
 
-            if len(anchors_inside) >= 1: # A single anchor/alignment point is inside this ROI - the output region gets the ROI id of that point
+            if len(anchors_inside) == 1: # A single anchor/alignment point is inside this ROI - the output region gets the ROI id of that point
                 pid = anchors_inside[0]
                 output_regions[pid] = [pt3d for _, pt3d in points]
+                output_volumes[pid] = vol_id
             elif len(anchors_inside) > 1:
                 # Pick first as master, map rest to it
                 master_pid = anchors_inside[0]
                 output_regions[master_pid] = [pt3d for _, pt3d in points]
+                output_volumes[master_pid] = vol_id
                 for other_pid in anchors_inside[1:]:
                     pid_mapping[other_pid] = master_pid
             else: # No anchor/alignment points inside
-                output_regions[(-1, vol_id)] = [pt3d for pt2d, pt3d in points]
+                region_id = (-1, vol_id)
+                output_regions[region_id] = [pt3d for pt2d, pt3d in points]
+                output_volumes[region_id] = vol_id
 
-        return output_regions, pid_mapping
+        return output_regions, pid_mapping, output_volumes
     elif method == "volume": # Default to split method if volume labels not in z-stack
         method = "split"
 
@@ -746,7 +753,7 @@ def project_angled_plane_points(
                 for pid in anchors_inside:
                     pid_mapping[pid] = master_pid
 
-    return output_regions, pid_mapping
+    return output_regions, pid_mapping, {}
 
 # TEST DEBUG
 import matplotlib.pyplot as plt
@@ -862,7 +869,7 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
         return new_stack
 
     # Angled plane: project + cluster
-    output_regions, _ = project_angled_plane_points(
+    output_regions, _, output_volumes = project_angled_plane_points(
         z_stack, plane, threshold=threshold, method=method, eps=eps, min_samples=min_samples
     ) 
 
@@ -879,6 +886,7 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
             continue
 
         new_z_planes[z_fixed][roi_id]["coords"] = coords_2d
+        new_z_planes[z_fixed][roi_id]["volume"] = output_volumes[(z, roi_id)]
 
         # Just assign a random intensity -- TODO could be improved later
         new_z_planes[z_fixed][roi_id]["intensity"] =  random.uniform(0.8, 1)
@@ -893,6 +901,7 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
         coords_2d = [plane._project_point_2d(np.array([x, y, z])) for (x, y, z) in points]
         new_z_planes[z_fixed][new_id]["coords"] = coords_2d
         new_z_planes[z_fixed][new_id]["intensity"] =  random.uniform(0.8, 1)
+        new_z_planes[z_fixed][new_id]["volume"] = output_volumes[(z, roi_id)]
         new_id += 1
 
     # Apply fixed 2d offset to all points (fixes margin roi exclusion errors in plane generation)
@@ -918,7 +927,6 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
 
     print("[INFO] Successfully extracted plane from z-stack")
     return new_stack
-
 
 def filter_region_by_shape(
     data,
@@ -1114,7 +1122,7 @@ def plot_projected_regions_with_plane_points(z_stack, plane, threshold=0.5, meth
     """
     from matplotlib.colors import to_rgba
     if datatype == "angled":
-        output_regions, pid_mapping = project_angled_plane_points(
+        output_regions, pid_mapping, _ = project_angled_plane_points(
             z_stack,
             angled_plane=plane,
             threshold=threshold,
