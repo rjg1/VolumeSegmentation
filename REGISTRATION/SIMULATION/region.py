@@ -256,7 +256,7 @@ def order_points_convex_hull(points):
         points_2d = points[:, :2]  # Take x and y
         zs = points[:, 2]          # Save z separately
 
-        hull = ConvexHull(points_2d)
+        hull = ConvexHull(points_2d, qhull_options='QJ')
         ordered_xy = points_2d[hull.vertices]
         ordered_z = zs[hull.vertices]
 
@@ -268,7 +268,7 @@ def order_points_convex_hull(points):
 
         return ordered
     except Exception as e:
-        print(f"[ConvexHull ordering failed]: {e}")
+        print(f"[REGION - order_points_convex_hull][ConvexHull ordering failed]: {e}")
         return points
 
 def create_polygon_from_points(points):

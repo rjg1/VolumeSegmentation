@@ -734,8 +734,8 @@ class ZStack:
                 print("Executor shut down.")
 
         # More deterministic ordering for simulations
-        for plane in self.planes:
-            print(plane.anchor_point.id)
+        # for plane in self.planes:
+        #     print(plane.anchor_point.id)
         # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
         self.planes.sort(key=lambda p: (p.anchor_point.id[1], p.normal[0], p.normal[1], p.normal[2]))
 
@@ -894,7 +894,7 @@ class ZStack:
             # Extract anchor row
             anchor_row = group[group["type"] == "anchor"].iloc[0]
             anchor_traits = {
-                tr: anchor_row[f"tr_{tr}"]
+                tr: float(anchor_row[f"tr_{tr}"])
                 for tr in trait_names
                 if not pd.isna(anchor_row[f"tr_{tr}"])
             }
@@ -905,7 +905,7 @@ class ZStack:
             alignment_rows = group[group["type"] == "alignment"]
             for _, row in alignment_rows.iterrows():
                 traits = {
-                    tr: row[f"tr_{tr}"]
+                    tr: float(row[f"tr_{tr}"])
                     for tr in trait_names
                     if not pd.isna(row[f"tr_{tr}"])
                 }

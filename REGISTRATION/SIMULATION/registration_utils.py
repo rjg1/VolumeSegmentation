@@ -17,6 +17,7 @@ from shapely.errors import TopologicalError
 from scipy.spatial import ConvexHull
 import random
 from skimage.measure import EllipseModel
+from tqdm import tqdm
 
 def safe_polygon(region):
     pts = region.get_boundary_points()
@@ -81,12 +82,6 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
 
             new_matches.append((i, j))
 
-    # Init plot
-    if plot:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_title("Matched ROIs with UoI Shading")
-        ax.set_aspect('equal')
-
     uoi_scores = []
 
     # Loop over all matches (original and new)
@@ -126,89 +121,79 @@ def compute_avg_uoi(regions_a, regions_b, matches, min_uoi = 0, plot=False):
         uoi = inter.area / union.area if union.area > 0 else 0.0
         uoi_scores.append(uoi)
 
-        if plot:
+
+    # Calc the avg uoi across all pair matches
+    avg_uoi = sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
+
+    if plot:
+        plot_uoi_matches(grouped_a, grouped_b, all_matches, min_uoi, avg_uoi)
+
+    return avg_uoi
+
+def plot_uoi_matches(grouped_a, grouped_b, matches, min_uoi, uoi):
+    """
+    Plot matched ROI regions with their union-over-intersection overlays.
+
+    Args:
+        grouped_a (dict): {id: [regions]} for dataset A
+        grouped_b (dict): {id: [regions]} for dataset B
+        matches (list of tuples): [(i, j), ...] match pairs
+        min_uoi (float): minimum UoI threshold to trigger plotting
+        uoi (float): current UoI score
+    """
+    if uoi <= min_uoi:
+        return  # Don't plot if below threshold
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.set_title("Matched ROIs with UoI Shading")
+    ax.set_aspect('equal')
+
+    for i, j in matches:
+        if i not in grouped_a or j not in grouped_b:
+            continue
+
+        polygons_a = [safe_polygon(region) for region in grouped_a[i]]
+        polygons_b = [safe_polygon(region) for region in grouped_b[j]]
+        polygons_a = [p for p in polygons_a if p is not None]
+        polygons_b = [p for p in polygons_b if p is not None]
+        if not polygons_a or not polygons_b:
+            continue
+
+        poly_a = unary_union(polygons_a)
+        poly_b = unary_union(polygons_b)
+        inter = poly_a.intersection(poly_b)
+
+        try:
             centroid_a = np.array(poly_a.centroid.xy).flatten()
             centroid_b = np.array(poly_b.centroid.xy).flatten()
-
             ax.scatter(*centroid_a, color="blue", marker="o", s=25)
             ax.scatter(*centroid_b, color="green", marker="x", s=25)
-
             ax.text(centroid_a[0]+0.1, centroid_a[1]+0.1, f"A{i}", color="blue", fontsize=8)
             ax.text(centroid_b[0]+0.1, centroid_b[1]+0.1, f"B{j}", color="green", fontsize=8)
 
-            # Plot Region A
-            if not poly_a.is_empty:
-                try:
-                    if not poly_a.is_valid:
-                        poly_a = poly_a.buffer(0)  # Fix minor invalidities
-                    if poly_a.geom_type == "Polygon":
-                        x, y = poly_a.exterior.xy
+            for poly, color, label in [(poly_a, "blue", f"A{i}"), (poly_b, "green", f"B{j}"), (inter, "purple", "Intersection")]:
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if poly.geom_type == "Polygon":
+                    x, y = poly.exterior.xy
+                    if len(x) >= 3:
+                        ax.fill(x, y, color=color, alpha=0.15 if color != "purple" else 0.3, zorder=1)
+                        ax.plot(x, y, color[0] + "--", linewidth=1, zorder=2)
+                elif poly.geom_type == "MultiPolygon":
+                    for subpoly in poly.geoms:
+                        if not subpoly.is_valid:
+                            subpoly = subpoly.buffer(0)
+                        x, y = subpoly.exterior.xy
                         if len(x) >= 3:
-                            ax.fill(x, y, color="blue", alpha=0.15, zorder=1,
-                                    label="Region A" if f"A{i}" not in [t.get_text() for t in ax.texts] else "")
-                            ax.plot(x, y, 'b--', linewidth=1, zorder=2)  # Optional outline
-                    elif poly_a.geom_type == "MultiPolygon":
-                        for subpoly in poly_a.geoms:
-                            if not subpoly.is_valid:
-                                subpoly = subpoly.buffer(0)
-                            x, y = subpoly.exterior.xy
-                            if len(x) >= 3:
-                                ax.fill(x, y, color="blue", alpha=0.15, zorder=1)
-                                ax.plot(x, y, 'b--', linewidth=1, zorder=2)
-                except Exception as e:
-                    print(f"[Polygon A Error] {e}")
+                            ax.fill(x, y, color=color, alpha=0.15 if color != "purple" else 0.3, zorder=1)
+                            ax.plot(x, y, color[0] + "--", linewidth=1, zorder=2)
 
-            # Plot Region B
-            if not poly_b.is_empty:
-                try:
-                    if not poly_b.is_valid:
-                        poly_b = poly_b.buffer(0)
-                    if poly_b.geom_type == "Polygon":
-                        x, y = poly_b.exterior.xy
-                        if len(x) >= 3:
-                            ax.fill(x, y, color="green", alpha=0.15, zorder=1,
-                                    label="Region B" if f"B{j}" not in [t.get_text() for t in ax.texts] else "")
-                            ax.plot(x, y, 'g--', linewidth=1, zorder=2)
-                    elif poly_b.geom_type == "MultiPolygon":
-                        for subpoly in poly_b.geoms:
-                            if not subpoly.is_valid:
-                                subpoly = subpoly.buffer(0)
-                            x, y = subpoly.exterior.xy
-                            if len(x) >= 3:
-                                ax.fill(x, y, color="green", alpha=0.15, zorder=1)
-                                ax.plot(x, y, 'g--', linewidth=1, zorder=2)
-                except Exception as e:
-                    print(f"[Polygon B Error] {e}")
+        except Exception as e:
+            print(f"[Plot Error for pair ({i}, {j})]: {e}")
 
-            # Plot Intersection
-            if not inter.is_empty:
-                try:
-                    if not inter.is_valid:
-                        inter = inter.buffer(0)
-                    if inter.geom_type == "Polygon":
-                        x, y = inter.exterior.xy
-                        if len(x) >= 3:
-                            ax.fill(x, y, color="purple", alpha=0.3, zorder=3,
-                                    label="Intersection" if "Intersection" not in [t.get_text() for t in ax.texts] else "")
-                    elif inter.geom_type == "MultiPolygon":
-                        for subpoly in inter.geoms:
-                            if not subpoly.is_valid:
-                                subpoly = subpoly.buffer(0)
-                            x, y = subpoly.exterior.xy
-                            if len(x) >= 3:
-                                ax.fill(x, y, color="purple", alpha=0.3, zorder=3)
-                except Exception as e:
-                    print(f"[Intersection Error] {e}")
-
-
-    uoi = sum(uoi_scores) / len(uoi_scores) if uoi_scores else 0.0
-
-    if plot and uoi > min_uoi:
-        ax.grid(True)
-        plt.tight_layout()
-        plt.show()
-
-    return uoi
+    ax.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 # Complete pipeline for matching the planes of 2 Z-stack objects
 def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack, 
@@ -254,22 +239,13 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
     if len(matched_planes) > 0:
         print(f"Best plane match score: {list(matched_planes.keys())[0]}")
 
-    # TEST DEBUG
-    print(matched_planes)
-
-    # Stores just (rounded) values for uniqueness checking
-    seen_transformations = set()
-
     # Stores full records including planes
     unique_transformations = []
 
-    # DEBUG
-    seen_transformations_count = {}
-
-    for match in matched_planes.values():
-        plane_a = match["plane_a"]
-        plane_b = match["plane_b"]
-        match_data = match["result"]
+    for plane_match in tqdm(matched_planes.values(), desc="Calculating 2D transforms"):
+        plane_a = plane_match["plane_a"]
+        plane_b = plane_match["plane_b"]
+        match_data = plane_match["result"]
 
         proj_a, proj_b_aligned, transform_info = plane_a.get_aligned_2d_projection(
             plane_b,
@@ -281,35 +257,19 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         scale_2d = transform_info["scale"]
         translation_2d = transform_info["translation"]
 
-        rounded = (
-            round(rotation_2d, 2),
-            round(scale_2d, 2),
-            round(translation_2d[0], 2),
-            round(translation_2d[1], 2),
-        )
-
-        if rounded not in seen_transformations:
-            seen_transformations.add(rounded)
-            unique_transformations.append((rotation_2d, scale_2d, translation_2d[0], translation_2d[1], match_data, plane_a, plane_b))
-            seen_transformations_count[rounded] = 1
-        else:
-            seen_transformations_count[rounded] += 1
-
-    print(f"Unique transformations found (rot, scale, t_x, t_y): {[(rot, scale, tx, ty) for rot, scale, tx, ty, _, _, _ in unique_transformations]}")
-
-    print(seen_transformations_count)
+        unique_transformations.append((rotation_2d, scale_2d, translation_2d[0], translation_2d[1], match_data, plane_a, plane_b))
 
     # Calculate UoIs of all unique 2D transformations
     UoIs = []
     uoi_match_data = [] # list of data relating to plane matches by UoI
 
     # Project and transform points on both planes for each transformation identified
-    for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in unique_transformations:
+    for rotation_2d, scale_2d, tx, ty, match_data, plane_a, plane_b in tqdm(unique_transformations, desc=f"Evaluating transforms"):
         # Determine whether either plane is flat
         flat_plane_a = np.allclose(np.abs(plane_a.normal), [0, 0, 1], atol=1e-6)
         flat_plane_b = np.allclose(np.abs(plane_b.normal), [0, 0, 1], atol=1e-6)
-        print(f"Plane A normal: {plane_a.normal}")
-        print(f"Plane B normal: {plane_b.normal}")
+        # print(f"Plane A normal: {plane_a.normal}")
+        # print(f"Plane B normal: {plane_b.normal}")
         translation_2d = (tx, ty)
 
         # Get dicts of {idx : [x,y,z]}
@@ -831,7 +791,7 @@ def plot_regions_and_alignment_points(
             ax.scatter(centroid[0], centroid[1], color='black', s=10)
 
         except Exception as e:
-            # print(f"Warning: Could not form polygon for region {pid}: {e}")
+            print(f"[plot_regions_and_alignment_points] Warning: Could not form polygon for region {pid}: {e}")
             continue
 
     # Now project alignment points and plot
@@ -886,7 +846,7 @@ def extract_zstack_plane(z_stack, plane, threshold=0.5, eps=5.0, min_samples=5, 
     
     if is_flat: # Simply copy points from the original z-dict
         z = plane.anchor_point.position[2]
-        print(f"Anchor point z: {z}")
+        # print(f"Anchor point z: {z}")
         for roi_id, roi_data in z_stack.z_planes[z].items():
             coords = roi_data["coords"]
             for (x, y) in coords:

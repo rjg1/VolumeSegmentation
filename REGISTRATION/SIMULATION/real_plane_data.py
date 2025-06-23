@@ -36,7 +36,7 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
@@ -97,7 +97,7 @@ match_params = {
     "plot_uoi" : True,
     "plot_match" : True,
     "use_gpu" : True,
-    "min_uoi": 0,
+    "min_uoi": 0.9,
     "seg_params": {
         "method" : "volume",
         "eps": 1.5,
@@ -222,17 +222,17 @@ def main():
     plane_gen_params['anchor_intensity_threshold'] = 0      # Any point can be an anchor point
     plane_gen_params['regenerate_planes'] = True            # Always regenerate b-planes
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
-    # DEBUG - extract all non-tested planes
-    if len(planes_b) > 0:
-        planes_b = [planes_b[0]] # Extract first plane of planes_b
-        new_stack.planes = planes_b
-    else:
-        print(f"No b planes generated... check that out maybe")
-        return
+    # # DEBUG - extract all non-tested planes
+    # if len(planes_b) > 0:
+    #     planes_b = [planes_b[0]] # Extract first plane of planes_b
+    #     new_stack.planes = planes_b
+    # else:
+    #     print(f"No b planes generated... check that out maybe")
+    #     return
     
-    planes_a = [z_stack.planes[1248]]
-    z_stack.planes = planes_a
-    # DEBUG
+    # planes_a = [z_stack.planes[1248]]
+    # z_stack.planes = planes_a
+    # # DEBUG
     # Restore params for other plane gen step
     plane_gen_params['align_intensity_threshold'] = 0.4
     plane_gen_params['anchor_intensity_threshold'] = 0.5
