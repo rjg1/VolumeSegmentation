@@ -17,11 +17,13 @@ STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 # STACK_IN_FILE = "drg_complete_2s_algo_VOLUMES.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split('.csv')[0] + "_planes.csv"
 USE_FLAT_PLANE = False
-FILTER_PLANES = True # Only assess a specific A plane
 PLOT_PLANE_COMPARISON = True
 AREA_THRESHOLD = 50
 MIN_ROI_NUMBER = 8
 MAX_ATTEMPTS = 50   
+
+# Comparison sim
+TRAIT_FOLDER = "trait_data"
 
 
 plane_gen_params = {
@@ -50,9 +52,8 @@ match_plane_params = {
         "bin_match_params" : {
             "min_matches" : 2,
             "fixed_scale" : 1, # Using same scale at the moment
-            "outlier_thresh" : 2, #10, # 2
-            "mse_threshold": 1, # 0.3
-            "angle_tolerance" : 5 #5, # 2
+            "outlier_thresh" : 2,
+            "mse_threshold": 0.3,
         },
         "traits": {
             "angle" : {
@@ -97,7 +98,7 @@ match_params = {
     "planes_a_write_file" : PLANE_OUT_FILE,
     "planes_b_write_file" : None,
     "plot_uoi" : True,
-    "plot_match" : False,
+    "plot_match" : True,
     "use_gpu" : True,
     "min_uoi": 0.9,
     "seg_params": {
@@ -112,8 +113,7 @@ match_params = {
         "max_eccentricity": 0.69,
         "preserve_anchor": True
     },
-    "rematch_angled_planes": True, # re-run 2d matching on new centroids of angled planes after projection (before uoi calculation)
-    "match_planes_only": False # Do not perform UoI comparison and only return the coarse match results
+    "match_planes_only": True # Do not perform UoI comparison and only return the coarse match results
 }
 
 # Test plane generation for z-stack data
@@ -145,16 +145,11 @@ def main():
     if not plane_ids:
         raise ValueError("No suitable planes found in the z-stack.")
     
+    selected_idx = None
+
     while attempt < MAX_ATTEMPTS:
-        tested_idxs = [1248, 2086, 1542, 1033, 620]
-        # selected_idx = 1248
-        selected_idx = 2086
-        # selected_idx = 620
-        # selected_idx = tested_idxs[0]
-        # while selected_idx in tested_idxs:
-        #     selected_idx = random.choice(plane_ids)
-
-
+        # selected_idx = random.choice(plane_ids)
+        selected_idx = 1248
         selected_plane = z_stack.planes[selected_idx]
 
         temp_stack = extract_zstack_plane(z_stack, selected_plane, threshold=plane_gen_params['projection_dist_thresh'], method="volume")
@@ -176,10 +171,10 @@ def main():
         raise RuntimeError(f"Could not find a suitable plane with average ROI area > {AREA_THRESHOLD} after {MAX_ATTEMPTS} attempts.")
     print("Finished plane selection")
 
-    # # # Debug - view 2d projection of new stack
+    # # Debug - view 2d projection of new stack
     # plot_zstack_rois(new_stack)
     
-    # # # Debug - view 2d projection of original points
+    # # Debug - view 2d projection of original points
     # plot_projected_regions_with_plane_points(z_stack, selected_plane)
 
     # plot_zstack_rois(filtered_stack)
@@ -195,18 +190,17 @@ def main():
     plane_gen_params['anchor_intensity_threshold'] = 0      # Any point can be an anchor point
     plane_gen_params['regenerate_planes'] = True            # Always regenerate b-planes
     planes_b = new_stack.generate_planes_gpu(plane_gen_params)
-
-    # DEBUG - extract all non-tested planes
+    # # DEBUG - extract all non-tested planes
     # if len(planes_b) > 0:
     #     planes_b = [planes_b[0]] # Extract first plane of planes_b
     #     new_stack.planes = planes_b
     # else:
     #     print(f"No b planes generated... check that out maybe")
     #     return
-    if FILTER_PLANES:
-        planes_a = [z_stack.planes[selected_idx]]
-        z_stack.planes = planes_a
-    # DEBUG
+    
+    # planes_a = [z_stack.planes[1248]]
+    # z_stack.planes = planes_a
+    # # DEBUG
     # Restore params for other plane gen step
     plane_gen_params['align_intensity_threshold'] = 0.4
     plane_gen_params['anchor_intensity_threshold'] = 0.5
@@ -228,9 +222,24 @@ def main():
     end = time.perf_counter()
 
     print(result)
-    print(f"Total time taken: {end - start:.4f} seconds")
-    print(f"Plane generation time taken: {generation_end - generation_start:.4f} seconds")
-    print(f"Match time taken: {end - match_start:.4f} seconds")
+    # DEBUG - work out how well coarse step worked
+    if match_params["match_planes_only"]:
+        ratio_list = evaluate_volume_overlap(result, z_stack, new_stack)
+        # Apply binary mask - 1 if perfect vol match else 0
+        filtered_list = [ratio if ratio == 1.0 else 0.0 for ratio in ratio_list]
+
+        # Determine ratio of correct to incorrect matches
+        num_ones = filtered_list.count(1.0)
+        num_zeros = filtered_list.count(0.0)
+        ratio_correct_matches = num_ones / len(filtered_list) if num_zeros != 0 else 1.0
+        print(f"{ratio_correct_matches * 100}% correct match rate in coarse plane matching in simulation ({num_ones}/{len(filtered_list)})")
+
+        # Visualise the distribution of error per trait
+        plot_trait_mse_by_match(result, filtered_list)
+
+        # Export to data folder
+        trait_path = f"./{TRAIT_FOLDER}/{selected_idx}-a.csv" if not USE_FLAT_PLANE else f"./{TRAIT_FOLDER}/{selected_idx}-f.csv"
+        export_trait_mse_to_csv(result, filtered_list, output_path=trait_path)
 
     
 
@@ -617,7 +626,7 @@ def plot_projected_regions_with_plane_points(z_stack, plane, threshold=0.5, meth
     """
     from matplotlib.colors import to_rgba
     if datatype == "angled":
-        output_regions, pid_mapping, _ = project_angled_plane_points(
+        output_regions, pid_mapping = project_angled_plane_points(
             z_stack,
             angled_plane=plane,
             threshold=threshold,

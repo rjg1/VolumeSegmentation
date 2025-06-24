@@ -18,6 +18,7 @@ from scipy.spatial import ConvexHull
 import random
 from skimage.measure import EllipseModel
 from tqdm import tqdm
+from planepoint import PlanePoint
 
 def safe_polygon(region):
     pts = region.get_boundary_points()
@@ -279,20 +280,20 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
         pid_mapping_b = {}
 
         if flat_plane_a:
-            rois_a_2d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
+            rois_a_3d = project_flat_plane_points(zstack_a, plane_a.anchor_point)
         else:
-            rois_a_2d, pid_mapping_a, _ = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_a_3d, pid_mapping_a, _ = project_angled_plane_points(zstack_a, plane_a, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         if flat_plane_b:
-            rois_b_2d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
+            rois_b_3d = project_flat_plane_points(zstack_b, plane_b.anchor_point)
         else:
-            rois_b_2d, pid_mapping_b, _ = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
+            rois_b_3d, pid_mapping_b, _ = project_angled_plane_points(zstack_b, plane_b, threshold=params["plane_gen_params"]["projection_dist_thresh"], **params["seg_params"])
         
         # Filtering for angled planes
         filter_params = params["filter_params"]
         if not filter_params["disable_filtering"]:
             print(f"Filtering B Regions")
-            rois_b_2d = filter_region_by_shape(
-                rois_b_2d,
+            rois_b_3d = filter_region_by_shape(
+                rois_b_3d,
                 plane_b,
                 min_area=filter_params["min_area"],
                 max_area=filter_params["max_area"],
@@ -300,8 +301,8 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
                 preserve_anchor_regions=filter_params["preserve_anchor"]
             )
             print(f"Filtering A Regions")
-            rois_a_2d = filter_region_by_shape(
-                    rois_a_2d,
+            rois_a_3d = filter_region_by_shape(
+                    rois_a_3d,
                     plane_a,
                     min_area=filter_params["min_area"],
                     max_area=filter_params["max_area"],
@@ -318,14 +319,77 @@ def match_zstacks_2d(zstack_a : ZStack, zstack_b : ZStack,
 
         rois_a_2d_proj = {}
         rois_b_2d_proj = {}
+
+        # Prepare for angled plane refinement step
+        plane_a_refined = plane_a
+        plane_b_refined = plane_b
+
+        # DEBUG attempt to correct angled 2d mismatch
+        if not (flat_plane_a and flat_plane_b) and params["rematch_angled_planes"]:
+            # print("Recalculating 2D Plane match for angled plane")
+            # Angled plane (realistically only plane a) was used - recalculate more precise 2d transformations
+            def compute_centroids(rois_dict):
+                return {pid: (np.min(pts, axis=0) + np.max(pts, axis=0)) / 2.0 for pid, pts in rois_dict.items()}
+            
+            def make_plane(centroid_dict, zstack, original_plane, label="A"):
+                if len(centroid_dict) < 3: # Must have at least 3 points to make a new plane
+                    return original_plane
+                anchor_id = original_plane.anchor_point.id
+                if anchor_id not in centroid_dict: # anchor not projected 
+                    anchor_id = next(iter(centroid_dict)) # pick any roi in centroid_dict as the new anchor
+
+                anchor_z, _ = anchor_id
+
+                anchor_pos = centroid_dict[anchor_id]
+                anchor_point = zstack.construct_planepoint(anchor_id, anchor_pos, idx_z = anchor_z)
+
+                align_pts = []
+                for pid, centroid_3d in centroid_dict.items():
+                    if pid == anchor_id:
+                        continue
+                    try:
+                        z, _ = pid # TODO traits go missing here if segmented by volume label - alignment pts dont help this step
+                        pp = zstack.construct_planepoint(pid, centroid_3d, idx_z = z)
+                        align_pts.append(pp)
+                    except Exception as e:
+                        print(f"[{label}] Warning for PID {pid}: {e}")
+
+                return Plane(anchor_point, align_pts, max_alignments=params["plane_gen_params"]["max_alignments"], fixed_basis=params["plane_gen_params"]["fixed_basis"])
+
+            # Make planes
+            centroids_a = compute_centroids(rois_a_3d)
+            centroids_b = compute_centroids(rois_b_3d)
+            plane_a_refined = make_plane(centroids_a, zstack_a, plane_a, label="A") if not flat_plane_a else plane_a
+            plane_b_refined = make_plane(centroids_b, zstack_b, plane_b, label="B") if not flat_plane_b else plane_b
+
+            # Match planes
+            match_data = plane_a_refined.match_planes(plane_b_refined, 
+                                    match_plane_params=params["match_plane_params"])
+            # print(f"New match data:\n{match_data}")
+            if match_data["match"]:
+                # Get aligned 2d projection
+                _, _, transform_info = plane_a_refined.get_aligned_2d_projection(
+                    plane_b_refined,
+                    offset_deg=match_data["offset"],
+                    scale_factor=match_data["scale_factor"]
+                )
+
+                rotation_2d = transform_info["rotation_deg"]
+                scale_2d = transform_info["scale"]
+                translation_2d = transform_info["translation"]
+                # print(f"[Refinement] Updated alignment")
+            else:
+                print("[Refinement] Plane match failed, falling back to previous transform")
+        # END DEBUG
+
         # Iterate through A rois and project to 2D plane
-        for idx, coords_3d in rois_a_2d.items():
-            rois_a_2d_proj[idx] = np.array([plane_a._project_point_2d(pt) for pt in coords_3d])
+        for idx, coords_3d in rois_a_3d.items():
+            rois_a_2d_proj[idx] = np.array([plane_a_refined._project_point_2d(pt) for pt in coords_3d])
 
         # Iterate through B rois and project to 2D plane and transform
-        for idx, coords_3d in rois_b_2d.items():
+        for idx, coords_3d in rois_b_3d.items():
             rois_b_2d_proj[idx] = np.array(
-                plane_a.project_and_transform_points(coords_3d, plane_b, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
+                plane_a_refined.project_and_transform_points(coords_3d, plane_b_refined, rotation_deg=rotation_2d, scale=scale_2d, translation=translation_2d)
             )
 
         # TEST DEBUG
@@ -527,14 +591,16 @@ def plot_uoi_match_data(sorted_data, zstack_a, zstack_b, threshold=0.5, seg_para
         for pid, points in rois_a_2d_proj.items():
             if len(points) > 0:
                 ax.plot(points[:, 0], points[:, 1], 'o', markersize=2, color='blue')
-                centroid = points.mean(axis=0)
-                ax.text(centroid[0], centroid[1], f"A{pid}", fontsize=8, color='blue')
+                centroid_x = np.min(points[:, 0]) + (np.max(points[:, 0]) - np.min(points[:, 0])) / 2
+                centroid_y = np.min(points[:, 1]) + (np.max(points[:, 1]) - np.min(points[:, 1])) / 2
+                ax.text(centroid_x, centroid_y, f"A{pid}", fontsize=8, color='blue')
 
         for pid, points in rois_b_2d_proj.items():
             if len(points) > 0:
                 ax.plot(points[:, 0], points[:, 1], 'x', markersize=2, color='green')
-                centroid = points.mean(axis=0)
-                ax.text(centroid[0], centroid[1], f"B{pid}", fontsize=8, color='green')
+                centroid_x = np.min(points[:, 0]) + (np.max(points[:, 0]) - np.min(points[:, 0])) / 2
+                centroid_y = np.min(points[:, 1]) + (np.max(points[:, 1]) - np.min(points[:, 1])) / 2
+                ax.text(centroid_x, centroid_y, f"B{pid}", fontsize=8, color='green')
 
         ax.grid(True)
         plt.tight_layout()
@@ -610,6 +676,7 @@ def project_angled_plane_points(
             clusters[vol_id].append((projected_pts_2d[i], original_pts_3d[i]))
 
         # Get all pts (anchor/alignment) on the plane and project them into 2D
+        plane_anchor_id = angled_plane.anchor_point.id
         projected_anchors = {
             pt.id: angled_plane._project_point_2d(pt.position)
             for pt in angled_plane.plane_points.values()
@@ -647,11 +714,14 @@ def project_angled_plane_points(
                 output_volumes[pid] = vol_id
             elif len(anchors_inside) > 1:
                 # Pick first as master, map rest to it
-                master_pid = anchors_inside[0]
+                master_pid = anchors_inside[0] if plane_anchor_id not in anchors_inside else plane_anchor_id # Prioritize keeping anchor pt id
                 output_regions[master_pid] = [pt3d for _, pt3d in points]
                 output_volumes[master_pid] = vol_id
-                for other_pid in anchors_inside[1:]:
-                    pid_mapping[other_pid] = master_pid
+
+                # Map all other pids to master
+                for pid in anchors_inside:
+                    if pid != master_pid:
+                        pid_mapping[pid] = master_pid
             else: # No anchor/alignment points inside
                 region_id = (-1, vol_id)
                 output_regions[region_id] = [pt3d for pt2d, pt3d in points]
@@ -794,9 +864,9 @@ def plot_regions_and_alignment_points(
             hull_pts = np.vstack([hull_pts, hull_pts[0]])
 
             ax.plot(hull_pts[:, 0], hull_pts[:, 1], '-', label=f"Region {pid}")
-            centroid = pts2d.mean(axis=0)
-            ax.scatter(centroid[0], centroid[1], color='black', s=10)
-
+            centroid_x = np.min(pts2d[:, 0]) + (np.max(pts2d[:, 0]) - np.min(pts2d[:, 0])) / 2
+            centroid_y = np.min(pts2d[:, 1]) + (np.max(pts2d[:, 1]) - np.min(pts2d[:, 1])) / 2
+            ax.scatter(centroid_x, centroid_y, color='black', s=10)
         except Exception as e:
             print(f"[plot_regions_and_alignment_points] Warning: Could not form polygon for region {pid}: {e}")
             continue

@@ -88,6 +88,7 @@ DEFAULT_2D_MATCH_PARAMS = {
         "max_eccentricity": 0.69,
         "preserve_anchor": True
     },
+    "rematch_angled_planes": True, # re-run 2d matching on new centroids of angled planes after projection (before uoi calculation)
     "min_uoi" : 0.5, # min uoi for a match between planes + transformations
     "plot_uoi" : False, # plot the matched rois and their intersection
     "plot_match" : False, # plot the matched rois only
