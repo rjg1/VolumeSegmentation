@@ -37,12 +37,25 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
     "n_threads" : 10, # Number of threads to spawn when generating planes
-    "anchor_dist_thresh": 100 # acceptable euclidean distance between an anchor and an alignment point
+    "anchor_dist_thresh": 100, # acceptable euclidean distance between an anchor and an alignment point
+    "reconstruct_angled_rois" : False, # projects points to angled planes and reconstructs ROIs for a more accurate centroid placement
+    "filter_params": { # used for filtering rois on reconstructed angular planes, prior to centroid calculation
+        "disable_filtering": True,
+        "min_area": 40,
+        "max_area": 1000,
+        "max_eccentricity": 0.69,
+        "preserve_anchor": True
+    },
+    "seg_params": { # used for segmenting rois when reconstructing angled planes
+        "method" : "volume",
+        "eps": 3.0,
+        "min_samples" : 5
+    }
 }
 
 
@@ -146,13 +159,17 @@ def main():
         raise ValueError("No suitable planes found in the z-stack.")
     
     while attempt < MAX_ATTEMPTS:
-        tested_idxs = [1248, 2086, 1542, 1033, 620]
+        
         # selected_idx = 1248
         selected_idx = 2086
         # selected_idx = 620
+
+        # # BEGIN DEBUG SELECTION
+        # tested_idxs = [1248, 2086, 1542, 1033, 620, 2194, 2303, 1433, 3082, 1612, 1257, 3317]
         # selected_idx = tested_idxs[0]
         # while selected_idx in tested_idxs:
         #     selected_idx = random.choice(plane_ids)
+        # # END DEBUG SELECTION
 
 
         selected_plane = z_stack.planes[selected_idx]

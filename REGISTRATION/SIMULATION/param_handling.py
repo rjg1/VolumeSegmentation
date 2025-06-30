@@ -19,7 +19,20 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to search for in z in both planes
     "n_threads" : 4, # number of threads to spawn when generating planes
-    "anchor_dist_thresh": None  # acceptable euclidean distance between an anchor and an alignment point
+    "anchor_dist_thresh": None,  # acceptable euclidean distance between an anchor and an alignment point
+    "reconstruct_angled_rois" : False, # projects points to angled planes and reconstructs ROIs for a more accurate centroid placement
+    "filter_params": { # used for filtering rois on reconstructed angular planes, prior to centroid calculation
+        "disable_filtering": True,
+        "min_area": 40,
+        "max_area": 1000,
+        "max_eccentricity": 0.69,
+        "preserve_anchor": True
+    },
+    "seg_params": { # used for segmenting rois when reconstructing angled planes
+        "method" : "volume",
+        "eps": 3.0,
+        "min_samples" : 5
+    }
 }
 
 # Default parameters for matching two planes

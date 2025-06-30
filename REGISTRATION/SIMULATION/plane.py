@@ -461,7 +461,13 @@ class Plane:
         v1 = np.array(p2) - np.array(p1)
         v2 = np.array(p3) - np.array(p1)
         normal = np.cross(v1, v2)
-        normal = normal / np.linalg.norm(normal)
+        norm = np.linalg.norm(normal)
+        if norm < 1e-8:
+            # Degenerate case: points are colinear or identical
+            print(f"[Warning] Degenerate plane: points {pp1.id}, {pp2.id}, {pp3.id} are colinear or identical.")
+            normal = np.array([0.0, 0.0, 1.0])  # Default fallback normal
+        else:
+            normal = normal / norm
         d = -np.dot(normal, p1)
         return normal, d
 

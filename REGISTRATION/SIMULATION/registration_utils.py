@@ -18,7 +18,6 @@ from scipy.spatial import ConvexHull
 import random
 from skimage.measure import EllipseModel
 from tqdm import tqdm
-from planepoint import PlanePoint
 
 def safe_polygon(region):
     pts = region.get_boundary_points()
@@ -655,7 +654,7 @@ def project_angled_plane_points(
     for z in z_stack.z_planes:
         for roi_id, roi_data in z_stack.z_planes[z].items():
             coords = roi_data["coords"]
-            vol_id = roi_data.get("volume", None)
+            vol_id = int(roi_data.get("volume", -1))
             for (x, y) in coords:
                 pt3d = np.array([x, y, z])
                 if angled_plane._distance_to_plane(pt3d) < threshold:

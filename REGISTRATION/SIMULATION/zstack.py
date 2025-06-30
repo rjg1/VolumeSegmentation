@@ -439,6 +439,7 @@ class ZStack:
 
 
     def generate_planes_gpu(self, plane_gen_params=None):
+        from registration_utils import project_angled_plane_points
         params = create_param_dict(PLANE_GEN_PARAMS_DEFAULT, plane_gen_params)
         if len(self.planes) > 0 and not params['regenerate_planes']:
             print("Using past save of planes...")
@@ -498,23 +499,6 @@ class ZStack:
             (z, anchor_id, anchor_roi) for z in sorted(anchor_by_z.keys())
             for anchor_id, anchor_roi in anchor_by_z[z]
         ]
-
-        # def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
-        #     if pair_pts1 is None or pair_pts2 is None:
-        #         return np.array([], dtype=bool)
-        #     if len(pair_pts1) == 0 or len(pair_pts2) == 0:
-        #         return np.array([], dtype=bool)
-        #     if pair_pts1.shape[0] != pair_pts2.shape[0]:
-        #         raise ValueError("Tilt check called with mismatched point pair arrays.")
-
-        #     v1 = pair_pts1 - anchor_pos
-        #     v2 = pair_pts2 - anchor_pos
-        #     cp_v1 = cp.asarray(v1)
-        #     cp_v2 = cp.asarray(v2)
-        #     dot = cp.sum(cp_v1 * cp_v2, axis=1)
-        #     norms = cp.linalg.norm(cp_v1, axis=1) * cp.linalg.norm(cp_v2, axis=1)
-        #     angles = cp.arccos(cp.clip(dot / norms, -1.0, 1.0))
-        #     return (angles <= max_angle).get()
 
         def gpu_tilt_check(anchor_pos, pair_pts1, pair_pts2, max_angle):
             if pair_pts1 is None or pair_pts2 is None:
@@ -578,6 +562,109 @@ class ZStack:
             within_thresh = cp.abs(distances) <= threshold
 
             return projected.get(), within_thresh.get()
+
+        def _is_flat(normal, tol=1e-6):
+            return abs(normal[0]) < tol and abs(normal[1]) < tol and abs(abs(normal[2]) - 1.0) < tol
+
+        def _refine_plane_with_projection(orig_plane, zstack, params):
+            """
+            Try to replace `orig_plane` with a new plane constructed from
+            projected / segmented ROIs.  Return the (possibly unchanged) plane.
+            """
+            if _is_flat(orig_plane.normal):          # nothing to do
+                return orig_plane
+            # Project & segment
+            proj_regions, pid_map, _ = project_angled_plane_points(
+                zstack,
+                orig_plane,
+                threshold=params["projection_dist_thresh"],
+                **params["seg_params"]              
+            )
+
+            if not proj_regions:
+                return orig_plane                    # no points projected
+
+            # Check anchor / alignment preservation
+            anchor_pid = orig_plane.anchor_point.id
+            old_align_pids = [pp.id for idx, pp in
+                            list(orig_plane.plane_points.items())[1:]]
+
+            # map originals -> new IDs
+            new_anchor_pid = pid_map.get(anchor_pid, anchor_pid)
+            new_align_pids = [pid_map.get(p, p) for p in old_align_pids]
+
+            # The anchor must survive
+            if new_anchor_pid not in proj_regions:
+                return orig_plane                    # terminate adjustment
+
+            # Count preserved alignment points
+            preserved_align = list({p for p in new_align_pids if p in proj_regions})
+            n_pres = len(preserved_align)
+
+            # Collect centroids for all projected ROIs
+            centroids   = {}
+            roi_traits  = {}
+
+            for pid, pts in proj_regions.items():
+                if not pts:
+                    continue
+                centroids[pid]  = (np.min(pts, axis=0) + np.max(pts, axis=0)) / 2.0
+                roi_traits[pid] = zstack._compute_roi_traits(pts)
+
+            # If <2 alignment pts preserved, supplement from other ROIs
+            if n_pres < 2:
+                return orig_plane  # Not enough to form a plane
+                # pick arbitrary supplemental ROIs not already chosen
+                supple = [pid for pid in centroids
+                        if pid not in [new_anchor_pid] + preserved_align][:2-n_pres]
+                preserved_align += supple
+
+            if len(preserved_align) < 2:
+                return orig_plane  # Not enough to form a plane
+
+            anchor_xyz = centroids[new_anchor_pid]
+            anchor_pp = zstack.construct_planepoint(
+                new_anchor_pid[1], anchor_xyz,
+                idx_z=new_anchor_pid[0],
+                traits=roi_traits.get(new_anchor_pid)
+            )
+
+            # Pick a reference alignment and build direction vector
+            pid1 = preserved_align[0]
+            xyz1 = centroids[pid1]
+            v_ref = xyz1 - anchor_xyz
+            norm_ref = np.linalg.norm(v_ref)
+
+            if norm_ref < 1e-6:
+                return orig_plane  # First alignment point too close to anchor
+
+            # Find the first other alignment point that is not colinear
+            chosen = None
+            for pid2 in preserved_align[1:]:
+                xyz2 = centroids[pid2]
+                v_test = xyz2 - anchor_xyz
+                cross = np.cross(v_ref, v_test)
+                if np.linalg.norm(cross) > 1e-6:
+                    chosen = (pid1, pid2)
+                    break
+
+            if not chosen:
+                return orig_plane  # All other alignments are colinear
+
+            # Build alignment points
+            align_pps = [
+                zstack.construct_planepoint(pid[1], centroids[pid], idx_z=pid[0], traits=roi_traits.get(pid))
+                for pid in chosen
+            ]
+
+            # Make the plane
+            new_plane = Plane(
+                anchor_pp,
+                align_pps,
+                max_alignments=params["max_alignments"],
+                fixed_basis=params["fixed_basis"],
+            )
+            return new_plane
 
         def process_anchor(z_anchor, anchor_id, anchor_roi, shutdown_flag):
             anchor_planes = []
@@ -701,6 +788,14 @@ class ZStack:
                     if point_projected:
                         plane.angles_and_magnitudes() # Update circular list
 
+                # Check if reconstruction required - better centroid positioning per ROI
+                if params["reconstruct_angled_rois"]:
+                    plane = _refine_plane_with_projection(
+                        plane,
+                        zstack=self,
+                        params=params     
+                    )
+
                 anchor_planes.append(plane)
                 normals_seen.append(normal)
 
@@ -733,9 +828,6 @@ class ZStack:
                 print("Executor shut down.")
 
         # More deterministic ordering for simulations
-        # for plane in self.planes:
-        #     print(plane.anchor_point.id)
-        # self.planes.sort(key=lambda p: (p.anchor_point.id, sorted(p.plane_points.keys())))
         self.planes.sort(key=lambda p: (p.anchor_point.id[1], p.normal[0], p.normal[1], p.normal[2]))
 
         if params["save_filename"] is not None:
@@ -768,12 +860,9 @@ class ZStack:
                 all_traits.update(ppt.traits.keys())
 
         sorted_traits = sorted(all_traits)  # consistent column ordering
-        print(f"Found traits: {sorted_traits}")
 
         # Step 2: Build rows for each plane in plane list of z stack
         for plane_id, plane in enumerate(self.planes):
-            if plane_id == 1248:
-                print(f"Plane id 1248 anchor position = {plane.anchor_point.position}")
             # Anchor point
             anchor = plane.anchor_point
             row = {
@@ -804,70 +893,68 @@ class ZStack:
 
         # Step 3: Save to CSV
         df = pd.DataFrame(rows)
-        print(f"Writing {len(df.groupby(['plane_id']))} rows to csv")
         df.to_csv(filename, index=False)
+
+    def _compute_roi_traits(self, pts_3d, intensity_list=None):
+        """
+        Args
+        ----
+        pts_3d : list[(x,y,z)]
+        intensity_list : optional list[float] aligned with pts
+
+        Returns
+        -------
+        dict – whatever you want attached to PlanePoint.traits
+        """
+        xyz = np.asarray(pts_3d)
+        # bounding-box midpoint – same logic you already decided to use
+        center = (xyz.min(axis=0) + xyz.max(axis=0)) / 2.0
+        # rough area via convex–hull on XY
+        area = 0.0
+        if len(xyz) >= 3:
+            try:
+                hull = ConvexHull(xyz[:, :2])
+                area = hull.volume          # for 2-D hull “volume” is area
+            except:
+                pass
+        traits = {
+            "n_pts"  : len(pts_3d),
+            "bbox_cx": center[0],
+            "bbox_cy": center[1],
+            "bbox_cz": center[2],
+            "bbox_area": area,
+        }
+        if intensity_list is not None and len(intensity_list):
+            traits["mean_intensity"] = float(np.mean(intensity_list))
+        return traits
 
 
     def _calculate_roi_traits(self):
         """
-        For each ROI in the z_planes dictionary, calculate:
-        - area: number of points
-        - avg_radius: average distance from centroid
-        - circularity: 4π * area / perimeter² (approximate using convex hull)
-
-        The traits will be stored in the "traits" key of each ROI dictionary.
+        For each ROI in z_planes, calculate useful traits and store them
+        under the "traits" key of each ROI dict.
         """
-
-
-        def centroid(coords):
-            coords = np.array(coords)
-            min_xy = np.min(coords, axis=0)
-            max_xy = np.max(coords, axis=0)
-            return (min_xy + max_xy) / 2
-
-        def perimeter(coords):
-            hull = ConvexHull(coords)
-            return np.sum([
-                np.linalg.norm(coords[simplex[0]] - coords[simplex[1]])
-                for simplex in hull.simplices
-            ])
-
         for z, roi_dict in self.z_planes.items():
             for roi_id, info in roi_dict.items():
                 coords = info.get("coords", [])
                 if not coords:
                     continue
+                pts3d = [(x, y, z) for (x, y) in coords]
+                traits = self._compute_roi_traits(pts3d)
+                info["traits"] = traits
 
-                coords_arr = np.array(coords)
-                traits = {}
-                traits["area"] = len(coords_arr)
-
-                # Centroid and avg radius
-                c = centroid(coords_arr)
-                distances = np.linalg.norm(coords_arr - c, axis=1)
-                traits["avg_radius"] = float(np.mean(distances))
-
-                # Circularity (approximate with convex hull)
-                if len(coords_arr) >= 3:
-                    try:
-                        p = perimeter(coords_arr)
-                        a = traits["area"]
-                        traits["circularity"] = float(4 * np.pi * a / (p ** 2)) if p > 0 else 0.0
-                    except Exception:
-                        traits["circularity"] = 0.0
-                else:
-                    traits["circularity"] = 0.0
-
-                info["traits"] = traits 
-
-    def construct_planepoint(self, roi_id, position, idx_z = None):
+    def construct_planepoint(self, roi_id, position, idx_z = None, traits = None):
         z = round(position[2], 3)
         if not idx_z: # Non-projected plane point z
             idx_z = z
         
-        roi_info = self.z_planes.get(idx_z, {}).get(roi_id, {})
-        traits = roi_info.get("traits", {}) if roi_info else {}
-        return PlanePoint((idx_z, roi_id), position, traits = traits)
+        if traits is None:
+            roi_info = self.z_planes.get(idx_z, {}).get(roi_id, {})
+            traits = roi_info.get("traits", {}) if roi_info else {}
+
+        point_id = (idx_z, roi_id)
+
+        return PlanePoint(point_id, position, traits = traits)
 
 
     # Remakes planes saved from a previous csv
@@ -919,9 +1006,3 @@ class ZStack:
         print("[INFO] Successfully loaded planes")
         return self.planes
 
-
-
-
-
-
-   
