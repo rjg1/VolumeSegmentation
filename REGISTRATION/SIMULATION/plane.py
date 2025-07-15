@@ -54,6 +54,9 @@ class Plane:
 
         signal = np.zeros(resolution)
         for angle in angle_list:
+            if not np.isfinite(angle):  # skips NaN and inf
+                print(f"[WARN] Skipping invalid angle: {angle}")
+                continue
             idx = int(round(angle % 360)) % resolution
             signal[idx] += 1
 
@@ -61,7 +64,7 @@ class Plane:
             return gaussian_filter1d(signal, sigma=blur_sigma, mode='wrap')
         else:
             return signal
-    
+        
     def _match_circular_signals(self, signal_a, signal_b):
         """
         Proper circular cross-correlation by rotating signal_b through all shifts.
@@ -265,9 +268,27 @@ class Plane:
 
         ids_a, ids_b = list(self.plane_points.keys()), list(plane_b.plane_points.keys())
 
+
+        # TEST DEBUG
+        clean_data = [
+            (a, m, id_a, id_b)
+            for a, m, id_a, id_b in zip(angles_a, mags_a, ids_a, ids_b)
+            if np.isfinite(a) and np.isfinite(m)
+        ]
+
+        if len(clean_data) == 0:
+            return {"match":False}
+
+        angles_a, mags_a, ids_a, ids_b = zip(*clean_data)
+        # END TEST DEBUG
+
+
         # Calculate best rotational offset
         signal_a = self._build_angular_signal(angles_a, **params["angle_match_params"])
         signal_b = self._build_angular_signal(angles_b, **params["angle_match_params"])
+
+
+
         if params["circular_fft"]:
             offset, ang_score, correlation = self._match_circular_signals_fft(signal_a, signal_b)
         else:

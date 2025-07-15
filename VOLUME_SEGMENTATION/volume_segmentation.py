@@ -134,7 +134,7 @@ def main():
             'num_x_points' : DEFAULT_X_POINTS
         }
     # Get X, Y, Z, ROI_ID points
-    points = import_csv(in_file=in_file)
+    points, intensity_map = import_csv(in_file=in_file)
     # Generate XZ ROIs
     # DEBUG: Cache XZ ROIS
     if xz_io_path is not None and os.path.exists(xz_io_path):
@@ -176,7 +176,7 @@ def main():
             print(f"Num xy_rois: {len(xy_rois)}")
 
         # Export segmentation to csv
-        export_segmentation(volumes, filename=out_file)
+        export_segmentation(volumes, filename=out_file, intensity_map = intensity_map)
 
 
 def str_to_bool(value):
@@ -413,8 +413,10 @@ def get_hull_boundary_points(hull):
     return boundary_points
 
 # Exports a segmentation into a csv
-def export_segmentation(volumes_dict, filename="algorithmic_segmentation.csv"):
+def export_segmentation(volumes_dict, filename="algorithmic_segmentation.csv", intensity_map = None):
     out_data = []
+    if intensity_map is None:
+        intensity_map = {}
     print(f"Volume dict: {volumes_dict}")
     for vol_id, volume in volumes_dict.items(): # Iterate through all volumes
         xy_rois = volume.get_xy_rois()  # Get the dict of {ROI_ID : <BoundaryRegion>}
@@ -422,22 +424,39 @@ def export_segmentation(volumes_dict, filename="algorithmic_segmentation.csv"):
             points_3d = xy_roi.get_boundary_points() # Get list of [(x,y,z)] boundary points for this ROI
             original_id = xy_roi.get_original_index() # Get original ROI ID from input dataset
             if original_id is not None:
+                avg_intensity = intensity_map.get(original_id, np.nan)
                 for x, y, z in points_3d: # For each x,y,z point, append to output list as a row
-                    out_data.append([x, y, z, original_id, vol_id])
+                    out_data.append([x, y, z, original_id, avg_intensity, vol_id])
             else:
                 print("export error!!!")
     # Create dataframe to export to csv
-    df = pd.DataFrame(out_data, columns=['x', 'y', 'z', 'ROI_ID', 'VOLUME_ID'])
+    df = pd.DataFrame(out_data, columns=['x', 'y', 'z', 'ROI_ID', 'intensity', 'VOLUME_ID'])
     # Export to csv
     df.to_csv(filename, index=False)
 
 # Function to import points from a source file
-def import_csv(in_file =  IN_FILE):
-    with open(in_file, 'r') as csvfile:
-        reader = csv.reader(csvfile)
-        next(reader)  # Skip header
-        points = [(float(row[0]), float(row[1]), float(row[2]), int(row[3])) for row in reader]
-        return points
+def import_csv(in_file):
+    with open(in_file, newline='') as f:
+        reader = csv.reader(f)
+        header = next(reader)                 # keep the header
+        rows = [row for row in reader]        # materialise the iterator
+
+    # (x, y, z, ROI_ID) — always present
+    points = [
+        (float(r[0]), float(r[1]), float(r[2]), int(r[3]))
+        for r in rows
+    ]
+
+    # avg_intensity column may or may not exist
+    if len(header) >= 5:                      # column 4 == avg_intensity
+        intensity_map = {
+            int(r[3]): float(r[4])
+            for r in rows if len(r) >= 5
+        }
+    else:
+        intensity_map = {}
+
+    return points, intensity_map
 
 if __name__ == "__main__":
     main()

@@ -160,8 +160,8 @@ def main():
     
     while attempt < MAX_ATTEMPTS:
         
-        # selected_idx = 1248
-        selected_idx = 2086
+        selected_idx = 1248
+        # selected_idx = 2086
         # selected_idx = 620
 
         # # BEGIN DEBUG SELECTION

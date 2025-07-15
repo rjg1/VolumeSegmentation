@@ -6,7 +6,7 @@ import csv
 
 # Load the 3D image z-stack from a .tif file
 # Assume the file 'image_stack.tif' is a 3D stack where the first dimension is the Z-plane
-image_stack = tifffile.imread('file_00001.tif')
+image_stack = tifffile.imread('AVG_file_test.tif')
 print(image_stack.shape)
 
 # Initialize Cellpose model
@@ -16,14 +16,27 @@ model = models.CellposeModel(pretrained_model='./DRG_xyzmodel_20220705')
 output_list = []
 
 # Iterate over each Z-plane in the stack
-for z in range(image_stack.shape[0]):
-    print(f"Segmenting z-plane: {z} of {image_stack.shape[0]-1}")
-    # Extract the Z-plane
-    z_plane = image_stack[z, :, :]
+if image_stack.ndim == 2:
+    z_planes = [image_stack]
+else:
+    z_planes = [image_stack[z, :, :] for z in range(image_stack.shape[0])]
+
+for z, z_plane in enumerate(z_planes):
+    print(f"Segmenting z-plane: {z} of {len(z_planes)-1}")
 
     # Segment the Z-plane using Cellpose
-    # masks, flows, styles = model.eval(z_plane, diameter=None, channels=[0, 0], flow_threshold=1, cellprob_threshold=-3)
-    masks, flows, styles = model.eval(z_plane, diameter=None, channels=[0, 0], flow_threshold=1.1, cellprob_threshold=-6)
+    masks, flows, styles = model.eval(z_plane, diameter=None, channels=[0, 0], flow_threshold=0.4, cellprob_threshold=-3)
+    # masks, flows, styles = model.eval(z_plane, diameter=None, channels=[0, 0], flow_threshold=1.1, cellprob_threshold=-6)
+
+    # Extract avg intensity per roi
+    roi_ids = np.unique(masks)
+    roi_ids = roi_ids[roi_ids != 0]  # skip background label 0
+
+    mean_intensities = {
+        roi: float(z_plane[masks == roi].mean())    # cast to float for JSON/CSV friendliness
+        for roi in roi_ids
+    }
+
 
     # Extract outlines
     outlines = utils.outlines_list(masks)
@@ -31,16 +44,17 @@ for z in range(image_stack.shape[0]):
     # Append the outlines to a list
     for roi_id, outline in enumerate(outlines, start=1):
         if outline.size > 0:  # Check if outline is not empty
+            avg_intensity = mean_intensities.get(roi_id, np.nan)
             for point in outline:
                 x, y = point
                 # Append the (x, y, z, ROI_ID) tuple
-                output_list.append((x, y, z, roi_id))
+                output_list.append((x, y, z, roi_id, avg_intensity))
 
 # Write the list to a CSV
-csv_filename = 'roi_coordinates_3.csv'
+csv_filename = 'roi_coords_single_plane.csv'
 with open(csv_filename, mode='w', newline='') as file:
     writer = csv.writer(file)
     # Write header
-    writer.writerow(['x', 'y', 'z', 'ROI_ID'])
+    writer.writerow(['x', 'y', 'z', 'ROI_ID', 'intensity'])
     # Write the ROI coordinates
     writer.writerows(output_list)

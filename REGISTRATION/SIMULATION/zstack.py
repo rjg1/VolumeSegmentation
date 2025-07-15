@@ -550,6 +550,26 @@ class ZStack:
             angles = np.arccos(np.clip(dots, -1.0, 1.0))
             return np.any(angles <= angle_thresh_rad)
 
+        # def is_coplanar(normal, normals_list, angle_thresh_rad=0.017):
+        #     """
+        #     Return True if *normal* is within angle_thresh_rad of ANY vector in normals_list,
+        #     *ignoring* 180° flips.
+        #     """
+        #     if not normals_list:
+        #         return False
+
+        #     normals = np.stack(normals_list)            # shape (k, 3)
+
+        #     # |n·m| = cos(θ) with θ in [0, π/2] regardless of sign,
+        #     # so opposite directions collapse onto the same dot value.
+        #     dots = np.abs(normals @ normal)             # 1-liner for np.dot
+
+        #     # Clip for numeric safety and back-convert to angle
+        #     angles = np.arccos(np.clip(dots, -1.0, 1.0))
+
+        #     return np.any(angles <= angle_thresh_rad)
+
+
         def gpu_project_points(points, normal, anchor_pos, threshold):
             if len(points) == 0:
                 return np.array([]), np.array([])
