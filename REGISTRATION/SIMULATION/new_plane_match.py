@@ -28,9 +28,9 @@ B_PLANE_OUT_FILE = f"{NEW_PLANE_IN_FILE}".split('.csv')[0] + "_planes.csv"
 plane_gen_params = {
     "read_filename" : A_PLANE_OUT_FILE, # file to read plane parameters from
     "save_filename" : A_PLANE_OUT_FILE, # file to save plane parameters to 
-    "anchor_intensity_threshold": 0.5, # threshold to compare transformed intensity to for a point to be considered an anchor pt (see transform_intensity)
-    "align_intensity_threshold": 0.4, # as above, but for alignment points
-    "z_threshold": 5, # max distance in z between two points in a plane
+    "anchor_intensity_threshold": 0, #0.5, # threshold to compare transformed intensity to for a point to be considered an anchor pt (see transform_intensity)
+    "align_intensity_threshold": 0, #0.4, # as above, but for alignment points
+    "z_threshold": 0, #5 # max distance in z between two points in a plane
     "max_tilt_deg": 30.0, # max magnitude of tilt in the vector between two points in a plane
     "projection_dist_thresh":  0.5, # euclidean distance for a point considered close enough to a plane for it to be projected
     "transform_intensity" : "quantile", # "quantile", "raw", "minmax" - transforms avg intensity per roi and compares to anchor/align intensity threshold
@@ -38,12 +38,12 @@ plane_gen_params = {
     "margin" : 2, # distance between boundary point and pixel in img to be considered an edge roi
     "match_anchors" : True, # require two planes to have a common anchor to be equivalent (turning this off will reduce the number of planes and accuracy)
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
-    "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
+    "regenerate_planes" : True, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
-    "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
+    "z_guess": 82, #-1 # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to generate for in z
     "n_threads" : 10, # Number of threads to spawn when generating planes
-    "anchor_dist_thresh": 20, # acceptable euclidean distance between an anchor and an alignment point
+    "anchor_dist_thresh": 100, # acceptable euclidean distance between an anchor and an alignment point
     "reconstruct_angled_rois" : False, # projects points to angled planes and reconstructs ROIs for a more accurate centroid placement
     "filter_params": { # used for filtering rois on reconstructed angular planes, prior to centroid calculation
         "disable_filtering": True,
@@ -93,11 +93,11 @@ match_plane_params = {
     }
 
 plane_list_params = {
-    "min_score" : 0.5,
+    "min_score" : 0.6,
     "max_matches" : 2, # max number of alignment point matches - score scaled up with more matches
     "min_score_modifier" : 1.0, # if num align matches for a plane = min_matches, score is modified by min score
     "max_score_modifier" : 1.0, # interpolated to max_score for >= max_matches
-    "z_guess_a": 88, #114, # guess at the z-level where the plane match is located in plane list a -> -1 means no guess -> used for optimization in time here for a pre-generated plane list
+    "z_guess_a": 82, #114, # guess at the z-level where the plane match is located in plane list a -> -1 means no guess -> used for optimization in time here for a pre-generated plane list
     "z_guess_b": -1, # guess at the z-level where the plane match is located in plane list k b -> -1 means no guess
     "z_range" : 20, # # +- tolerance to search for in z in both planes
 }
@@ -113,7 +113,7 @@ match_params = {
     "plot_uoi" : True,
     "plot_match" : False,
     "use_gpu" : True,
-    "min_uoi": 0.9,
+    "min_uoi": 0,
     "seg_params": {
         "method" : "volume",
         "eps": 1.5,
@@ -139,8 +139,29 @@ def main():
     z_stack = ZStack(data=STACK_IN_FILE) # Load z-stack of existing data
     z_stack.generate_random_intensities(0,1000) # Generate random average intensities for it per ROI
     generation_start = time.perf_counter()
-    z_stack.generate_planes_gpu(plane_gen_params)
+    planes_a = z_stack.generate_planes_gpu(plane_gen_params)
     generation_end = time.perf_counter()
+
+    # DEBUG step - isolate flat planes on z=82
+    flat_planes = []
+    z_target = 82
+    z_tolerance = 0.05
+    angle_tolerance_deg = 2
+    target_normal = np.array([0, 0, 1]) # Test for flat planes to begin with
+
+    for plane in planes_a:
+        anchor_z = plane.anchor_point.position[2]
+        if abs(anchor_z - z_target) <= z_tolerance:
+            # Compare normal angle to [0,0,1]
+            dot = np.dot(plane.normal, target_normal)
+            norm = np.linalg.norm(plane.normal) * np.linalg.norm(target_normal)
+            angle_deg = np.degrees(np.arccos(np.clip(dot / norm, -1.0, 1.0)))
+
+            if angle_deg <= angle_tolerance_deg:
+                flat_planes.append(plane)
+
+    print(f"[DEBUG] Found {len(flat_planes)} flat planes at z={z_target} (±{z_tolerance}).")
+
     # Choose a random plane to make a new z-stack
     # End debug
 
