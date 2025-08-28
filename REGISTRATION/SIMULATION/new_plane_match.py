@@ -162,6 +162,11 @@ def main():
 
     print(f"[DEBUG] Found {len(flat_planes)} flat planes at z={z_target} (±{z_tolerance}).")
 
+    # Test viewing planes
+    from real_plane_data import plot_projected_regions_with_plane_points
+    for plane in flat_planes:
+        plot_projected_regions_with_plane_points(z_stack, plane, datatype="flat")
+
     # Choose a random plane to make a new z-stack
     # End debug
 

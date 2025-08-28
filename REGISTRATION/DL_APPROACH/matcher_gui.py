@@ -1,0 +1,1556 @@
+#!/usr/bin/env python3
+"""
+ROI Pairing & Pose GUI (per‑z + TIF underlay + inside‑outline selection + visual warp + live overlay/IoU)
+-------------------------------------------------------------------------------------------------------
+
+Additions in this version:
+- Optional initial TIF rotation per dataset (0/90/180/270) to fix orientation.
+- Apply B→A transform to **points and TIF** in B view (toggle).
+- Live third panel: **Overlay (A+B)** — updates transform progressively:
+    * 1 pair → translation only
+    * 2 pairs → rotation+scale+translation from the two pairs
+    * ≥3 pairs → SVD similarity (robust)
+  Computes and displays IoU for each matched ROI (convex hull vs. transformed hull) with filled masks.
+- Selection quality:
+    * Click inside outline to select; click again to deselect (toggle)
+    * ESC clears selection
+    * (Right‑click unpairs still available on centroid; but deselection is via toggle/ESC)
+- ROI ID labels drawn next to centroids (both panels).
+- Overlay symbols on A changed from "x" to hollow circles to avoid confusion.
+- Hungarian matching uses **transformed B centroids** when a transform is available (unchanged).
+
+Deps:
+    pip install PySide6 pyqtgraph numpy pandas scipy tifffile shapely
+
+Run:
+    python roi_pair_pose_gui.py
+"""
+
+import sys
+import os
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple, Optional
+
+import numpy as np
+import pandas as pd
+
+# --- Qt / Graph imports (try PySide6, fall back to PyQt5) ---
+try:
+    from PySide6 import QtWidgets, QtCore, QtGui
+    QT_LIB = 'PySide6'
+except Exception:
+    from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
+    QT_LIB = 'PyQt5'
+
+import pyqtgraph as pg
+import tifffile as tiff
+
+# Optional Hungarian
+try:
+    from scipy.optimize import linear_sum_assignment  # type: ignore
+    HUNGARIAN_AVAILABLE = True
+except Exception:
+    HUNGARIAN_AVAILABLE = False
+    def linear_sum_assignment(cost_matrix: np.ndarray):
+        m = cost_matrix.copy()
+        used_rows, used_cols, pairs = set(), set(), []
+        flat = [(i, j, m[i, j]) for i in range(m.shape[0]) for j in range(m.shape[1])]
+        flat.sort(key=lambda x: x[2])
+        for i, j, _ in flat:
+            if i not in used_rows and j not in used_cols:
+                used_rows.add(i); used_cols.add(j); pairs.append((i, j))
+        if not pairs:
+            return np.array([], dtype=int), np.array([], dtype=int)
+        rows, cols = zip(*pairs)
+        return np.array(rows, dtype=int), np.array(cols, dtype=int)
+
+# Optional convex hull
+try:
+    from scipy.spatial import ConvexHull  # type: ignore
+    HULL_AVAILABLE = True
+except Exception:
+    HULL_AVAILABLE = False
+    ConvexHull = None  # type: ignore
+
+# Optional precise polygon IoU (Shapely)
+try:
+    from shapely.geometry import Polygon  # type: ignore
+    SHAPELY = True
+except Exception:
+    SHAPELY = False
+    Polygon = None  # type: ignore
+
+
+# ---------------------------- Math utils ----------------------------
+
+def estimate_similarity_transform_2d(src: np.ndarray, dst: np.ndarray, allow_reflection: bool = False):
+    """Return (s, R, t) such that approx: dst ≈ s * R @ src + t."""
+    assert src.shape == dst.shape and src.shape[1] == 2 and src.shape[0] >= 2
+    mu_src = src.mean(axis=0); mu_dst = dst.mean(axis=0)
+    X = src - mu_src; Y = dst - mu_dst
+    Sigma = X.T @ Y / src.shape[0]
+    U, D, Vt = np.linalg.svd(Sigma)
+    R = U @ Vt
+    if not allow_reflection and np.linalg.det(R) < 0:
+        Vt[1, :] *= -1
+        R = U @ Vt
+    var_src = (X ** 2).sum() / src.shape[0]
+    s = 1.0 if var_src < 1e-12 else float(np.trace(np.diag(D)) / var_src)
+    t = mu_dst - s * (R @ mu_src)
+    return float(s), R, t
+
+
+def apply_similarity_transform_2d(points: np.ndarray, s: float, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+    if points.size == 0:
+        return points
+    return (s * (R @ points.T)).T + t
+
+
+def two_point_similarity(p1: np.ndarray, p2: np.ndarray, q1: np.ndarray, q2: np.ndarray):
+    """Similarity from two point pairs: p1->q1, p2->q2.
+       Returns (s, R, t). If p1==p2, falls back to translation from p1->q1.
+    """
+    vP = p2 - p1
+    vQ = q2 - q1
+    nP = np.linalg.norm(vP)
+    if nP < 1e-8:
+        s = 1.0; R = np.eye(2); t = q1 - p1
+        return s, R, t
+    s = float(np.linalg.norm(vQ) / nP) if nP > 0 else 1.0
+    aP = np.arctan2(vP[1], vP[0])
+    aQ = np.arctan2(vQ[1], vQ[0])
+    ang = aQ - aP
+    c, d = np.cos(ang), np.sin(ang)
+    R = np.array([[c, -d], [d, c]], dtype=float)
+    t = q1 - s * (R @ p1)
+    return s, R, t
+
+
+# ---------------------------- Data model ----------------------------
+
+ROIKey = Tuple[float, int]  # (z, ROI_ID)
+
+def norm_z(zval: float) -> float:
+    return float(np.round(float(zval), 6))
+
+
+@dataclass
+class Dataset:
+    name: str = ""
+    df: Optional[pd.DataFrame] = None
+
+    # SAFE defaults so they exist even before CSV load
+    z_values: List[float] = field(default_factory=list)
+    roi_to_points_by_z: Dict[float, Dict[int, np.ndarray]] = field(default_factory=dict)
+    roi_centroids_xy_by_z: Dict[float, Dict[int, np.ndarray]] = field(default_factory=dict)
+
+    current_z: Optional[float] = None
+    cur_roi_ids_sorted: List[int] = field(default_factory=list)
+    cur_centroid_array: Optional[np.ndarray] = None
+    cur_roi_centroids_xy: Dict[int, np.ndarray] = field(default_factory=dict)
+
+    tif_path: Optional[str] = None
+    tif_stack: Optional[np.ndarray] = None  # (H,W) or (Z,H,W)
+    def clear(self):
+        self.df = None
+        self.z_values = []
+        self.roi_to_points_by_z = {}
+        self.roi_centroids_xy_by_z = {}
+        self.current_z = None
+        self.cur_roi_ids_sorted = []
+        self.cur_centroid_array = None
+        self.cur_roi_centroids_xy = {}
+        self.tif_path = None
+        self.tif_stack = None
+
+    def load_csv(self, path: str):
+        self.name = os.path.basename(path)
+        df = pd.read_csv(path)
+        required = {"x", "y", "z", "ROI_ID"}
+        missing = required - set(map(str, df.columns))
+        if missing:
+            raise ValueError(f"CSV missing required columns: {missing}")
+        df['x'] = pd.to_numeric(df['x'])
+        df['y'] = pd.to_numeric(df['y'])
+        df['z'] = pd.to_numeric(df['z'])
+        df['ROI_ID'] = pd.to_numeric(df['ROI_ID'], downcast='integer')
+        self.df = df
+        self.z_values = sorted([norm_z(z) for z in df['z'].unique()])
+        self.roi_to_points_by_z = {}
+        self.roi_centroids_xy_by_z = {}
+        for z in self.z_values:
+            subz = df[np.isclose(df['z'], z)]
+            rid2pts: Dict[int, np.ndarray] = {}
+            rid2cent: Dict[int, np.ndarray] = {}
+            for rid, sub in subz.groupby('ROI_ID'):
+                pts = sub[["x", "y", "z"]].to_numpy(dtype=float)
+                rid2pts[int(rid)] = pts
+                rid2cent[int(rid)] = pts[:, :2].mean(axis=0)
+            self.roi_to_points_by_z[z] = rid2pts
+            self.roi_centroids_xy_by_z[z] = rid2cent
+        if self.z_values:
+            self.set_current_z(self.z_values[0])
+
+    def load_tif(self, path: str):
+        arr = tiff.imread(path)
+        if arr.ndim == 2:
+            self.tif_stack = arr.astype(np.float32)
+        elif arr.ndim >= 3:
+            self.tif_stack = (arr if arr.ndim == 3 else arr[..., 0]).astype(np.float32)
+        else:
+            raise ValueError("Unsupported TIF dims")
+        self.tif_path = path
+
+    def set_current_z(self, z: float):
+        z = norm_z(z)
+        self.current_z = z
+        rid2cent = (self.roi_centroids_xy_by_z or {}).get(z, {})
+        self.cur_roi_centroids_xy = rid2cent
+        self.cur_roi_ids_sorted = sorted(rid2cent.keys())
+        if rid2cent:
+            self.cur_centroid_array = np.array(
+                [rid2cent[rid] for rid in self.cur_roi_ids_sorted], dtype=float
+            )
+        else:
+            self.cur_centroid_array = np.zeros((0, 2), dtype=float)
+
+    def get_boundary_xy_for_z(self, z: float) -> np.ndarray:
+        if self.df is None:
+            return np.zeros((0, 2), dtype=float)
+        z = norm_z(z)
+        subz = self.df[np.isclose(self.df['z'], z)]
+        if subz.empty:
+            return np.zeros((0, 2), dtype=float)
+        return subz[["x", "y"]].to_numpy(dtype=float)
+
+    def get_tif_slice_for_z(self, z: float) -> Optional[np.ndarray]:
+        if self.tif_stack is None:
+            return None
+        if self.tif_stack.ndim == 2:
+            return self.tif_stack
+        zvals = self.z_values
+        if len(zvals) == self.tif_stack.shape[0] and len(zvals) > 0:
+            z_norm = norm_z(z)
+            try:
+                idx = zvals.index(z_norm)
+            except ValueError:
+                idx = int(np.argmin(np.abs(np.array(zvals) - z_norm)))
+        else:
+            idx = int(np.clip(int(round(z)), 0, self.tif_stack.shape[0] - 1))
+        return self.tif_stack[idx]
+
+
+# ---------------------------- Graphics helpers ----------------------------
+
+class ClickableScatter(pg.ScatterPlotItem):
+    def __init__(self, *args, on_left_click=None, on_right_click=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._on_left = on_left_click
+        self._on_right = on_right_click
+    def mouseClickEvent(self, ev):
+        if ev.button() not in (QtCore.Qt.LeftButton, QtCore.Qt.RightButton):
+            super().mouseClickEvent(ev); return
+        pts = self.pointsAt(ev.pos())
+        if pts is None or len(pts) == 0:
+            ev.ignore(); return
+        rid = pts[0].data()
+        if ev.button() == QtCore.Qt.LeftButton and self._on_left:
+            self._on_left(rid); ev.accept()
+        elif ev.button() == QtCore.Qt.RightButton and self._on_right:
+            self._on_right(rid); ev.accept()
+        else:
+            ev.ignore()
+
+
+# ---------------------------- Main Window ----------------------------
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ROI Pairing & Pose GUI — B → A (overlay & IoU)")
+        self.resize(2100, 1100)
+
+        # Cached outlines
+        self.outlineItemsA = []
+        self.outlineItemsB = []
+
+
+        # TIF rects (per-z)
+        self.imgRectA_by_z = {}  # z -> QRectF
+        self.imgRectB_by_z = {}
+
+        # Data
+        self.datasetA = Dataset(name="A")
+        self.datasetB = Dataset(name="B")
+
+        # Pairing maps (1:1) using keys (z, ROI_ID)
+        self.A2B: Dict[ROIKey, ROIKey] = {}
+        self.B2A: Dict[ROIKey, ROIKey] = {}
+
+        # Current staged selections (ROI_ID only; z from dataset state)
+        self.selA: Optional[int] = None
+        self.selB: Optional[int] = None
+
+        # Transform from B->A (None until computed dynamically)
+        self.transform: Optional[Tuple[float, np.ndarray, np.ndarray]] = None
+
+        # (Legacy) initial 90° step toggles, kept for completeness but not used for live UI
+        self.rotA_k = 0
+        self.rotB_k = 0
+
+        # Base levels cache per dataset per z (lo, hi)
+        self._baseLevelsA_by_z = {}  # {z: (lo, hi)}
+        self._baseLevelsB_by_z = {}
+
+        # ---------------- UI ----------------
+        central = QtWidgets.QWidget(); self.setCentralWidget(central)
+        layout = QtWidgets.QHBoxLayout(central)
+
+        # Three views: A | B | Overlay
+        self.viewA = pg.PlotWidget(); self.viewB = pg.PlotWidget(); self.viewOverlay = pg.PlotWidget()
+        for v, title in [
+            (self.viewA, "Dataset A (target)"),
+            (self.viewB, "Dataset B (source)"),
+            (self.viewOverlay, "Overlay (A+B) — live transform & IoU")
+        ]:
+            v.setBackground('w'); v.showGrid(x=True, y=True, alpha=0.2); v.setAspectLocked(False)
+            ax = v.getAxis('left'); ax.setPen(pg.mkPen(color=(80,80,80)))
+            ax = v.getAxis('bottom'); ax.setPen(pg.mkPen(color=(80,80,80)))
+            v.setTitle(title)
+
+        layout.addWidget(self.viewA, 1)
+        layout.addWidget(self.viewB, 1)
+        layout.addWidget(self.viewOverlay, 1)
+
+        # Match matplotlib origin='upper'
+        for v in (self.viewA, self.viewB, self.viewOverlay):
+            v.invertY(True)
+
+        # Background click selection
+        self.viewA.scene().sigMouseClicked.connect(self._on_viewA_click)
+        self.viewB.scene().sigMouseClicked.connect(self._on_viewB_click)
+
+        # Control panel (right)
+        ctrl = QtWidgets.QWidget(); ctrl.setFixedWidth(600); layout.addWidget(ctrl)
+        f = QtWidgets.QFormLayout(ctrl)
+
+        # ---------------- CSV loaders ----------------
+        self.btnLoadA = QtWidgets.QPushButton("Load CSV A…")
+        self.btnLoadB = QtWidgets.QPushButton("Load CSV B…")
+        self.lblA = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.lblB = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.btnLoadA.clicked.connect(lambda: self.load_csv(self.datasetA, self.lblA, which='A'))
+        self.btnLoadB.clicked.connect(lambda: self.load_csv(self.datasetB, self.lblB, which='B'))
+        f.addRow(self.btnLoadA, self.lblA)
+        f.addRow(self.btnLoadB, self.lblB)
+
+        # ---------------- TIF loaders + filenames ----------------
+        self.btnLoadTifA = QtWidgets.QPushButton("Load TIF A…")
+        self.btnLoadTifB = QtWidgets.QPushButton("Load TIF B…")
+        self.lblTifA = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.lblTifB = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.btnLoadTifA.clicked.connect(lambda: self.load_tif(self.datasetA, which='A'))
+        self.btnLoadTifB.clicked.connect(lambda: self.load_tif(self.datasetB, which='B'))
+        f.addRow(self.btnLoadTifA, self.lblTifA)
+        f.addRow(self.btnLoadTifB, self.lblTifB)
+
+        # Show image + Show outlines (same row per dataset)
+        self.chkShowImgA = QtWidgets.QCheckBox("Show image (A)")
+        self.chkShowImgB = QtWidgets.QCheckBox("Show image (B)")
+        self.chkShowOutlineA = QtWidgets.QCheckBox("Show outlines (A)")
+        self.chkShowOutlineB = QtWidgets.QCheckBox("Show outlines (B)")
+        self.chkShowImgA.setChecked(False); self.chkShowImgB.setChecked(False)
+        self.chkShowOutlineA.setChecked(True); self.chkShowOutlineB.setChecked(True)
+
+        self.chkShowImgA.toggled.connect(lambda _: (self.populate_view_A(), self.update_overlay_view()))
+        self.chkShowImgB.toggled.connect(lambda _: (self.populate_view_B(), self.update_overlay_view()))
+        self.chkShowOutlineA.toggled.connect(self._on_toggle_outlineA)
+        self.chkShowOutlineB.toggled.connect(self._on_toggle_outlineB)
+
+        rowA = QtWidgets.QWidget(); hA = QtWidgets.QHBoxLayout(rowA); hA.setContentsMargins(0,0,0,0); hA.setSpacing(12)
+        hA.addWidget(self.chkShowImgA); hA.addWidget(self.chkShowOutlineA); hA.addStretch(1)
+        rowB = QtWidgets.QWidget(); hB = QtWidgets.QHBoxLayout(rowB); hB.setContentsMargins(0,0,0,0); hB.setSpacing(12)
+        hB.addWidget(self.chkShowImgB); hB.addWidget(self.chkShowOutlineB); hB.addStretch(1)
+        f.addRow(QtWidgets.QLabel("A display:"), rowA)
+        f.addRow(QtWidgets.QLabel("B display:"), rowB)
+
+        # --- Image intensity (sliders) ---
+        self.sldIntensityA = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sldIntensityA.setRange(5, 500)          # 5 -> 0.05×, 500 -> 5.00×
+        self.sldIntensityA.setValue(100)              # 1.00× default
+        self.lblIntensityA = QtWidgets.QLabel("1.00×")
+        self.sldIntensityA.valueChanged.connect(lambda v: self.on_intensity_changed('A', v))
+
+        wrapA = QtWidgets.QWidget()
+        hlA = QtWidgets.QHBoxLayout(wrapA); hlA.setContentsMargins(0, 0, 0, 0); hlA.setSpacing(8)
+        hlA.addWidget(self.sldIntensityA); hlA.addWidget(self.lblIntensityA)
+        f.addRow(QtWidgets.QLabel("Image intensity A:"), wrapA)
+
+        self.sldIntensityB = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sldIntensityB.setRange(5, 500)
+        self.sldIntensityB.setValue(100)
+        self.lblIntensityB = QtWidgets.QLabel("1.00×")
+        self.sldIntensityB.valueChanged.connect(lambda v: self.on_intensity_changed('B', v))
+
+        wrapB = QtWidgets.QWidget()
+        hlB = QtWidgets.QHBoxLayout(wrapB); hlB.setContentsMargins(0, 0, 0, 0); hlB.setSpacing(8)
+        hlB.addWidget(self.sldIntensityB); hlB.addWidget(self.lblIntensityB)
+        f.addRow(QtWidgets.QLabel("Image intensity B:"), wrapB)
+
+
+        # ---------------- Rotation (deg) + flips ----------------
+        self.spinRotA = QtWidgets.QDoubleSpinBox()
+        self.spinRotA.setRange(-3600.0, 3600.0); self.spinRotA.setDecimals(2)
+        self.spinRotA.setSingleStep(0.5); self.spinRotA.setSuffix("°"); self.spinRotA.setValue(0.0)
+        self.spinRotB = QtWidgets.QDoubleSpinBox()
+        self.spinRotB.setRange(-3600.0, 3600.0); self.spinRotB.setDecimals(2)
+        self.spinRotB.setSingleStep(0.5); self.spinRotB.setSuffix("°"); self.spinRotB.setValue(0.0)
+        self.spinRotA.valueChanged.connect(lambda _: self.on_user_orientation_changed('A'))
+        self.spinRotB.valueChanged.connect(lambda _: self.on_user_orientation_changed('B'))
+        f.addRow(QtWidgets.QLabel("Rotation A (deg):"), self.spinRotA)
+        f.addRow(QtWidgets.QLabel("Rotation B (deg):"), self.spinRotB)
+
+        self.chkFlipHA = QtWidgets.QCheckBox("Flip A horizontally")
+        self.chkFlipVA = QtWidgets.QCheckBox("Flip A vertically")
+        self.chkFlipHB = QtWidgets.QCheckBox("Flip B horizontally")
+        self.chkFlipVB = QtWidgets.QCheckBox("Flip B vertically")
+        self.chkFlipHA.toggled.connect(lambda _: self.on_user_orientation_changed('A'))
+        self.chkFlipVA.toggled.connect(lambda _: self.on_user_orientation_changed('A'))
+        self.chkFlipHB.toggled.connect(lambda _: self.on_user_orientation_changed('B'))
+        self.chkFlipVB.toggled.connect(lambda _: self.on_user_orientation_changed('B'))
+        f.addRow(self.chkFlipHA, self.chkFlipVA)
+        f.addRow(self.chkFlipHB, self.chkFlipVB)
+
+        # ---------------- Z selection: entry boxes (not dropdowns) ----------------
+        self.editZA = QtWidgets.QLineEdit(); self.editZB = QtWidgets.QLineEdit()
+        self.editZA.setPlaceholderText("type z (e.g., 82)")
+        self.editZB.setPlaceholderText("type z (e.g., 82)")
+        self.editZA.setValidator(QtGui.QDoubleValidator()); self.editZB.setValidator(QtGui.QDoubleValidator())
+        self.editZA.editingFinished.connect(lambda: self.change_z_text('A'))
+        self.editZB.editingFinished.connect(lambda: self.change_z_text('B'))
+        f.addRow(QtWidgets.QLabel("Z (A):"), self.editZA)
+        f.addRow(QtWidgets.QLabel("Z (B):"), self.editZB)
+
+        # ---------------- Live transform only: overlay show/hide ----------------
+        self.chkShowOverlay = QtWidgets.QCheckBox("Show overlay / transform pane")
+        self.chkShowOverlay.setChecked(True)
+        self.chkShowOverlay.toggled.connect(self.toggle_overlay_visible)
+        f.addRow(self.chkShowOverlay)
+
+        # ---------------- Hungarian controls (kept) ----------------
+        self.btnHungarian = QtWidgets.QPushButton("Auto-match (Hungarian, current slices)")
+        self.btnHungarian.clicked.connect(self.run_hungarian)
+        self.btnHungarian.setEnabled(False)
+        self.spinMaxDist = QtWidgets.QDoubleSpinBox(); self.spinMaxDist.setRange(0.0, 1e6)
+        self.spinMaxDist.setDecimals(2); self.spinMaxDist.setValue(30.0)
+        self.spinMaxDist.setSuffix(" px max distance")
+        f.addRow(self.btnHungarian, self.spinMaxDist)
+
+        # ---------------- Pairs table ----------------
+        self.pairTable = QtWidgets.QTableWidget(0, 2)
+        self.pairTable.setHorizontalHeaderLabels(["A (z,ROI)", "B (z,ROI)"])
+        self.pairTable.horizontalHeader().setStretchLastSection(True)
+        self.pairTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.pairTable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        f.addRow(QtWidgets.QLabel("<b>Pairs</b>")); f.addRow(self.pairTable)
+
+        # Pair table actions
+        hbtns = QtWidgets.QHBoxLayout()
+        self.btnRemovePair = QtWidgets.QPushButton("Remove Selected Pair")
+        self.btnClearPairs = QtWidgets.QPushButton("Clear All Pairs")
+        self.btnRemovePair.clicked.connect(self.remove_selected_pair)
+        self.btnClearPairs.clicked.connect(self.clear_pairs)
+        hcont = QtWidgets.QWidget(); hcont.setLayout(hbtns)
+        hbtns.addWidget(self.btnRemovePair); hbtns.addWidget(self.btnClearPairs)
+        f.addRow(hcont)
+
+        # Export
+        self.btnExport = QtWidgets.QPushButton("Export Labeled CSVs…")
+        self.btnExport.clicked.connect(self.export_labeled_csvs)
+        self.btnExport.setEnabled(False)
+        f.addRow(self.btnExport)
+
+        # Status
+        self.status = QtWidgets.QLabel("")
+        f.addRow(self.status)
+
+        # Graphics state
+        self.imgItemA: Optional[pg.ImageItem] = None
+        self.imgItemB: Optional[pg.ImageItem] = None
+        self.centroidsA: Optional[ClickableScatter] = None
+        self.centroidsB: Optional[ClickableScatter] = None
+        self.labelsA: List[pg.TextItem] = []
+        self.labelsB: List[pg.TextItem] = []
+        self.overlay_B_on_A = None
+        self.hullsA: Dict[int, QtGui.QPainterPath] = {}
+        self.hullsB: Dict[int, QtGui.QPainterPath] = {}
+        self.selOutlineA = None
+        self.selOutlineB = None
+
+        # Colors (current z)
+        self.colorA: Dict[int, QtGui.QColor] = {}
+        self.colorB: Dict[int, QtGui.QColor] = {}
+    # ------------------------ Utility ------------------------
+    def _on_toggle_outlineA(self, checked: bool):
+        if not checked:
+            self._clear_outlines('A')
+            self._clear_labels('A')
+        self.populate_view_A()
+        self.update_overlay_view()
+
+    def _on_toggle_outlineB(self, checked: bool):
+        if not checked:
+            self._clear_outlines('B')
+            self._clear_labels('B')
+        self.populate_view_B()
+        self.update_overlay_view()
+
+    def _draw_outlines(self, which: str):
+        view = self.viewA if which == 'A' else self.viewB
+        items = self.outlineItemsA if which == 'A' else self.outlineItemsB
+        # clear previous
+        for it in items:
+            try: view.removeItem(it)
+            except Exception: pass
+        items.clear()
+
+        hulls = self.hullsA if which == 'A' else self.hullsB
+        pen = pg.mkPen((0,120,255), width=1.2) if which == 'A' else pg.mkPen((255,140,0), width=1.2)
+
+        for rid, path in hulls.items():
+            poly = path.toFillPolygon()
+            if poly.isEmpty():
+                continue
+            pts = np.array([[p.x(), p.y()] for p in poly], dtype=float)
+            if pts.shape[0] >= 2:
+                if not np.allclose(pts[0], pts[-1]):
+                    pts = np.vstack([pts, pts[0]])
+                item = pg.PlotDataItem(pts[:, 0], pts[:, 1], pen=pen)
+                view.addItem(item)
+                items.append(item)
+
+        if which == 'A':
+            self.outlineItemsA = items
+        else:
+            self.outlineItemsB = items
+
+
+    def on_intensity_changed(self, which: str, v: int):
+        """Slider callback: update label, redraw images, refresh overlay."""
+        # map slider 5..500 → factor 0.05..5.00
+        fct = max(0.05, min(5.0, v / 100.0))
+
+        if which == 'A':
+            if hasattr(self, "lblIntensityA"):
+                self.lblIntensityA.setText(f"{fct:.2f}×")
+            self.update_image_on_view('A')
+        else:
+            if hasattr(self, "lblIntensityB"):
+                self.lblIntensityB.setText(f"{fct:.2f}×")
+            self.update_image_on_view('B')
+
+        # overlay uses the same per-z levels; refresh it too
+        self.update_overlay_view()
+
+
+    def _slider_to_factor(self, v: int) -> float:
+        # 5..500 → 0.05..5.00
+        return max(0.05, min(5.0, v / 100.0))
+
+    def _get_intensity_factor(self, which: str) -> float:
+        if which == 'A':
+            return self._slider_to_factor(self.sldIntensityA.value())
+        else:
+            return self._slider_to_factor(self.sldIntensityB.value())
+
+    def _ensure_base_levels_for_z(self, which: str, z: float, slc: np.ndarray):
+        """Compute/caches robust base levels (lo, hi) per (dataset, z).
+        Falls back to wider percentiles/minmax if the window is too narrow.
+        """
+        if slc is None:
+            return
+        cache = self._baseLevelsA_by_z if which == 'A' else self._baseLevelsB_by_z
+        if z in cache:
+            return
+
+        vals = slc.astype(np.float32, copy=False)
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            cache[z] = (0.0, 1.0)
+            return
+
+        # Start with robust percentiles
+        lo = float(np.percentile(vals, 1.0))
+        hi = float(np.percentile(vals, 99.0))
+        width = hi - lo
+
+        # Overall dynamic range (robust)
+        dyn = float(np.percentile(vals, 99.9) - np.percentile(vals, 0.1))
+
+        # If too narrow, widen to 0.1–99.9
+        if width < 1e-6 or width < 0.01 * max(dyn, 1.0):
+            lo = float(np.percentile(vals, 0.1))
+            hi = float(np.percentile(vals, 99.9))
+            width = hi - lo
+
+        # If still too narrow (e.g., almost-constant images), center on median with min width
+        if width < 1e-6 or width < 0.005 * max(dyn, 1.0):
+            vmin = float(np.min(vals))
+            vmax = float(np.max(vals))
+            if vmax <= vmin:
+                vmax = vmin + 1.0
+            med = float(np.median(vals))
+            base_width = max(0.05 * (vmax - vmin), 1.0)  # at least 5% of full range or 1 DN
+            lo = med - 0.5 * base_width
+            hi = med + 0.5 * base_width
+
+        cache[z] = (float(lo), float(hi))
+
+
+    def _apply_image_levels(self, imgItem: pg.ImageItem, which: str, slc: np.ndarray, z: Optional[float] = None):
+        """Brighten-style mapping: larger slider => lower level bounds => brighter.
+        Still robust per-z; clamps and enforces a minimum window to avoid binary images.
+        """
+        if imgItem is None or slc is None:
+            return
+        if z is None:
+            z = self.datasetA.current_z if which == 'A' else self.datasetB.current_z
+
+        self._ensure_base_levels_for_z(which, z, slc)
+        cache = self._baseLevelsA_by_z if which == 'A' else self._baseLevelsB_by_z
+        base = cache.get(z)
+        if base is None:
+            return
+
+        lo_base, hi_base = base
+        f = self._get_intensity_factor(which)  # 0.05..5.00; higher should look brighter
+
+        # brighten mapping: shift both levels downward proportionally
+        lo2 = lo_base / max(f, 1e-6)
+        hi2 = hi_base / max(f, 1e-6)
+
+        vmin = float(np.nanmin(slc))
+        vmax = float(np.nanmax(slc))
+
+        # clamp to data range
+        lo2 = max(vmin, lo2)
+        hi2 = min(vmax, hi2)
+
+        # enforce a minimum window (avoid all-black/white)
+        min_width = max(1e-6, 0.005 * (vmax - vmin))  # ≥0.5% of full range
+        if (hi2 - lo2) < min_width:
+            c = 0.5 * (lo2 + hi2)
+            half = 0.5 * min_width
+            lo2, hi2 = c - half, c + half
+            lo2 = max(vmin, lo2)
+            hi2 = min(vmax, hi2)
+            if hi2 <= lo2:
+                hi2 = lo2 + 1.0
+
+        imgItem.setLevels((lo2, hi2))
+
+    def toggle_overlay_visible(self, checked: bool):
+        self.viewOverlay.setVisible(checked)
+
+    def change_z_text(self, which: str):
+        ds = self.datasetA if which == 'A' else self.datasetB
+        edit = self.editZA if which == 'A' else self.editZB
+        if ds.df is None:
+            return
+        txt = edit.text().strip()
+        if not txt:
+            return
+        try:
+            zval = float(txt)
+        except ValueError:
+            return
+        # snap to nearest available z from CSV
+        if ds.z_values:
+            zarr = np.asarray(ds.z_values, dtype=float)
+            zsel = float(zarr[np.argmin(np.abs(zarr - zval))])
+        else:
+            zsel = zval
+        ds.set_current_z(zsel)
+        edit.setText(str(zsel))
+        if which == 'A': self.populate_view_A()
+        else:            self.populate_view_B()
+        self.update_overlay_view()
+
+    def on_user_orientation_changed(self, which: str):
+        if which == 'A':
+            self.populate_view_A()
+        else:
+            self.populate_view_B()
+        self.update_overlay_view()
+
+
+    def _rect_for_dataset(self, which: str, slc_shape: Tuple[int,int]) -> QtCore.QRectF:
+        """Use existing per-z rect if set; otherwise default to pixel-center rect."""
+        rect_map = self.imgRectA_by_z if which == 'A' else self.imgRectB_by_z
+        ds = self.datasetA if which == 'A' else self.datasetB
+        rect = rect_map.get(ds.current_z)
+        if rect is not None:
+            return rect
+        H, W = slc_shape
+        return QtCore.QRectF(-0.5, -0.5, W, H)
+
+    def _user_affine(self, which: str) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (A, b) for XY' = A @ XY + b, applying flipH/flipV then rotation about the image-rect center."""
+        angle_deg = (self.spinRotA.value() if which == 'A' else self.spinRotB.value())
+        flipH = (self.chkFlipHA.isChecked() if which == 'A' else self.chkFlipHB.isChecked())
+        flipV = (self.chkFlipVA.isChecked() if which == 'A' else self.chkFlipVB.isChecked())
+
+        # Need current slice shape to define the default rect / center
+        ds = self.datasetA if which == 'A' else self.datasetB
+        slc = ds.get_tif_slice_for_z(ds.current_z) if ds.tif_stack is not None else None
+        if slc is None:
+            # fallback from points extent
+            pts = ds.get_boundary_xy_for_z(ds.current_z)
+            if pts.size == 0:
+                cx = cy = 0.0
+            else:
+                cx = 0.5 * (pts[:,0].min() + pts[:,0].max())
+                cy = 0.5 * (pts[:,1].min() + pts[:,1].max())
+        else:
+            rect = self._rect_for_dataset(which, (slc.shape[0], slc.shape[1]))
+            cx = rect.x() + rect.width() * 0.5
+            cy = rect.y() + rect.height() * 0.5
+
+        # 2x2
+        ang = np.deg2rad(angle_deg)
+        c, s = np.cos(ang), np.sin(ang)
+        Arot = np.array([[c, -s], [s, c]], dtype=float)
+        Sflip = np.diag([ -1.0 if flipH else 1.0, -1.0 if flipV else 1.0 ])
+        A = Arot @ Sflip  # flips first, then rotate
+
+        # translate so pivot = (cx, cy)
+        p = np.array([cx, cy], dtype=float)
+        b = p - A @ p
+        return A, b
+
+    def _user_qtransform(self, which: str) -> QtGui.QTransform:
+        A, b = self._user_affine(which)
+        # x' = a*x + c*y + dx ; y' = b*x + d*y + dy
+        a, b12, c, d = A[0,0], A[1,0], A[0,1], A[1,1]
+        dx, dy = float(b[0]), float(b[1])
+        return QtGui.QTransform(a, b12, 0.0, c, d, 0.0, dx, dy, 1.0)
+
+    def _apply_user_affine_to_points(self, which: str, XY: np.ndarray) -> np.ndarray:
+        if XY is None or XY.size == 0:
+            return XY
+        A, b = self._user_affine(which)
+        return (A @ XY.T).T + b
+
+
+    def _pre_orient_tif_stack(self, arr: np.ndarray) -> np.ndarray:
+        """
+        One-time raster-only orientation: 90° CW + *horizontal* flip on spatial axes.
+        This matches what you saw when using matplotlib imshow(origin='upper').
+        """
+        if arr is None:
+            return arr
+
+        if arr.ndim == 2:
+            out = np.rot90(arr, k=-1)   # 90° CW
+            out = out[:, ::-1]          # flip columns (left-right) 
+            return out
+
+        if arr.ndim == 3:
+            # Assume (Z,H,W). If you ever need to be robust, detect spatial axes first.
+            # Here we keep it simple since you said Z format is fine.
+            out = np.rot90(arr, k=-1, axes=(1, 2))  # rotate on (H,W)
+            out = out[:, :, ::-1]                   # flip columns (W axis) 
+            return out
+
+        return arr
+
+    def keyPressEvent(self, ev):
+        if ev.key() == QtCore.Qt.Key_Escape:
+            self.selA = None; self.selB = None
+            self._clear_highlight('A'); self._clear_highlight('B')
+            ev.accept(); return
+        super().keyPressEvent(ev)
+
+    def set_rot(self, which: str):
+        idx = self.comboRotA.currentIndex() if which == 'A' else self.comboRotB.currentIndex()
+        k = [0, 1, 2, 3][idx]
+        if which == 'A': self.rotA_k = k
+        else:            self.rotB_k = k
+
+    def apply_xy_options(self, XY: np.ndarray) -> np.ndarray:
+        return XY
+
+    def qtransform_from_similarity(self, s: float, R: np.ndarray, t: np.ndarray) -> QtGui.QTransform:
+        a = s * R[0, 0]; b = s * R[1, 0]
+        c = s * R[0, 1]; d = s * R[1, 1]
+        dx = float(t[0]); dy = float(t[1])
+        # Qt mapping: x' = m11*x + m21*y + dx ; y' = m12*x + m22*y + dy
+        return QtGui.QTransform(a, b, 0.0, c, d, 0.0, dx, dy, 1.0)
+
+    # ------------------------ File loading + z ------------------------
+    def load_csv(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, f"Load {dataset.name} CSV", os.getcwd(), "CSV Files (*.csv)"
+        )
+        if not path:
+            return
+
+        try:
+            dataset.load_csv(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Load error", str(e))
+            return
+
+        # Show filename beside the Load button
+        label_widget.setText(os.path.basename(path))
+
+        # Pick the first z-level (if any) and set current
+        if dataset.z_values:
+            z0 = dataset.z_values[0]
+            dataset.set_current_z(z0)
+            if which == 'A':
+                self.editZA.setText(str(z0))
+            else:
+                self.editZB.setText(str(z0))
+
+        self.status.setText(
+            f"Loaded {dataset.name}: {len(dataset.df)} points, {len(dataset.z_values)} z-levels"
+        )
+
+        # Draw views
+        if which == 'A':
+            self.populate_view_A()
+        else:
+            self.populate_view_B()
+
+        self.refresh_controls()
+        self.update_overlay_view()
+
+
+
+    def load_tif(self, dataset: Dataset, which: str):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, f"Load {dataset.name} TIF", os.getcwd(), "TIFF Files (*.tif *.tiff)"
+        )
+        if not path:
+            return
+
+        try:
+            dataset.load_tif(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "TIF load error", str(e))
+            return
+
+        # One-time pre-orientation (your fixed version that rotates CW then flips columns)
+        dataset.tif_stack = self._pre_orient_tif_stack(dataset.tif_stack)
+
+        # If z not set yet, initialize it (for 2D: 0; for 3D: 0th slice)
+        if dataset.current_z is None:
+            z_init = 0.0
+            dataset.set_current_z(z_init)
+            if which == 'A':
+                self.editZA.setText(str(dataset.current_z))
+            else:
+                self.editZB.setText(str(dataset.current_z))
+
+        # Update filename label beside the TIF button
+        if which == 'A':
+            self.lblTifA.setText(os.path.basename(path))
+            self._baseLevelsA_by_z.clear()
+        else:
+            self.lblTifB.setText(os.path.basename(path))
+            self._baseLevelsB_by_z.clear()
+
+        # Optionally scale/position image to match points on this z (no harm if no points)
+        try:
+            self.auto_fit_image_to_points(which)
+        except Exception:
+            pass  # safe fallback; rect will default to pixel coords
+
+        # Turn on "Show image" and draw immediately
+        if which == 'A':
+            self.chkShowImgA.blockSignals(True)
+            self.chkShowImgA.setChecked(True)
+            self.chkShowImgA.blockSignals(False)
+            self.populate_view_A()
+        else:
+            self.chkShowImgB.blockSignals(True)
+            self.chkShowImgB.setChecked(True)
+            self.chkShowImgB.blockSignals(False)
+            self.populate_view_B()
+
+        self.update_overlay_view()
+        self.status.setText(f"Loaded TIF for {dataset.name}: {os.path.basename(path)}")
+
+    def change_z(self, which: str):
+        dataset = self.datasetA if which == 'A' else self.datasetB
+        combo = self.comboZA if which == 'A' else self.comboZB
+        if dataset.df is None or combo.count() == 0:
+            return
+        z = norm_z(float(combo.currentText()))
+        dataset.set_current_z(z)
+        if which == 'A': self.populate_view_A()
+        else:            self.populate_view_B()
+        self.refresh_controls(); self.update_overlay_view()
+
+    # ------------------------ Controls enable ------------------------
+    def refresh_controls(self):
+        loadedA = self.datasetA.df is not None
+        loadedB = self.datasetB.df is not None
+        both_loaded = loadedA and loadedB
+
+        # Enable Hungarian only when both datasets are loaded and have centroids on the current z
+        hasA = both_loaded and (self.datasetA.cur_centroid_array is not None) and (self.datasetA.cur_centroid_array.size > 0)
+        hasB = both_loaded and (self.datasetB.cur_centroid_array is not None) and (self.datasetB.cur_centroid_array.size > 0)
+        if hasattr(self, "btnHungarian"):
+            self.btnHungarian.setEnabled(hasA and hasB)
+
+        # Enable export when at least one pair exists
+        if hasattr(self, "btnExport"):
+            self.btnExport.setEnabled(both_loaded and len(self.A2B) > 0)
+
+
+    # ------------------------ Drawing ------------------------
+    def populate_view_A(self):
+        self.viewA.clear(); self._clear_labels('A')
+        if self.datasetA.df is None:
+            return
+        self.update_image_on_view('A')
+        z = self.datasetA.current_z
+        pts = self.apply_xy_options(self.datasetA.get_boundary_xy_for_z(z))
+        pts = self._apply_user_affine_to_points('A', pts)
+        if pts.size:
+            self.viewA.addItem(
+                pg.PlotDataItem(
+                    pts[:, 0], pts[:, 1],
+                    pen=None,
+                    symbol='o',
+                    symbolSize=3,
+                    symbolPen=pg.mkPen(0,120,255, 220),
+                    symbolBrush=pg.mkBrush(0,120,255, 140),
+                )
+            )
+        self.centroidsA = self._draw_centroids(self.viewA, self.datasetA, is_A=True)
+        self._draw_labels(self.viewA, self.datasetA, 'A')
+        self.rebuild_hulls_for(self.datasetA, 'A')
+        if getattr(self, 'chkShowOutlineA', None) and self.chkShowOutlineA.isChecked():
+            self._draw_outlines('A')
+        self.update_overlay_on_A()
+
+        self.viewA.autoRange()
+
+    def populate_view_B(self):
+        self.viewB.clear(); self._clear_labels('B')
+        if self.datasetB.df is None:
+            return
+        self.update_image_on_view('B')
+        z = self.datasetB.current_z
+        pts = self.apply_xy_options(self.datasetB.get_boundary_xy_for_z(z))
+        pts = self._apply_user_affine_to_points('B', pts)
+        if pts.size:
+            self.viewB.addItem(
+                pg.PlotDataItem(
+                    pts[:, 0], pts[:, 1],
+                    pen=None,
+                    symbol='o',
+                    symbolSize=3,
+                    symbolPen=pg.mkPen(255,140,0, 220),
+                    symbolBrush=pg.mkBrush(255,140,0, 140),
+                )
+            )
+        self.centroidsB = self._draw_centroids(self.viewB, self.datasetB, is_A=False)
+        self._draw_labels(self.viewB, self.datasetB, 'B')
+        self.rebuild_hulls_for(self.datasetB, 'B')
+        if getattr(self, 'chkShowOutlineB', None) and self.chkShowOutlineB.isChecked():
+            self._draw_outlines('B')
+
+        self.viewB.autoRange()
+
+    def oriented_slice(self, dataset, which: str) -> Optional[np.ndarray]:
+        # Return the current slice as-is (already pre-oriented at load time).
+        return dataset.get_tif_slice_for_z(dataset.current_z)
+
+    def _clear_outlines(self, which: str):
+        view = self.viewA if which == 'A' else self.viewB
+        items = self.outlineItemsA if which == 'A' else self.outlineItemsB
+        for it in items:
+            try: view.removeItem(it)
+            except Exception: pass
+        if which == 'A':
+            self.outlineItemsA = []
+        else:
+            self.outlineItemsB = []
+
+    def update_image_on_view(self, which: str):
+        dataset = self.datasetA if which == 'A' else self.datasetB
+        view    = self.viewA    if which == 'A' else self.viewB
+        chk     = self.chkShowImgA if which == 'A' else self.chkShowImgB
+        imgItem = self.imgItemA if which == 'A' else self.imgItemB
+        if imgItem is not None:
+            try: view.removeItem(imgItem)
+            except Exception: pass
+            if which == 'A': self.imgItemA = None
+            else:            self.imgItemB = None
+        if not chk.isChecked() or dataset.tif_stack is None:
+            return
+        slc = self.oriented_slice(dataset, which)
+        if slc is None:
+            return
+
+        new_img = pg.ImageItem(slc)
+
+        rect_map = self.imgRectA_by_z if which == 'A' else self.imgRectB_by_z
+        rect = rect_map.get(dataset.current_z)
+        if rect is None:
+            H, W = slc.shape[0], slc.shape[1]
+            rect = QtCore.QRectF(-0.5, -0.5, W, H)
+        new_img.setRect(rect)
+
+        # User orientation (flip + any-angle rot) applied to the image
+        T_user = self._user_qtransform(which)
+
+        # Optionally compose B→A similarity in B view
+        T = T_user
+        if which == 'B' and self.transform is not None and self.chkApplyTransformToB.isChecked():
+            s, R, t = self.transform
+            T = self.qtransform_from_similarity(s, R, t) * T_user
+
+        new_img.setTransform(T)
+        cur_z = self.datasetA.current_z if which == 'A' else self.datasetB.current_z
+        self._apply_image_levels(new_img, which, slc, z=cur_z)
+        new_img.setZValue(-100)
+        view.addItem(new_img)
+        if which == 'A': self.imgItemA = new_img
+        else:            self.imgItemB = new_img
+
+    def _draw_centroids(self, view: pg.PlotWidget, dataset: Dataset, is_A: bool) -> ClickableScatter:
+        colors = {}; n = max(1, len(dataset.cur_roi_ids_sorted))
+        for i, rid in enumerate(dataset.cur_roi_ids_sorted):
+            colors[rid] = pg.intColor(i, hues=n)
+        if is_A: self.colorA = colors
+        else:    self.colorB = colors
+        spots = []
+        for rid in dataset.cur_roi_ids_sorted:
+            xy = dataset.cur_roi_centroids_xy[rid]
+            xy = self.apply_xy_options(np.array(xy))
+            xy = self._apply_user_affine_to_points('A' if is_A else 'B', np.array([xy]))[0]
+            col = colors[rid]
+            spots.append({'pos': (xy[0], xy[1]), 'size': 10, 'brush': col,
+                          'pen': pg.mkPen('k', width=0.8), 'data': rid, 'symbol': 'o'})
+        scatter = ClickableScatter(on_left_click=(self.on_click_A if is_A else self.on_click_B),
+                                   on_right_click=(self.on_right_A if is_A else self.on_right_B))
+        scatter.addPoints(spots)
+        view.addItem(scatter)
+        return scatter
+
+    def _draw_labels(self, view: pg.PlotWidget, dataset: Dataset, which: str):
+        # Don't draw labels if outlines are hidden
+        if (which == 'A' and not self.chkShowOutlineA.isChecked()) or \
+        (which == 'B' and not self.chkShowOutlineB.isChecked()):
+            # ensure any old labels are cleared
+            self._clear_labels(which)
+            return
+
+        lbls: List[pg.TextItem] = []
+        ids = dataset.cur_roi_ids_sorted or []
+        for rid in ids:
+            base_xy = dataset.cur_roi_centroids_xy.get(rid)
+            if base_xy is None:
+                continue
+            xy = np.asarray(base_xy, dtype=float)
+            xy = self.apply_xy_options(xy)
+            xy = self._apply_user_affine_to_points(which, xy[None, :])[0]
+
+            label_item = pg.TextItem(text=str(rid), anchor=(0, 1))
+            label_item.setPos(float(xy[0]) + 3.0, float(xy[1]) - 3.0)
+            view.addItem(label_item)
+            lbls.append(label_item)
+
+        if which == 'A':
+            self.labelsA = lbls
+        else:
+            self.labelsB = lbls
+
+
+
+    def _clear_labels(self, which: str):
+        lbls = self.labelsA if which == 'A' else self.labelsB
+        for ti in lbls:
+            try: (self.viewA if which=='A' else self.viewB).removeItem(ti)
+            except Exception: pass
+        if which == 'A': self.labelsA = []
+        else:            self.labelsB = []
+
+    # ------------------------ Hulls + background click ------------------------
+    def rebuild_hulls_for(self, dataset: Dataset, which: str):
+        hulls: Dict[int, QtGui.QPainterPath] = {}
+        rid2pts = dataset.roi_to_points_by_z.get(dataset.current_z, {})
+        for rid, pts3 in rid2pts.items():
+            pts = self.apply_xy_options(pts3[:, :2])
+            pts = self._apply_user_affine_to_points(which, pts)
+            poly = None
+            if pts.shape[0] >= 3 and HULL_AVAILABLE:
+                try:
+                    hull = ConvexHull(pts)
+                    poly = pts[hull.vertices]
+                except Exception:
+                    poly = None
+            if poly is None:
+                if pts.shape[0] == 0:
+                    continue
+                mn = pts.min(axis=0); mx = pts.max(axis=0)
+                poly = np.array([[mn[0], mn[1]],[mx[0], mn[1]],[mx[0], mx[1]],[mn[0], mx[1]]], float)
+            path = QtGui.QPainterPath(); qp = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in poly])
+            path.addPolygon(qp); path.closeSubpath()
+            hulls[int(rid)] = path
+        if which == 'A': self.hullsA = hulls
+        else:            self.hullsB = hulls
+
+    def find_roi_at_point(self, dataset: Dataset, which: str, x: float, y: float) -> Optional[int]:
+        hulls = self.hullsA if which == 'A' else self.hullsB
+        qp = QtCore.QPointF(x, y)
+        for rid, path in hulls.items():
+            if path.contains(qp):
+                return rid
+        XY = dataset.cur_centroid_array
+        if XY is not None and XY.size:
+            XY2 = self.apply_xy_options(XY)
+            d = np.linalg.norm(XY2 - np.array([x, y]), axis=1)
+            idx = int(np.argmin(d))
+            return dataset.cur_roi_ids_sorted[idx]
+        return None
+
+    def _on_viewA_click(self, ev):
+        if ev.button() != QtCore.Qt.LeftButton or ev.isAccepted():
+            return
+        vb = self.viewA.getViewBox(); p = vb.mapSceneToView(ev.scenePos())
+        rid = self.find_roi_at_point(self.datasetA, 'A', p.x(), p.y())
+        if rid is None: return
+        if self.selA == rid:
+            self.selA = None; self._clear_highlight('A')
+        else:
+            self.selA = rid; self._highlight_roi('A', rid)
+        self.try_make_pair(); self.update_overlay_view()
+
+    def _on_viewB_click(self, ev):
+        if ev.button() != QtCore.Qt.LeftButton or ev.isAccepted():
+            return
+        vb = self.viewB.getViewBox(); p = vb.mapSceneToView(ev.scenePos())
+        rid = self.find_roi_at_point(self.datasetB, 'B', p.x(), p.y())
+        if rid is None: return
+        if self.selB == rid:
+            self.selB = None; self._clear_highlight('B')
+        else:
+            self.selB = rid; self._highlight_roi('B', rid)
+        self.try_make_pair(); self.update_overlay_view()
+
+    def _highlight_roi(self, which: str, rid: int):
+        self._clear_highlight(which)
+        ds = self.datasetA if which == 'A' else self.datasetB
+        pts3 = ds.roi_to_points_by_z.get(ds.current_z, {}).get(int(rid))
+        if pts3 is None or pts3.size == 0:
+            return
+        XY = self.apply_xy_options(pts3[:, :2].copy())
+        if XY.shape[0] >= 3:
+            XY = np.vstack([XY, XY[0]])
+        # TODO get diff cols here
+        pen = pg.mkPen((0, 120, 255), width=2) if which == 'A' else pg.mkPen((255, 140, 0), width=2)
+        item = pg.PlotDataItem(XY[:, 0], XY[:, 1], pen=pen)
+        if which == 'A':
+            self.selOutlineA = item; self.viewA.addItem(item)
+        else:
+            self.selOutlineB = item; self.viewB.addItem(item)
+
+    def _clear_highlight(self, which: str):
+        if which == 'A' and self.selOutlineA is not None:
+            try: self.viewA.removeItem(self.selOutlineA)
+            except Exception: pass
+            self.selOutlineA = None
+        if which == 'B' and self.selOutlineB is not None:
+            try: self.viewB.removeItem(self.selOutlineB)
+            except Exception: pass
+            self.selOutlineB = None
+
+    # ------------------------ Click handlers on centroids ------------------------
+    def on_click_A(self, rid: int):
+        if rid not in self.datasetA.cur_roi_centroids_xy:
+            return
+        if self.selA == rid:
+            self.selA = None; self._clear_highlight('A')
+        else:
+            self.selA = rid; self._highlight_roi('A', rid)
+        self.status.setText(f"Selected A (z={self.datasetA.current_z}) ROI {rid}")
+        self.try_make_pair(); self.update_overlay_view()
+
+    def on_click_B(self, rid: int):
+        if rid not in self.datasetB.cur_roi_centroids_xy:
+            return
+        if self.selB == rid:
+            self.selB = None; self._clear_highlight('B')
+        else:
+            self.selB = rid; self._highlight_roi('B', rid)
+        self.status.setText(f"Selected B (z={self.datasetB.current_z}) ROI {rid}")
+        self.try_make_pair(); self.update_overlay_view()
+
+    def on_right_A(self, rid: int):
+        akey: ROIKey = (self.datasetA.current_z, int(rid))
+        if akey in self.A2B:
+            bkey = self.A2B[akey]
+            del self.A2B[akey]
+            if bkey in self.B2A:
+                del self.B2A[bkey]
+            self.status.setText(f"Unpaired A {akey} ↔ B {bkey}")
+            self.update_pair_table(); self.refresh_controls(); self.update_overlay_on_A(); self.update_overlay_view()
+
+    def on_right_B(self, rid: int):
+        bkey: ROIKey = (self.datasetB.current_z, int(rid))
+        if bkey in self.B2A:
+            akey = self.B2A[bkey]
+            del self.B2A[bkey]
+            if akey in self.A2B:
+                del self.A2B[akey]
+            self.status.setText(f"Unpaired A {akey} ↔ B {bkey}")
+            self.update_pair_table(); self.refresh_controls(); self.update_overlay_on_A(); self.update_overlay_view()
+
+    def try_make_pair(self):
+        if self.selA is None or self.selB is None:
+            return
+        akey: ROIKey = (self.datasetA.current_z, int(self.selA))
+        bkey: ROIKey = (self.datasetB.current_z, int(self.selB))
+        if akey in self.A2B:
+            prev_b = self.A2B[akey];
+            if prev_b in self.B2A: del self.B2A[prev_b]
+        if bkey in self.B2A:
+            prev_a = self.B2A[bkey];
+            if prev_a in self.A2B: del self.A2B[prev_a]
+        self.A2B[akey] = bkey; self.B2A[bkey] = akey
+        self.selA = None; self.selB = None
+        self._clear_highlight('A'); self._clear_highlight('B')
+        self.status.setText(f"Paired A {akey} ↔ B {bkey}")
+        self.update_pair_table(); self.refresh_controls(); self.update_overlay_on_A(); self.update_overlay_view()
+
+    def is_key_on_current_slices(self, akey: ROIKey, bkey: ROIKey) -> bool:
+        return (np.isclose(akey[0], self.datasetA.current_z) and np.isclose(bkey[0], self.datasetB.current_z))
+
+    def update_pair_table(self):
+        self.pairTable.setRowCount(0)
+        for i, (akey, bkey) in enumerate(sorted(self.A2B.items())):
+            self.pairTable.insertRow(i)
+            itemA = QtWidgets.QTableWidgetItem(f"({akey[0]}, {akey[1]})")
+            itemB = QtWidgets.QTableWidgetItem(f"({bkey[0]}, {bkey[1]})")
+            itemA.setData(QtCore.Qt.UserRole, akey); itemB.setData(QtCore.Qt.UserRole, bkey)
+            self.pairTable.setItem(i, 0, itemA); self.pairTable.setItem(i, 1, itemB)
+
+    def remove_selected_pair(self):
+        rows = sorted(set([ix.row() for ix in self.pairTable.selectedIndexes()]), reverse=True)
+        for r in rows:
+            aitem = self.pairTable.item(r, 0); bitem = self.pairTable.item(r, 1)
+            if not aitem or not bitem: continue
+            akey: ROIKey = aitem.data(QtCore.Qt.UserRole); bkey: ROIKey = bitem.data(QtCore.Qt.UserRole)
+            if akey in self.A2B: del self.A2B[akey]
+            if bkey in self.B2A: del self.B2A[bkey]
+            self.pairTable.removeRow(r)
+        self.refresh_controls(); self.update_overlay_on_A(); self.update_overlay_view()
+
+    def clear_pairs(self):
+        self.A2B.clear(); self.B2A.clear()
+        self.update_pair_table(); self.refresh_controls(); self.update_overlay_on_A(); self.update_overlay_view()
+
+    # ------------------------ Transform & overlay ------------------------
+    def compute_transform(self):
+        valid_pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+        if len(valid_pairs) < 3:
+            QtWidgets.QMessageBox.warning(self, "Need ≥3 pairs", "Provide at least 3 A↔B pairs on the current z-slices.")
+            return
+        A_pts, B_pts = [], []
+        for (az, arid), (bz, brid) in valid_pairs:
+            A_pts.append(self.datasetA.cur_roi_centroids_xy[arid])
+            B_pts.append(self.datasetB.cur_roi_centroids_xy[brid])
+        A_pts = np.array(A_pts, dtype=float); B_pts = np.array(B_pts, dtype=float)
+        try:
+            s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
+            self.transform = (s, R, t)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Transform error", str(e)); return
+        self.status.setText(f"Estimated B→A on zA={self.datasetA.current_z}, zB={self.datasetB.current_z}: scale={self.transform[0]:.4f}")
+        self.update_overlay_on_A(); self.populate_view_B(); self.update_overlay_view()
+
+    def clear_transform(self):
+        self.transform = None
+        self.update_overlay_on_A(); self.populate_view_B(); self.update_overlay_view()
+
+    def update_overlay_on_A(self): # removed
+        return
+
+    # ------------------------ Live overlay view (A+B) with IoU ------------------------
+    def dynamic_transform_from_pairs(self):
+        pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+        n = len(pairs)
+        if n == 0:
+            return None
+        A_pts = [ self._apply_user_affine_to_points('A', np.array([self.datasetA.cur_roi_centroids_xy[ak[1]]]))[0]
+                for ak, _ in pairs ]
+        B_pts = [ self._apply_user_affine_to_points('B', np.array([self.datasetB.cur_roi_centroids_xy[bk[1]]]))[0]
+                for _, bk in pairs ]
+        A_pts = np.array(A_pts, float); B_pts = np.array(B_pts, float)
+        if n == 1:
+            p1 = B_pts[0]; q1 = A_pts[0]
+            s, R, t = 1.0, np.eye(2), q1 - p1
+        elif n == 2:
+            s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
+        else:
+            s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
+        return (s, R, t)
+
+    def polygon_from_roi(self, dataset: Dataset, rid: int) -> Optional[np.ndarray]:
+        pts3 = dataset.roi_to_points_by_z.get(dataset.current_z, {}).get(int(rid))
+        if pts3 is None or pts3.size == 0:
+            return None
+        pts = self.apply_xy_options(pts3[:, :2])
+        if pts.shape[0] >= 3 and HULL_AVAILABLE:
+            try:
+                hull = ConvexHull(pts)
+                poly = pts[hull.vertices]
+            except Exception:
+                poly = pts
+        else:
+            poly = pts
+        return poly
+
+    def iou_between(self, polyA: np.ndarray, polyB: np.ndarray) -> Optional[float]:
+        if polyA is None or polyB is None or polyA.shape[0] < 3 or polyB.shape[0] < 3:
+            return None
+        if SHAPELY:
+            try:
+                pA = Polygon(polyA)
+                pB = Polygon(polyB)
+                inter = pA.intersection(pB).area
+                uni = pA.union(pB).area
+                if uni <= 0: return 0.0
+                return float(inter / uni)
+            except Exception:
+                return None
+        # Fallback: coarse raster IoU
+        all_pts = np.vstack([polyA, polyB])
+        mn = np.floor(all_pts.min(axis=0)).astype(int); mx = np.ceil(all_pts.max(axis=0)).astype(int)
+        w = max(1, int(mx[0]-mn[0])); h = max(1, int(mx[1]-mn[1]))
+        if w*h > 2_000_000:  # limit
+            return None
+        grid_x, grid_y = np.meshgrid(np.arange(mn[0], mx[0]), np.arange(mn[1], mx[1]))
+        pts = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
+        from matplotlib.path import Path  # lightweight
+        maskA = Path(polyA).contains_points(pts).reshape(h, w)
+        maskB = Path(polyB).contains_points(pts).reshape(h, w)
+        inter = np.logical_and(maskA, maskB).sum()
+        uni = np.logical_or(maskA, maskB).sum()
+        if uni == 0: return 0.0
+        return float(inter/uni)
+
+    def update_overlay_view(self):
+        self.viewOverlay.clear()
+        if self.datasetA.df is None or self.datasetB.df is None:
+            return
+        # base images (respect toggles & rotation; no transform on A image; B image with dynamic transform?)
+        if self.chkShowImgA.isChecked() and self.datasetA.tif_stack is not None:
+            slcA = self.oriented_slice(self.datasetA, 'A')
+            if slcA is not None:
+                # if self.rotA_k: slcA = np.rot90(slcA, k=-self.rotA_k)   # <-- REMOVE
+                imgA = pg.ImageItem(slcA); imgA.setZValue(-200)
+                self._apply_image_levels(imgA, 'A', slcA, z=self.datasetA.current_z)
+                rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
+                if rectA is None:
+                    Ha, Wa = slcA.shape[0], slcA.shape[1]
+                    rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
+                imgA.setRect(rectA)
+                imgA.setTransform(self._user_qtransform('A'))
+                self.viewOverlay.addItem(imgA)
+
+        if self.chkShowImgB.isChecked() and self.datasetB.tif_stack is not None:
+            slcB = self.oriented_slice(self.datasetB, 'B')
+            if slcB is not None:
+                # if self.rotB_k: slcB = np.rot90(slcB, k=-self.rotB_k)   # <-- REMOVE
+                imgB = pg.ImageItem(slcB); imgB.setZValue(-190)
+                self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z) 
+                rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
+                if rectB is None:
+                    Hb, Wb = slcB.shape[0], slcB.shape[1]
+                    rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
+                imgB.setRect(rectB)
+
+                T_user_B = self._user_qtransform('B')
+                T_total_B = T_user_B
+                dyn = self.dynamic_transform_from_pairs()
+                if dyn is not None:
+                    s, R, t = dyn
+                    T_total_B = self.qtransform_from_similarity(s, R, t) * T_user_B
+                imgB.setTransform(T_total_B)
+
+                self.viewOverlay.addItem(imgB)
+        # Draw polygons & centroids
+        # A in blue; B in orange (transformed by dynamic transform)
+        dyn = self.dynamic_transform_from_pairs()
+        sRt = None if dyn is None else dyn
+        penA = pg.mkPen((0, 120, 255), width=2)
+        penB = pg.mkPen((255, 140, 0), width=2)
+        brushA = pg.mkBrush(0,120,255,60)
+        brushB = pg.mkBrush(255,140,0,60)
+        # A polygons
+        rid2polyA: Dict[int, np.ndarray] = {}
+        for rid in self.datasetA.cur_roi_ids_sorted:
+            poly = self.polygon_from_roi(self.datasetA, rid)
+            poly = self._apply_user_affine_to_points('A', poly)
+            rid2polyA[rid] = poly
+            if poly is None or poly.shape[0] < 3:
+                continue
+            if self.chkShowOutlineA.isChecked():
+                poly2 = np.vstack([poly, poly[0]])
+                self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penA))
+        # B polygons (dynamic transform)
+        for rid in self.datasetB.cur_roi_ids_sorted:
+            poly = self.polygon_from_roi(self.datasetB, rid)
+            poly = self._apply_user_affine_to_points('B', poly)
+            if poly is None or poly.shape[0] < 3: continue
+            if sRt is not None:
+                s, R, t = sRt
+                poly = apply_similarity_transform_2d(poly, s, R, t)
+            poly2 = np.vstack([poly, poly[0]])
+            if not getattr(self, 'chkShowOutlineB', None) or self.chkShowOutlineB.isChecked():
+                self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penB))
+
+        # IoU labels for matched pairs (current slices)
+        show_iou = self.chkShowOutlineA.isChecked() and self.chkShowOutlineB.isChecked()
+        if show_iou:
+            pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+            for (az, arid), (bz, brid) in pairs:
+                polyA = rid2polyA.get(arid)
+                polyB = self.polygon_from_roi(self.datasetB, brid)
+                if polyA is None or polyB is None: continue
+                if sRt is not None:
+                    s, R, t = sRt
+                    polyB = apply_similarity_transform_2d(polyB, s, R, t)
+                iou = self.iou_between(polyA, polyB)
+                if iou is None: continue
+                # place label at A centroid
+                cA = self.datasetA.cur_roi_centroids_xy[arid]
+                ti = pg.TextItem(text=f"IoU {iou:.2f}", anchor=(0,1))
+                ti.setPos(cA[0]+3, cA[1]-3)
+                self.viewOverlay.addItem(ti)
+        self.viewOverlay.autoRange()
+
+    # ------------------------ Hungarian auto-match ------------------------
+    def run_hungarian(self):
+        if self.datasetA.df is None or self.datasetB.df is None:
+            return
+
+        # Unpaired lists on current slices
+        A_unpaired = [rid for rid in self.datasetA.cur_roi_ids_sorted
+                    if (self.datasetA.current_z, rid) not in self.A2B]
+        B_unpaired = [rid for rid in self.datasetB.cur_roi_ids_sorted
+                    if (self.datasetB.current_z, rid) not in self.B2A]
+
+        if not A_unpaired or not B_unpaired:
+            QtWidgets.QMessageBox.information(self, "No unpaired ROIs", "Nothing to match on current slices.")
+            return
+
+        # A: centroids -> user orientation
+        A_pts = []
+        for rid in A_unpaired:
+            xy = np.asarray(self.datasetA.cur_roi_centroids_xy[rid], dtype=float)
+            xy = self.apply_xy_options(xy)
+            xy = self._apply_user_affine_to_points('A', xy[None, :])[0]
+            A_pts.append(xy)
+        A_pts = np.asarray(A_pts, dtype=float)
+
+        # B: centroids -> user orientation -> (optional) similarity B→A
+        B_pts_user = []
+        for rid in B_unpaired:
+            xy = np.asarray(self.datasetB.cur_roi_centroids_xy[rid], dtype=float)
+            xy = self.apply_xy_options(xy)
+            xy = self._apply_user_affine_to_points('B', xy[None, :])[0]
+            B_pts_user.append(xy)
+        B_pts_user = np.asarray(B_pts_user, dtype=float)
+
+        if self.transform is not None:
+            s, R, t = self.transform
+            B_pts = apply_similarity_transform_2d(B_pts_user, s, R, t)
+        else:
+            B_pts = B_pts_user
+
+        # Cost = Euclidean distances
+        dists = np.sqrt(((A_pts[:, None, :] - B_pts[None, :, :]) ** 2).sum(axis=2))
+
+        # Hungarian assignment
+        row_ind, col_ind = linear_sum_assignment(dists)
+
+        # Threshold by max distance
+        max_dist = float(self.spinMaxDist.value())
+        added = 0
+        for i, j in zip(row_ind, col_ind):
+            if dists[i, j] <= max_dist:
+                akey: ROIKey = (self.datasetA.current_z, int(A_unpaired[i]))
+                bkey: ROIKey = (self.datasetB.current_z, int(B_unpaired[j]))
+
+                # keep 1:1
+                if akey in self.A2B:
+                    prev_b = self.A2B[akey]
+                    if prev_b in self.B2A:
+                        del self.B2A[prev_b]
+                if bkey in self.B2A:
+                    prev_a = self.B2A[bkey]
+                    if prev_a in self.A2B:
+                        del self.A2B[prev_a]
+
+                self.A2B[akey] = bkey
+                self.B2A[bkey] = akey
+                added += 1
+
+        self.status.setText(
+            f"Hungarian added {added} pairs on zA={self.datasetA.current_z}, zB={self.datasetB.current_z} (≤ {max_dist:.1f} px)"
+        )
+        self.update_pair_table()
+        self.refresh_controls()
+        self.update_overlay_on_A()
+        self.populate_view_B()
+        self.update_overlay_view()
+
+    # ------------------------ Export ------------------------
+    def export_labeled_csvs(self):
+        if self.datasetA.df is None or self.datasetB.df is None:
+            return
+        if len(self.A2B) == 0:
+            QtWidgets.QMessageBox.warning(self, "No pairs", "Create at least one pair before exporting.")
+            return
+        pairs_sorted = sorted(self.A2B.items())
+        label_map_A: Dict[ROIKey, int] = {}; label_map_B: Dict[ROIKey, int] = {}
+        for k, (akey, bkey) in enumerate(pairs_sorted, start=1):
+            label_map_A[akey] = k; label_map_B[bkey] = k
+        def map_label(row, which: str):
+            z = norm_z(row['z']); rid = int(row['ROI_ID'])
+            return int((label_map_A if which=='A' else label_map_B).get((z, rid), 0))
+        dfA = self.datasetA.df.copy(); dfB = self.datasetB.df.copy()
+        dfA['label'] = dfA.apply(lambda r: map_label(r, 'A'), axis=1)
+        dfB['label'] = dfB.apply(lambda r: map_label(r, 'B'), axis=1)
+        out_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output directory", os.getcwd())
+        if not out_dir:
+            return
+        baseA = os.path.splitext(self.datasetA.name)[0]; baseB = os.path.splitext(self.datasetB.name)[0]
+        outA = os.path.join(out_dir, f"{baseA}_labeled.csv")
+        outB = os.path.join(out_dir, f"{baseB}_labeled.csv")
+        try:
+            dfA.to_csv(outA, index=False); dfB.to_csv(outB, index=False)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Export error", str(e)); return
+        self.status.setText(f"Exported:{outA}{outB}")
+
+
+# ---------------------------- main ----------------------------
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    pg.setConfigOptions(antialias=False, useOpenGL=False)
+    w = MainWindow(); w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
