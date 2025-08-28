@@ -4,13 +4,18 @@ from cellpose import models, utils
 import tifffile
 import csv
 
+# Temp parameter to segment only a single plane
+target_z = 82
+
 # Load the 3D image z-stack from a .tif file
 # Assume the file 'image_stack.tif' is a 3D stack where the first dimension is the Z-plane
-image_stack = tifffile.imread('AVG_file_test.tif')
+# image_stack = tifffile.imread('AVG_file_test.tif')
+image_stack = tifffile.imread('file_00001.tif')
 print(image_stack.shape)
 
 # Initialize Cellpose model
-model = models.CellposeModel(pretrained_model='./DRG_xyzmodel_20220705')
+# model = models.CellposeModel(pretrained_model='./DRG_xyzmodel_20220705')
+model = models.CellposeModel(pretrained_model='./DRG_20250116_111124')
 
 # Placeholder list to store segmentation masks for each Z-plane
 output_list = []
@@ -19,7 +24,12 @@ output_list = []
 if image_stack.ndim == 2:
     z_planes = [image_stack]
 else:
-    z_planes = [image_stack[z, :, :] for z in range(image_stack.shape[0])]
+    if target_z is not None:
+        if target_z < 0 or target_z >= image_stack.shape[0]:
+            raise ValueError(f"target_z {target_z} out of range! Must be 0 to {image_stack.shape[0]-1}")
+        z_planes = [image_stack[target_z, :, :]]
+    else:
+        z_planes = [(z, image_stack[z, :, :]) for z in range(image_stack.shape[0])]
 
 for z, z_plane in enumerate(z_planes):
     print(f"Segmenting z-plane: {z} of {len(z_planes)-1}")
@@ -51,7 +61,7 @@ for z, z_plane in enumerate(z_planes):
                 output_list.append((x, y, z, roi_id, avg_intensity))
 
 # Write the list to a CSV
-csv_filename = 'roi_coords_single_plane.csv'
+csv_filename = 'day0_single_plane.csv'
 with open(csv_filename, mode='w', newline='') as file:
     writer = csv.writer(file)
     # Write header
