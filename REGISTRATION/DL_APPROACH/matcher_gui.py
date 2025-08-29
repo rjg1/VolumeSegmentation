@@ -397,6 +397,27 @@ class MainWindow(QtWidgets.QMainWindow):
         hlB.addWidget(self.sldIntensityB); hlB.addWidget(self.lblIntensityB)
         f.addRow(QtWidgets.QLabel("Image intensity B:"), wrapB)
 
+         # --- Image opacity (sliders) ---
+        self.sldOpacityA = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sldOpacityA.setRange(0, 100)      # 0%..100%
+        self.sldOpacityA.setValue(100)          # default 100%
+        self.lblOpacityA = QtWidgets.QLabel("100%")
+        self.sldOpacityA.valueChanged.connect(lambda v: self.on_opacity_changed('A', v))
+        wrapOA = QtWidgets.QWidget()
+        hlOA = QtWidgets.QHBoxLayout(wrapOA); hlOA.setContentsMargins(0,0,0,0); hlOA.setSpacing(8)
+        hlOA.addWidget(self.sldOpacityA); hlOA.addWidget(self.lblOpacityA)
+        f.addRow(QtWidgets.QLabel("Image opacity A:"), wrapOA)
+
+        self.sldOpacityB = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sldOpacityB.setRange(0, 100)
+        self.sldOpacityB.setValue(100)
+        self.lblOpacityB = QtWidgets.QLabel("100%")
+        self.sldOpacityB.valueChanged.connect(lambda v: self.on_opacity_changed('B', v))
+        wrapOB = QtWidgets.QWidget()
+        hlOB = QtWidgets.QHBoxLayout(wrapOB); hlOB.setContentsMargins(0,0,0,0); hlOB.setSpacing(8)
+        hlOB.addWidget(self.sldOpacityB); hlOB.addWidget(self.lblOpacityB)
+        f.addRow(QtWidgets.QLabel("Image opacity B:"), wrapOB)
+
 
         # ---------------- Rotation (deg) + flips ----------------
         self.spinRotA = QtWidgets.QDoubleSpinBox()
@@ -491,10 +512,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.colorA: Dict[int, QtGui.QColor] = {}
         self.colorB: Dict[int, QtGui.QColor] = {}
     # ------------------------ Utility ------------------------
+    def on_opacity_changed(self, which: str, v: int):
+        txt = f"{int(v)}%"
+        if which == 'A':
+            if hasattr(self, "lblOpacityA"): self.lblOpacityA.setText(txt)
+            self.update_image_on_view('A')
+        else:
+            if hasattr(self, "lblOpacityB"): self.lblOpacityB.setText(txt)
+            self.update_image_on_view('B')
+        # Overlay uses the same opacity settings
+        self.update_overlay_view()
+
+    def _slider_to_opacity(self, v: int) -> float:
+        return max(0.0, min(1.0, v / 100.0))
+
+    def _get_opacity(self, which: str) -> float:
+        if which == 'A':
+            return self._slider_to_opacity(self.sldOpacityA.value())
+        else:
+            return self._slider_to_opacity(self.sldOpacityB.value())
+
+
     def _on_toggle_outlineA(self, checked: bool):
+
         if not checked:
             self._clear_outlines('A')
             self._clear_labels('A')
+            self._clear_highlight('A')          # <-- clear selection outline too
+            self.update_overlay_view()          # <-- refresh overlay so it hides there as well
+
         self.populate_view_A()
         self.update_overlay_view()
 
@@ -502,10 +548,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if not checked:
             self._clear_outlines('B')
             self._clear_labels('B')
+            self._clear_highlight('B')          # <-- clear selection outline too
+            self.update_overlay_view()          # <-- refresh overlay
+
         self.populate_view_B()
         self.update_overlay_view()
 
     def _draw_outlines(self, which: str):
+        if (which == 'A' and not self.chkShowOutlineA.isChecked()) or (which == 'B' and not self.chkShowOutlineB.isChecked()):
+            return
         view = self.viewA if which == 'A' else self.viewB
         items = self.outlineItemsA if which == 'A' else self.outlineItemsB
         # clear previous
@@ -608,46 +659,59 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     def _apply_image_levels(self, imgItem: pg.ImageItem, which: str, slc: np.ndarray, z: Optional[float] = None):
-        """Brighten-style mapping: larger slider => lower level bounds => brighter.
-        Still robust per-z; clamps and enforces a minimum window to avoid binary images.
+        """
+        Stable contrast slider:
+        - Compute robust wide and tight windows per-z.
+        - Slider (0.05..5.0) maps linearly to mix between wide (low contrast) and tight (high contrast).
         """
         if imgItem is None or slc is None:
             return
         if z is None:
             z = self.datasetA.current_z if which == 'A' else self.datasetB.current_z
 
+        # compute once per (dataset, z)
         self._ensure_base_levels_for_z(which, z, slc)
         cache = self._baseLevelsA_by_z if which == 'A' else self._baseLevelsB_by_z
         base = cache.get(z)
         if base is None:
             return
 
-        lo_base, hi_base = base
-        f = self._get_intensity_factor(which)  # 0.05..5.00; higher should look brighter
+        v = slc.astype(np.float32, copy=False)
+        v = v[np.isfinite(v)]
+        if v.size == 0:
+            imgItem.setLevels((0.0, 1.0))
+            return
 
-        # brighten mapping: shift both levels downward proportionally
-        lo2 = lo_base / max(f, 1e-6)
-        hi2 = hi_base / max(f, 1e-6)
+        # wide and tight windows (robust)
+        p = np.percentile
+        wide_lo, wide_hi   = float(p(v, 0.2)),  float(p(v, 99.8))
+        tight_lo, tight_hi = float(p(v, 10.0)), float(p(v, 90.0))
 
-        vmin = float(np.nanmin(slc))
-        vmax = float(np.nanmax(slc))
+        # ensure order
+        if tight_hi <= tight_lo:
+            tight_lo, tight_hi = wide_lo, wide_hi
+        if wide_hi <= wide_lo:
+            wide_lo, wide_hi = float(np.min(v)), float(np.max(v))
+            if wide_hi <= wide_lo:
+                wide_hi = wide_lo + 1.0
 
-        # clamp to data range
-        lo2 = max(vmin, lo2)
-        hi2 = min(vmax, hi2)
+        # slider factor 0.05..5.00  →  mix 0..1 linearly
+        f   = self._get_intensity_factor(which)              # 0.05..5
+        mix = (f - 0.05) / (5.0 - 0.05)                      # 0..1
+        mix = max(0.0, min(1.0, mix))
 
-        # enforce a minimum window (avoid all-black/white)
-        min_width = max(1e-6, 0.005 * (vmax - vmin))  # ≥0.5% of full range
-        if (hi2 - lo2) < min_width:
-            c = 0.5 * (lo2 + hi2)
-            half = 0.5 * min_width
-            lo2, hi2 = c - half, c + half
-            lo2 = max(vmin, lo2)
-            hi2 = min(vmax, hi2)
-            if hi2 <= lo2:
-                hi2 = lo2 + 1.0
+        lo = (1.0 - mix) * wide_lo + mix * tight_lo
+        hi = (1.0 - mix) * wide_hi + mix * tight_hi
 
-        imgItem.setLevels((lo2, hi2))
+        # enforce a tiny minimal width to avoid binary look
+        full = float(np.max(v) - np.min(v))
+        minw = max(1e-6, 0.001 * full)
+        if (hi - lo) < minw:
+            c = 0.5 * (hi + lo)
+            lo, hi = c - 0.5 * minw, c + 0.5 * minw
+
+        imgItem.setLevels((float(lo), float(hi)))
+
 
     def toggle_overlay_visible(self, checked: bool):
         self.viewOverlay.setVisible(checked)
@@ -728,13 +792,6 @@ class MainWindow(QtWidgets.QMainWindow):
         b = p - A @ p
         return A, b
 
-    def _user_qtransform(self, which: str) -> QtGui.QTransform:
-        A, b = self._user_affine(which)
-        # x' = a*x + c*y + dx ; y' = b*x + d*y + dy
-        a, b12, c, d = A[0,0], A[1,0], A[0,1], A[1,1]
-        dx, dy = float(b[0]), float(b[1])
-        return QtGui.QTransform(a, b12, 0.0, c, d, 0.0, dx, dy, 1.0)
-
     def _apply_user_affine_to_points(self, which: str, XY: np.ndarray) -> np.ndarray:
         if XY is None or XY.size == 0:
             return XY
@@ -780,12 +837,36 @@ class MainWindow(QtWidgets.QMainWindow):
     def apply_xy_options(self, XY: np.ndarray) -> np.ndarray:
         return XY
 
+    def _qtransform_from_affine(self, A: np.ndarray, t: np.ndarray) -> QtGui.QTransform:
+        """
+        Build QTransform for XY' = A @ XY + t (no perspective).
+        Qt maps points as:
+            x' = m11*x + m21*y + m31
+            y' = m12*x + m22*y + m32
+            w  = m13*x + m23*y + m33
+        For affine: m13=m23=0, m33=1.
+        """
+        return QtGui.QTransform(
+            float(A[0, 0]), float(A[1, 0]), 0.0,   # m11, m12, m13
+            float(A[0, 1]), float(A[1, 1]), 0.0,   # m21, m22, m23
+            float(t[0]),    float(t[1]),    1.0    # m31, m32, m33
+        )
+
     def qtransform_from_similarity(self, s: float, R: np.ndarray, t: np.ndarray) -> QtGui.QTransform:
-        a = s * R[0, 0]; b = s * R[1, 0]
-        c = s * R[0, 1]; d = s * R[1, 1]
-        dx = float(t[0]); dy = float(t[1])
-        # Qt mapping: x' = m11*x + m21*y + dx ; y' = m12*x + m22*y + dy
-        return QtGui.QTransform(a, b, 0.0, c, d, 0.0, dx, dy, 1.0)
+        return self._qtransform_from_affine(s * R, t)
+
+    def _user_qtransform(self, which: str) -> QtGui.QTransform:
+        A, b = self._user_affine(which)
+        return self._qtransform_from_affine(A, b)
+
+    def qtransform_from_similarity(self, s: float, R: np.ndarray, t: np.ndarray) -> QtGui.QTransform:
+        return self._qtransform_from_affine(s * R, t)
+
+    def _user_qtransform(self, which: str) -> QtGui.QTransform:
+        A, b = self._user_affine(which)
+        return self._qtransform_from_affine(A, b)
+
+
 
     # ------------------------ File loading + z ------------------------
     def load_csv(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
@@ -919,7 +1000,7 @@ class MainWindow(QtWidgets.QMainWindow):
         z = self.datasetA.current_z
         pts = self.apply_xy_options(self.datasetA.get_boundary_xy_for_z(z))
         pts = self._apply_user_affine_to_points('A', pts)
-        if pts.size:
+        if pts.size and self.chkShowOutlineA.isChecked():
             self.viewA.addItem(
                 pg.PlotDataItem(
                     pts[:, 0], pts[:, 1],
@@ -947,7 +1028,7 @@ class MainWindow(QtWidgets.QMainWindow):
         z = self.datasetB.current_z
         pts = self.apply_xy_options(self.datasetB.get_boundary_xy_for_z(z))
         pts = self._apply_user_affine_to_points('B', pts)
-        if pts.size:
+        if pts.size and self.chkShowOutlineB.isChecked():
             self.viewB.addItem(
                 pg.PlotDataItem(
                     pts[:, 0], pts[:, 1],
@@ -972,14 +1053,49 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _clear_outlines(self, which: str):
         view = self.viewA if which == 'A' else self.viewB
+        plot = view.getPlotItem()
+
         items = self.outlineItemsA if which == 'A' else self.outlineItemsB
+
         for it in items:
-            try: view.removeItem(it)
-            except Exception: pass
+            # 1) Proper owner removal (PlotItem)
+            try:
+                plot.removeItem(it)
+            except Exception:
+                pass
+
+            try:
+                view.removeItem(it)
+            except Exception:
+                pass
+
+            # 2) Hard fallback: detach and remove from scene
+            try:
+                gi = it  # PlotDataItem is already a GraphicsObject
+                if gi.scene() is not None:
+                    gi.setParentItem(None)
+                    gi.hide()
+                    gi.scene().removeItem(gi)
+            except Exception:
+                pass
+
+            # 3) Nuke its data as a last resort (instant visual clear)
+            try:
+                if hasattr(it, "setData"):
+                    it.setData(x=[], y=[])
+            except Exception:
+                pass
+
+        # Reset the cache list
         if which == 'A':
             self.outlineItemsA = []
         else:
             self.outlineItemsB = []
+
+        # Force a redraw so the removal is visible immediately
+        plot.update()
+        view.update()
+        QtWidgets.QApplication.processEvents()
 
     def update_image_on_view(self, which: str):
         dataset = self.datasetA if which == 'A' else self.datasetB
@@ -996,8 +1112,9 @@ class MainWindow(QtWidgets.QMainWindow):
         slc = self.oriented_slice(dataset, which)
         if slc is None:
             return
-
         new_img = pg.ImageItem(slc)
+        new_img.setOpacity(self._get_opacity(which))  # <— add this
+
 
         rect_map = self.imgRectA_by_z if which == 'A' else self.imgRectB_by_z
         rect = rect_map.get(dataset.current_z)
@@ -1288,19 +1405,20 @@ class MainWindow(QtWidgets.QMainWindow):
         n = len(pairs)
         if n == 0:
             return None
-        A_pts = [ self._apply_user_affine_to_points('A', np.array([self.datasetA.cur_roi_centroids_xy[ak[1]]]))[0]
-                for ak, _ in pairs ]
-        B_pts = [ self._apply_user_affine_to_points('B', np.array([self.datasetB.cur_roi_centroids_xy[bk[1]]]))[0]
-                for _, bk in pairs ]
-        A_pts = np.array(A_pts, float); B_pts = np.array(B_pts, float)
+
+        # RAW centroids (no user affine)
+        A_pts = np.array([ self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs ], float)
+        B_pts = np.array([ self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs ], float)
+
         if n == 1:
-            p1 = B_pts[0]; q1 = A_pts[0]
+            p1, q1 = B_pts[0], A_pts[0]
             s, R, t = 1.0, np.eye(2), q1 - p1
         elif n == 2:
             s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
         else:
             s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
         return (s, R, t)
+
 
     def polygon_from_roi(self, dataset: Dataset, rid: int) -> Optional[np.ndarray]:
         pts3 = dataset.roi_to_points_by_z.get(dataset.current_z, {}).get(int(rid))
@@ -1356,34 +1474,40 @@ class MainWindow(QtWidgets.QMainWindow):
             if slcA is not None:
                 # if self.rotA_k: slcA = np.rot90(slcA, k=-self.rotA_k)   # <-- REMOVE
                 imgA = pg.ImageItem(slcA); imgA.setZValue(-200)
+                imgA.setOpacity(self._get_opacity('A')) 
+
                 self._apply_image_levels(imgA, 'A', slcA, z=self.datasetA.current_z)
                 rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
                 if rectA is None:
                     Ha, Wa = slcA.shape[0], slcA.shape[1]
                     rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
                 imgA.setRect(rectA)
-                imgA.setTransform(self._user_qtransform('A'))
+                imgA.setTransform(QtGui.QTransform())
                 self.viewOverlay.addItem(imgA)
 
         if self.chkShowImgB.isChecked() and self.datasetB.tif_stack is not None:
             slcB = self.oriented_slice(self.datasetB, 'B')
             if slcB is not None:
-                # if self.rotB_k: slcB = np.rot90(slcB, k=-self.rotB_k)   # <-- REMOVE
                 imgB = pg.ImageItem(slcB); imgB.setZValue(-190)
-                self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z) 
+                imgB.setOpacity(self._get_opacity('B'))  # <— use slider value
+
+
+                self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z)
+
                 rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
                 if rectB is None:
                     Hb, Wb = slcB.shape[0], slcB.shape[1]
                     rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
                 imgB.setRect(rectB)
 
-                T_user_B = self._user_qtransform('B')
-                T_total_B = T_user_B
+                # Compose: user affine first, then the dynamic B→A similarity (same as points)
                 dyn = self.dynamic_transform_from_pairs()
                 if dyn is not None:
                     s, R, t = dyn
-                    T_total_B = self.qtransform_from_similarity(s, R, t) * T_user_B
-                imgB.setTransform(T_total_B)
+                    T = self.qtransform_from_similarity(s, R, t)
+                else:
+                    T = QtGui.QTransform()  # identity
+                imgB.setTransform(T)
 
                 self.viewOverlay.addItem(imgB)
         # Draw polygons & centroids
@@ -1392,49 +1516,54 @@ class MainWindow(QtWidgets.QMainWindow):
         sRt = None if dyn is None else dyn
         penA = pg.mkPen((0, 120, 255), width=2)
         penB = pg.mkPen((255, 140, 0), width=2)
-        brushA = pg.mkBrush(0,120,255,60)
-        brushB = pg.mkBrush(255,140,0,60)
-        # A polygons
-        rid2polyA: Dict[int, np.ndarray] = {}
+
+        # A polygons (RAW)
+        rid2polyA = {}
         for rid in self.datasetA.cur_roi_ids_sorted:
-            poly = self.polygon_from_roi(self.datasetA, rid)
-            poly = self._apply_user_affine_to_points('A', poly)
+            poly = self.polygon_from_roi(self.datasetA, rid)   # RAW
             rid2polyA[rid] = poly
-            if poly is None or poly.shape[0] < 3:
-                continue
-            if self.chkShowOutlineA.isChecked():
+            if poly is not None and poly.shape[0] >= 3 and self.chkShowOutlineA.isChecked():
                 poly2 = np.vstack([poly, poly[0]])
                 self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penA))
-        # B polygons (dynamic transform)
+
+        # B polygons (RAW → similarity only)
         for rid in self.datasetB.cur_roi_ids_sorted:
-            poly = self.polygon_from_roi(self.datasetB, rid)
-            poly = self._apply_user_affine_to_points('B', poly)
-            if poly is None or poly.shape[0] < 3: continue
+            poly = self.polygon_from_roi(self.datasetB, rid)   # RAW
+            if poly is None or poly.shape[0] < 3: 
+                continue
             if sRt is not None:
                 s, R, t = sRt
                 poly = apply_similarity_transform_2d(poly, s, R, t)
             poly2 = np.vstack([poly, poly[0]])
-            if not getattr(self, 'chkShowOutlineB', None) or self.chkShowOutlineB.isChecked():
+            if self.chkShowOutlineB.isChecked():
                 self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penB))
+
 
         # IoU labels for matched pairs (current slices)
         show_iou = self.chkShowOutlineA.isChecked() and self.chkShowOutlineB.isChecked()
         if show_iou:
             pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
             for (az, arid), (bz, brid) in pairs:
-                polyA = rid2polyA.get(arid)
-                polyB = self.polygon_from_roi(self.datasetB, brid)
-                if polyA is None or polyB is None: continue
+                polyA = rid2polyA.get(arid)  # RAW
+                polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW
+                if polyA is None or polyB is None:
+                    continue
+
+                # similarity only (RAW → A frame)
                 if sRt is not None:
                     s, R, t = sRt
                     polyB = apply_similarity_transform_2d(polyB, s, R, t)
+
                 iou = self.iou_between(polyA, polyB)
-                if iou is None: continue
-                # place label at A centroid
+                if iou is None:
+                    continue
+
+                # label at RAW A centroid (matches RAW overlay)
                 cA = self.datasetA.cur_roi_centroids_xy[arid]
                 ti = pg.TextItem(text=f"IoU {iou:.2f}", anchor=(0,1))
-                ti.setPos(cA[0]+3, cA[1]-3)
+                ti.setPos(cA[0] + 3, cA[1] - 3)
                 self.viewOverlay.addItem(ti)
+
         self.viewOverlay.autoRange()
 
     # ------------------------ Hungarian auto-match ------------------------
