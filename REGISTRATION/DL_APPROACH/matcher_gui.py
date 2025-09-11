@@ -1,38 +1,13 @@
-#!/usr/bin/env python3
-"""
-ROI Pairing & Pose GUI (per‑z + TIF underlay + inside‑outline selection + visual warp + live overlay/IoU)
--------------------------------------------------------------------------------------------------------
-
-Additions in this version:
-- Optional initial TIF rotation per dataset (0/90/180/270) to fix orientation.
-- Apply B→A transform to **points and TIF** in B view (toggle).
-- Live third panel: **Overlay (A+B)** — updates transform progressively:
-    * 1 pair → translation only
-    * 2 pairs → rotation+scale+translation from the two pairs
-    * ≥3 pairs → SVD similarity (robust)
-  Computes and displays IoU for each matched ROI (convex hull vs. transformed hull) with filled masks.
-- Selection quality:
-    * Click inside outline to select; click again to deselect (toggle)
-    * ESC clears selection
-    * (Right‑click unpairs still available on centroid; but deselection is via toggle/ESC)
-- ROI ID labels drawn next to centroids (both panels).
-- Overlay symbols on A changed from "x" to hollow circles to avoid confusion.
-- Hungarian matching uses **transformed B centroids** when a transform is available (unchanged).
-
-Deps:
-    pip install PySide6 pyqtgraph numpy pandas scipy tifffile shapely
-
-Run:
-    python roi_pair_pose_gui.py
-"""
-
 import sys
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
-
+import math
 import numpy as np
+import itertools
 import pandas as pd
+import pyqtgraph as pg
+import tifffile as tiff
 
 # --- Qt / Graph imports (try PySide6, fall back to PyQt5) ---
 try:
@@ -42,8 +17,7 @@ except Exception:
     from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
     QT_LIB = 'PyQt5'
 
-import pyqtgraph as pg
-import tifffile as tiff
+
 
 # Optional Hungarian
 try:
@@ -267,12 +241,19 @@ class ClickableScatter(pg.ScatterPlotItem):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ROI Pairing & Pose GUI — B → A (overlay & IoU)")
+        self.setWindowTitle("ROI Registration GUI")
         self.resize(2100, 1100)
+
+        # Cached zoomed values of plots
+        self._savedRanges = {'A': None, 'B': None, 'O': None}  # overlay=O
 
         # Cached outlines
         self.outlineItemsA = []
         self.outlineItemsB = []
+
+        # Cached pairs
+        self._two_pair_cache: Dict[Tuple[ROIKey, ROIKey, ROIKey, ROIKey], Tuple[float, np.ndarray, np.ndarray, float]] = {}
+        self._best_combo_cache: Dict[frozenset, Tuple[float, np.ndarray, np.ndarray, float]] = {}
 
 
         # TIF rects (per-z)
@@ -321,6 +302,10 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.viewA, 1)
         layout.addWidget(self.viewB, 1)
         layout.addWidget(self.viewOverlay, 1)
+
+        self.viewA.getViewBox().sigRangeChanged.connect(lambda *_: self._save_range('A'))
+        self.viewB.getViewBox().sigRangeChanged.connect(lambda *_: self._save_range('B'))
+        self.viewOverlay.getViewBox().sigRangeChanged.connect(lambda *_: self._save_range('O'))
 
         # Match matplotlib origin='upper'
         for v in (self.viewA, self.viewB, self.viewOverlay):
@@ -458,6 +443,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chkShowOverlay.toggled.connect(self.toggle_overlay_visible)
         f.addRow(self.chkShowOverlay)
 
+        # --- Manual T/R/S override ---
+        self.chkManualTRS = QtWidgets.QCheckBox("Manual T / R / S override")
+        self.chkManualTRS.setChecked(False)
+        f.addRow(self.chkManualTRS)
+
+        rowTRS = QtWidgets.QWidget(); hTRS = QtWidgets.QGridLayout(rowTRS)
+        hTRS.setContentsMargins(0,0,0,0); hTRS.setHorizontalSpacing(8); hTRS.setVerticalSpacing(4)
+
+        self.spinTx = QtWidgets.QDoubleSpinBox(); self.spinTx.setRange(-1e6, 1e6); self.spinTx.setDecimals(3)
+        self.spinTy = QtWidgets.QDoubleSpinBox(); self.spinTy.setRange(-1e6, 1e6); self.spinTy.setDecimals(3)
+        self.spinScale = QtWidgets.QDoubleSpinBox(); self.spinScale.setRange(1e-4, 1e4); self.spinScale.setDecimals(6); self.spinScale.setValue(1.0)
+        self.spinTheta = QtWidgets.QDoubleSpinBox(); self.spinTheta.setRange(-3600.0, 3600.0); self.spinTheta.setDecimals(3); self.spinTheta.setSuffix("°")
+
+        hTRS.addWidget(QtWidgets.QLabel("Tx"), 0, 0); hTRS.addWidget(self.spinTx,   0, 1)
+        hTRS.addWidget(QtWidgets.QLabel("Ty"), 0, 2); hTRS.addWidget(self.spinTy,   0, 3)
+        hTRS.addWidget(QtWidgets.QLabel("Scale"), 1, 0); hTRS.addWidget(self.spinScale, 1, 1)
+        hTRS.addWidget(QtWidgets.QLabel("Angle"), 1, 2); hTRS.addWidget(self.spinTheta, 1, 3)
+        f.addRow(rowTRS)
+
+        # Disable the fields when override is off
+        for w in (self.spinTx, self.spinTy, self.spinScale, self.spinTheta):
+            w.setEnabled(False)
+
+        # Re-render overlay when manual values change (only if override is ON)
+        def _maybe_update_overlay(_):
+            if self.chkManualTRS.isChecked():
+                self.update_overlay_view()
+
+        self.spinTx.valueChanged.connect(_maybe_update_overlay)
+        self.spinTy.valueChanged.connect(_maybe_update_overlay)
+        self.spinScale.valueChanged.connect(_maybe_update_overlay)
+        self.spinTheta.valueChanged.connect(_maybe_update_overlay)
+
+        def _on_override_toggled(checked: bool):
+            for w in (self.spinTx, self.spinTy, self.spinScale, self.spinTheta):
+                w.setEnabled(checked)
+            # When turning ON, seed fields from the latest auto so user can fine-tune
+            if checked and hasattr(self, "_last_auto_sRt") and (self._last_auto_sRt is not None):
+                s, R, t = self._last_auto_sRt
+                self._set_ui_from_srt(s, R, t, block_signals=True)
+            self.update_overlay_view()
+
+        self.chkManualTRS.toggled.connect(_on_override_toggled)
+
+
+
         # ---------------- Hungarian controls (kept) ----------------
         self.btnHungarian = QtWidgets.QPushButton("Auto-match (Hungarian, current slices)")
         self.btnHungarian.clicked.connect(self.run_hungarian)
@@ -512,6 +543,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self.colorA: Dict[int, QtGui.QColor] = {}
         self.colorB: Dict[int, QtGui.QColor] = {}
     # ------------------------ Utility ------------------------
+    def _save_range(self, which: str):
+        vb = {'A': self.viewA, 'B': self.viewB, 'O': self.viewOverlay}[which].getViewBox()
+        xr, yr = vb.viewRange()  # [[xMin,xMax],[yMin,yMax]]
+        self._savedRanges[which] = (tuple(xr), tuple(yr))
+
+    def _restore_range(self, which: str):
+        rng = self._savedRanges.get(which)
+        if rng:
+            vb = {'A': self.viewA, 'B': self.viewB, 'O': self.viewOverlay}[which].getViewBox()
+            vb.setRange(xRange=rng[0], yRange=rng[1], padding=0)
+            return True
+        return False
+
+    def _srt_from_ui(self) -> Optional[Tuple[float, np.ndarray, np.ndarray]]:
+        try:
+            s = float(self.spinScale.value())
+            th = float(self.spinTheta.value()) * np.pi / 180.0
+            c, d = np.cos(th), np.sin(th)
+            R = np.array([[c, -d], [d,  c]], dtype=float)
+            t = np.array([float(self.spinTx.value()), float(self.spinTy.value())], dtype=float)
+            return (s, R, t)
+        except Exception:
+            return None
+
+    def _set_ui_from_srt(self, s: float, R: np.ndarray, t: np.ndarray, block_signals: bool = False):
+        # recover angle (deg) from R
+        theta = float(np.arctan2(R[1, 0], R[0, 0])) * 180.0 / np.pi
+        widgets = [self.spinScale, self.spinTheta, self.spinTx, self.spinTy]
+        if block_signals:
+            for w in widgets: w.blockSignals(True)
+        try:
+            self.spinScale.setValue(float(s))
+            self.spinTheta.setValue(theta)
+            self.spinTx.setValue(float(t[0]))
+            self.spinTy.setValue(float(t[1]))
+        finally:
+            if block_signals:
+                for w in widgets: w.blockSignals(False)
+
+
     def on_opacity_changed(self, which: str, v: int):
         txt = f"{int(v)}%"
         if which == 'A':
@@ -993,6 +1064,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------ Drawing ------------------------
     def populate_view_A(self):
+        self._save_range('A') 
         self.viewA.clear(); self._clear_labels('A')
         if self.datasetA.df is None:
             return
@@ -1018,9 +1090,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._draw_outlines('A')
         self.update_overlay_on_A()
 
-        self.viewA.autoRange()
+        if not self._restore_range('A'):   # keep user zoom if we have it
+            self.viewA.autoRange()         # otherwise autorange only on first draw
 
     def populate_view_B(self):
+        self._save_range('B')
         self.viewB.clear(); self._clear_labels('B')
         if self.datasetB.df is None:
             return
@@ -1045,7 +1119,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(self, 'chkShowOutlineB', None) and self.chkShowOutlineB.isChecked():
             self._draw_outlines('B')
 
-        self.viewB.autoRange()
+        if not self._restore_range('B'):
+                self.viewB.autoRange()
 
     def oriented_slice(self, dataset, which: str) -> Optional[np.ndarray]:
         # Return the current slice as-is (already pre-oriented at load time).
@@ -1267,16 +1342,22 @@ class MainWindow(QtWidgets.QMainWindow):
         pts3 = ds.roi_to_points_by_z.get(ds.current_z, {}).get(int(rid))
         if pts3 is None or pts3.size == 0:
             return
-        XY = self.apply_xy_options(pts3[:, :2].copy())
+
+        # Apply user orientation (so highlight aligns with the view)
+        XY = self._apply_user_affine_to_points(which, pts3[:, :2].copy())
         if XY.shape[0] >= 3:
             XY = np.vstack([XY, XY[0]])
-        # TODO get diff cols here
-        pen = pg.mkPen((0, 120, 255), width=2) if which == 'A' else pg.mkPen((255, 140, 0), width=2)
-        item = pg.PlotDataItem(XY[:, 0], XY[:, 1], pen=pen)
+
+        # Fixed highlight colours (lighter shades of A/B)
         if which == 'A':
+            pen = pg.mkPen((150, 200, 255), width=2)   # light blue
+            item = pg.PlotDataItem(XY[:, 0], XY[:, 1], pen=pen)
             self.selOutlineA = item; self.viewA.addItem(item)
         else:
+            pen = pg.mkPen((255, 200, 120), width=2)   # light orange
+            item = pg.PlotDataItem(XY[:, 0], XY[:, 1], pen=pen)
             self.selOutlineB = item; self.viewB.addItem(item)
+
 
     def _clear_highlight(self, which: str):
         if which == 'A' and self.selOutlineA is not None:
@@ -1286,7 +1367,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if which == 'B' and self.selOutlineB is not None:
             try: self.viewB.removeItem(self.selOutlineB)
             except Exception: pass
-            self.selOutlineB = None
+        self.selOutlineB = None
+
 
     # ------------------------ Click handlers on centroids ------------------------
     def on_click_A(self, rid: int):
@@ -1400,24 +1482,157 @@ class MainWindow(QtWidgets.QMainWindow):
         return
 
     # ------------------------ Live overlay view (A+B) with IoU ------------------------
+    # def dynamic_transform_from_pairs(self):
+    #     pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+    #     n = len(pairs)
+    #     if n == 0:
+    #         return None
+
+    #     # RAW centroids (no user affine)
+    #     A_pts = np.array([ self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs ], float)
+    #     B_pts = np.array([ self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs ], float)
+
+    #     if n == 1:
+    #         p1, q1 = B_pts[0], A_pts[0]
+    #         s, R, t = 1.0, np.eye(2), q1 - p1
+    #     elif n == 2:
+    #         s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
+    #     else:
+    #         s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
+    #     return (s, R, t)
     def dynamic_transform_from_pairs(self):
+        """
+        1 pair  -> translation only
+        2 pairs -> similarity from those two pairs
+        3+      -> choose the best 2 pairs (i,j) that maximize mean IoU across all current pairs.
+                - cache per (pair_i, pair_j)
+                - early stop when (t_x, t_y, s, theta) stabilizes.
+        NOTE: This operates in RAW coordinates (no user-affine) so overlay should not apply user transforms.
+        """
+        # Collect valid current-slice pairs
         pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
         n = len(pairs)
         if n == 0:
             return None
 
-        # RAW centroids (no user affine)
-        A_pts = np.array([ self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs ], float)
-        B_pts = np.array([ self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs ], float)
+        # Raw centroids (no user affine)
+        A_pts = np.array([self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs], dtype=float)
+        B_pts = np.array([self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs], dtype=float)
 
+        # ---- 1 pair: translation ----
         if n == 1:
-            p1, q1 = B_pts[0], A_pts[0]
+            p1 = B_pts[0]; q1 = A_pts[0]
             s, R, t = 1.0, np.eye(2), q1 - p1
-        elif n == 2:
+            return (s, R, t)
+
+        # ---- 2 pairs: direct similarity ----
+        if n == 2:
             s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
-        else:
+            return (s, R, t)
+
+        # ---- 3+ pairs: choose the best (i, j) by IoU over ALL pairs ----
+
+        # Precompute raw polygons (no user affine)
+        polyA = []
+        polyB = []
+        for (ak, bk) in pairs:
+            pA = self.polygon_from_roi(self.datasetA, ak[1])
+            pB = self.polygon_from_roi(self.datasetB, bk[1])
+            polyA.append(pA if (pA is not None and pA.shape[0] >= 3) else None)
+            polyB.append(pB if (pB is not None and pB.shape[0] >= 3) else None)
+
+        # If we have no usable polygons at all, fall back to SVD on all points
+        if not any(p is not None for p in polyA) or not any(p is not None for p in polyB):
             s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
+            return (s, R, t)
+
+        # Helper: mean IoU across all matched polygons (skip Nones)
+        def score_transform(s: float, R: np.ndarray, t: np.ndarray) -> float:
+            scores = []
+            for k in range(n):
+                pa = polyA[k]; pb = polyB[k]
+                if pa is None or pb is None:
+                    continue
+                pb_t = apply_similarity_transform_2d(pb, s, R, t)
+                val = self.iou_between(pa, pb_t)
+                if val is not None:
+                    scores.append(val)
+            if not scores:
+                return -1.0  # nothing to score on
+            return float(np.mean(scores))
+
+        # Candidate combos of two pairs
+        idx_pairs = list(itertools.combinations(range(n), 2))
+
+        # Cache key for current set of pairs (so we can reuse the best result if nothing changed)
+        set_key = frozenset(pairs)
+        if set_key in self._best_combo_cache:
+            s0, R0, t0, _ = self._best_combo_cache[set_key]
+            return (s0, R0, t0)
+
+        best_score = -1.0
+        best_sRt = None  # (s,R,t)
+
+        # Early stopping settings (convergence on parameters)
+        k_window = 6
+        tol_t = 0.25      # px
+        tol_s = 1e-3
+        tol_theta = 1e-3  # rad ~ 0.057deg
+        stable_hits = 0
+        param_window = []
+
+        def params_of(R: np.ndarray, t: np.ndarray, s: float) -> np.ndarray:
+            theta = math.atan2(R[1, 0], R[0, 0])  # rotation from R
+            return np.array([t[0], t[1], s, theta], dtype=float)
+
+        # For large n, evaluating all C(n,2) can be costly—iterate in a deterministic but
+        # semi-spread order (middle, edges) to find good candidates early.
+        # (Simple heuristic: evaluate mid indices first.)
+        mid = n // 2
+        idx_pairs.sort(key=lambda ij: abs((ij[0]+ij[1]) * 0.5 - mid))
+
+        for (i, j) in idx_pairs:
+            # Per-two-pair cache key (order-invariant)
+            key = (pairs[i][0], pairs[i][1], pairs[j][0], pairs[j][1])
+            # normalize to keep (i,j) vs (j,i) identical
+            if key not in self._two_pair_cache:
+                s, R, t = two_point_similarity(B_pts[i], B_pts[j], A_pts[i], A_pts[j])
+                sc = score_transform(s, R, t)
+                self._two_pair_cache[key] = (s, R, t, sc)
+            else:
+                s, R, t, sc = self._two_pair_cache[key]
+
+            # Track best
+            if sc > best_score:
+                best_score = sc
+                best_sRt = (s, R, t)
+
+            # ---- Early stopping on parameter stability ----
+            p = params_of(R, t, s)
+            param_window.append(p)
+            if len(param_window) > k_window:
+                param_window.pop(0)
+
+            if len(param_window) == k_window:
+                span = np.ptp(np.stack(param_window, axis=0), axis=0)
+                # if translation, scale and angle are all stable for a couple of consecutive windows
+                if (max(span[0], span[1]) < tol_t) and (span[2] < tol_s) and (span[3] < tol_theta):
+                    stable_hits += 1
+                    if stable_hits >= 2:  # "majority" convergence proxy
+                        break
+                else:
+                    stable_hits = 0
+
+        # Fallback if somehow nothing scored
+        if best_sRt is None:
+            s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
+            return (s, R, t)
+
+        # Remember the best for this exact set of pairs
+        s, R, t = best_sRt
+        self._best_combo_cache[set_key] = (s, R, t, best_score)
         return (s, R, t)
+
 
 
     def polygon_from_roi(self, dataset: Dataset, rid: int) -> Optional[np.ndarray]:
@@ -1465,54 +1680,60 @@ class MainWindow(QtWidgets.QMainWindow):
         return float(inter/uni)
 
     def update_overlay_view(self):
+        self._save_range('O')
         self.viewOverlay.clear()
         if self.datasetA.df is None or self.datasetB.df is None:
             return
-        # base images (respect toggles & rotation; no transform on A image; B image with dynamic transform?)
+
+        # Choose transform: manual override (UI) or auto (dynamic)
+        if self.chkManualTRS.isChecked():
+            sRt = self._srt_from_ui()
+        else:
+            sRt = self.dynamic_transform_from_pairs()
+            # keep UI boxes synced to auto values
+            if sRt is not None:
+                s, R, t = sRt
+                self._last_auto_sRt = (s, R.copy(), t.copy())
+                # Only update fields if override is OFF (so the user sees the auto values)
+                self._set_ui_from_srt(s, R, t, block_signals=True)
+
+        # ---- draw images (overlay should be in RAW frame; no user-affine here) ----
+        # A image (identity transform)
         if self.chkShowImgA.isChecked() and self.datasetA.tif_stack is not None:
             slcA = self.oriented_slice(self.datasetA, 'A')
             if slcA is not None:
-                # if self.rotA_k: slcA = np.rot90(slcA, k=-self.rotA_k)   # <-- REMOVE
                 imgA = pg.ImageItem(slcA); imgA.setZValue(-200)
                 imgA.setOpacity(self._get_opacity('A')) 
-
                 self._apply_image_levels(imgA, 'A', slcA, z=self.datasetA.current_z)
                 rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
                 if rectA is None:
                     Ha, Wa = slcA.shape[0], slcA.shape[1]
                     rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
                 imgA.setRect(rectA)
-                imgA.setTransform(QtGui.QTransform())
+                imgA.setTransform(QtGui.QTransform())  # RAW frame
                 self.viewOverlay.addItem(imgA)
 
+        # B image (apply only the chosen similarity)
         if self.chkShowImgB.isChecked() and self.datasetB.tif_stack is not None:
             slcB = self.oriented_slice(self.datasetB, 'B')
             if slcB is not None:
                 imgB = pg.ImageItem(slcB); imgB.setZValue(-190)
                 imgB.setOpacity(self._get_opacity('B'))  # <— use slider value
-
-
                 self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z)
-
                 rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
                 if rectB is None:
                     Hb, Wb = slcB.shape[0], slcB.shape[1]
                     rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
                 imgB.setRect(rectB)
-
-                # Compose: user affine first, then the dynamic B→A similarity (same as points)
-                dyn = self.dynamic_transform_from_pairs()
-                if dyn is not None:
-                    s, R, t = dyn
-                    T = self.qtransform_from_similarity(s, R, t)
-                else:
-                    T = QtGui.QTransform()  # identity
-                imgB.setTransform(T)
-
+                T_total_B = QtGui.QTransform()
+                if sRt is not None:
+                    s, R, t = sRt
+                    T_total_B = self.qtransform_from_similarity(s, R, t)
+                imgB.setTransform(T_total_B)
                 self.viewOverlay.addItem(imgB)
         # Draw polygons & centroids
         # A in blue; B in orange (transformed by dynamic transform)
-        dyn = self.dynamic_transform_from_pairs()
+        dyn = sRt
         sRt = None if dyn is None else dyn
         penA = pg.mkPen((0, 120, 255), width=2)
         penB = pg.mkPen((255, 140, 0), width=2)
@@ -1564,7 +1785,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 ti.setPos(cA[0] + 3, cA[1] - 3)
                 self.viewOverlay.addItem(ti)
 
-        self.viewOverlay.autoRange()
+        if not self._restore_range('O'):
+            self.viewOverlay.autoRange()
 
     # ------------------------ Hungarian auto-match ------------------------
     def run_hungarian(self):
