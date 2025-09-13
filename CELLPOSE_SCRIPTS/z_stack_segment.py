@@ -12,7 +12,7 @@ target_z = None
 # Assume the file 'image_stack.tif' is a 3D stack where the first dimension is the Z-plane
 # image_stack = tifffile.imread('AVG_file_test.tif')
 # image_stack = tifffile.imread('file_00001.tif')
-image_stack = tifffile.imread('Hour0.tif')
+image_stack = tifffile.imread('day_x_single_plane_zoomed.tif')
 print(image_stack.shape)
 
 # Initialize Cellpose model
@@ -63,7 +63,7 @@ for z, z_plane in enumerate(z_planes):
                 output_list.append((x, y, z, roi_id, avg_intensity))
 
 # Write the list to a CSV
-csv_filename = 'Hour0.csv'
+csv_filename = 'day_x_single_plane_zoomed.csv'
 with open(csv_filename, mode='w', newline='') as file:
     writer = csv.writer(file)
     # Write header

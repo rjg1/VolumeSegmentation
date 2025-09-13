@@ -123,6 +123,9 @@ class Dataset:
     cur_centroid_array: Optional[np.ndarray] = None
     cur_roi_centroids_xy: Dict[int, np.ndarray] = field(default_factory=dict)
 
+    labels_by_z: Dict[float, Dict[int, int]] = field(default_factory=dict)  # z -> {ROI_ID: label}
+    has_labels: bool = False
+
     tif_path: Optional[str] = None
     tif_stack: Optional[np.ndarray] = None  # (H,W) or (Z,H,W)
     def clear(self):
@@ -136,6 +139,8 @@ class Dataset:
         self.cur_roi_centroids_xy = {}
         self.tif_path = None
         self.tif_stack = None
+        self.labels_by_z = {}
+        self.has_labels = False
 
     def load_csv(self, path: str):
         self.name = os.path.basename(path)
@@ -148,7 +153,19 @@ class Dataset:
         df['y'] = pd.to_numeric(df['y'])
         df['z'] = pd.to_numeric(df['z'])
         df['ROI_ID'] = pd.to_numeric(df['ROI_ID'], downcast='integer')
+        
+        has_label_col = 'label' in df.columns
+
+        if has_label_col:
+            # normalize to integer labels; missing/NaN -> 0
+            df['label'] = pd.to_numeric(df['label'], errors='coerce').fillna(0).astype(int)
+            self.has_labels = bool((df['label'] > 0).any())
+        else:
+            df['label'] = 0
+            self.has_labels = False
+        
         self.df = df
+
         self.z_values = sorted([norm_z(z) for z in df['z'].unique()])
         self.roi_to_points_by_z = {}
         self.roi_centroids_xy_by_z = {}
@@ -164,6 +181,34 @@ class Dataset:
             self.roi_centroids_xy_by_z[z] = rid2cent
         if self.z_values:
             self.set_current_z(self.z_values[0])
+
+            self.labels_by_z = {}
+        
+        for z in self.z_values:
+            ...
+            # build labels_by_z
+            if self.has_labels:
+                subz = df[np.isclose(df['z'], z)]
+                self.labels_by_z[z] = {int(rid): int(lbl) for rid, lbl
+                                    in subz.groupby('ROI_ID')['label'].first().items()}
+            else:
+                self.labels_by_z[z] = {}
+
+    def get_label(self, z: float, rid: int) -> int:
+        z = norm_z(z)
+        return int((self.labels_by_z.get(z) or {}).get(int(rid), 0))
+
+    def set_label(self, z: float, rid: int, label: int):
+        """Set label in memory (both map + df). Creates 'label' col if missing."""
+        z = norm_z(z); rid = int(rid); label = int(label)
+        self.labels_by_z.setdefault(z, {})[rid] = label
+        if self.df is None: return
+        if 'label' not in self.df.columns:
+            self.df['label'] = 0
+        m = (np.isclose(self.df['z'], z)) & (self.df['ROI_ID'].astype(int) == rid)
+        self.df.loc[m, 'label'] = label
+        # also refresh has_labels flag
+        self.has_labels = bool((self.df['label'] > 0).any())
 
     def load_tif(self, path: str):
         arr = tiff.imread(path)
@@ -234,6 +279,20 @@ class ClickableScatter(pg.ScatterPlotItem):
             self._on_right(rid); ev.accept()
         else:
             ev.ignore()
+
+
+class ClickablePathItem(QtWidgets.QGraphicsPathItem):
+    def __init__(self, path: QtGui.QPainterPath, on_click=None, key=None):
+        super().__init__(path)
+        self._on_click = on_click
+        self._key = key
+
+    def mousePressEvent(self, ev: QtWidgets.QGraphicsSceneMouseEvent):
+        if ev.button() == QtCore.Qt.LeftButton and self._on_click:
+            self._on_click(self._key)   # notify MainWindow
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
 
 
 # ---------------------------- Main Window ----------------------------
@@ -489,22 +548,34 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 
-        # ---------------- Hungarian controls (kept) ----------------
-        self.btnHungarian = QtWidgets.QPushButton("Auto-match (Hungarian, current slices)")
-        self.btnHungarian.clicked.connect(self.run_hungarian)
+        # ---------------- Auto-match (IoU) ----------------
+        self.btnHungarian = QtWidgets.QPushButton("Auto-match (IoU ≥ threshold, current slices)")
+        self.btnHungarian.clicked.connect(self.run_auto_iou)  # <-- new handler
         self.btnHungarian.setEnabled(False)
-        self.spinMaxDist = QtWidgets.QDoubleSpinBox(); self.spinMaxDist.setRange(0.0, 1e6)
-        self.spinMaxDist.setDecimals(2); self.spinMaxDist.setValue(30.0)
-        self.spinMaxDist.setSuffix(" px max distance")
+
+        self.spinMaxDist = QtWidgets.QDoubleSpinBox()
+        self.spinMaxDist.setRange(0.0, 1.0)          # IoU in [0,1]
+        self.spinMaxDist.setDecimals(2)
+        self.spinMaxDist.setSingleStep(0.05)
+        self.spinMaxDist.setValue(0.50)              # default 0.50 IoU
+        self.spinMaxDist.setSuffix(" min IoU")       # <-- label reflects IoU now
+
         f.addRow(self.btnHungarian, self.spinMaxDist)
 
+
         # ---------------- Pairs table ----------------
-        self.pairTable = QtWidgets.QTableWidget(0, 2)
-        self.pairTable.setHorizontalHeaderLabels(["A (z,ROI)", "B (z,ROI)"])
+        self.pairTable = QtWidgets.QTableWidget(0, 3)
+        self.pairTable.setHorizontalHeaderLabels(["A (z,ROI)", "B (z,ROI)","Cell ID"])
         self.pairTable.horizontalHeader().setStretchLastSection(True)
         self.pairTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.pairTable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         f.addRow(QtWidgets.QLabel("<b>Pairs</b>")); f.addRow(self.pairTable)
+
+        # Hold intersection items keyed by (akey, bkey)
+        self._overlay_intersections: Dict[Tuple[ROIKey, ROIKey], List[QtWidgets.QGraphicsPathItem]] = {}
+
+        # React to user selecting a pair row
+        self.pairTable.itemSelectionChanged.connect(self._on_pair_selection_changed)
 
         # Pair table actions
         hbtns = QtWidgets.QHBoxLayout()
@@ -543,6 +614,124 @@ class MainWindow(QtWidgets.QMainWindow):
         self.colorA: Dict[int, QtGui.QColor] = {}
         self.colorB: Dict[int, QtGui.QColor] = {}
     # ------------------------ Utility ------------------------
+    def _on_intersection_clicked(self, key: Tuple[ROIKey, ROIKey]):
+        """Select the pair row and highlight the two ROIs in A/B views."""
+        akey, bkey = key
+        # select row in the pairs table
+        for r in range(self.pairTable.rowCount()):
+            aitem = self.pairTable.item(r, 0); bitem = self.pairTable.item(r, 1)
+            if not aitem or not bitem:
+                continue
+            if aitem.data(QtCore.Qt.UserRole) == akey and bitem.data(QtCore.Qt.UserRole) == bkey:
+                self.pairTable.setCurrentCell(r, 0)
+                self.pairTable.selectRow(r)
+                break
+
+        # highlight outlines in A/B using existing function
+        (az, arid), (bz, brid) = akey, bkey
+        self._clear_highlight('A'); self._clear_highlight('B')
+        self._highlight_roi('A', int(arid))
+        self._highlight_roi('B', int(brid))
+
+
+    def _next_global_label(self) -> int:
+        """Next label = 1 + max label seen across both datasets (0 if none)."""
+        def _maxlab(ds: Dataset) -> int:
+            if ds.df is None or 'label' not in ds.df.columns or ds.df['label'].empty:
+                return 0
+            try:
+                return int(pd.to_numeric(ds.df['label'], errors='coerce').fillna(0).max())
+            except Exception:
+                return 0
+        return max(_maxlab(self.datasetA), _maxlab(self.datasetB)) + 1
+
+    def _assign_or_propagate_label_for_pair(self, akey: ROIKey, bkey: ROIKey):
+        az, arid = akey; bz, brid = bkey
+        labA = self.datasetA.get_label(az, arid)
+        labB = self.datasetB.get_label(bz, brid)
+        if labA > 0 and labB == 0:
+            self.datasetB.set_label(bz, brid, labA)
+        elif labB > 0 and labA == 0:
+            self.datasetA.set_label(az, arid, labB)
+        elif labA == 0 and labB == 0:
+            new_lab = self._next_global_label()
+            self.datasetA.set_label(az, arid, new_lab)
+            self.datasetB.set_label(bz, brid, new_lab)
+        # if both >0 and disagree, leave as-is
+
+    def _resolve_pair_label(self, akey, bkey) -> int:
+        az, arid = akey; bz, brid = bkey
+        labA = self.datasetA.get_label(az, arid)
+        labB = self.datasetB.get_label(bz, brid)
+        return labA if labA > 0 else (labB if labB > 0 else 0)
+
+
+    def _autopair_by_labels(self):
+        """If BOTH datasets have labels, auto-create pairs where labels match (per-z)."""
+        if not (self.datasetA.has_labels and self.datasetB.has_labels):
+            return
+        made = 0
+        # Use intersection of z-levels that exist in both
+        zs = sorted(set(self.datasetA.z_values) & set(self.datasetB.z_values))
+        for z in zs:
+            labA = self.datasetA.labels_by_z.get(z, {})
+            labB = self.datasetB.labels_by_z.get(z, {})
+            if not labA or not labB: 
+                continue
+            # invert: label -> rid (assume labels are unique per session)
+            invA = {lab: rid for rid, lab in labA.items() if lab > 0}
+            invB = {lab: rid for rid, lab in labB.items() if lab > 0}
+
+            common = set(invA.keys()) & set(invB.keys())
+            for lab in sorted(common):
+                akey = (z, int(invA[lab]))
+                bkey = (z, int(invB[lab]))
+                # enforce 1:1
+                if akey in self.A2B and self.A2B[akey] != bkey:
+                    continue
+                if bkey in self.B2A and self.B2A[bkey] != akey:
+                    continue
+                if akey not in self.A2B and bkey not in self.B2A:
+                    self.A2B[akey] = bkey
+                    self.B2A[bkey] = akey
+                    made += 1
+        if made:
+            self.status.setText(f"Auto-loaded {made} pairs from existing registration labels.")
+            self.update_pair_table()
+            self.refresh_controls()
+            self.update_overlay_view()
+
+
+    def _on_pair_selection_changed(self):
+        # reset everything to "normal" style
+        normal_pen   = QtGui.QPen(QtGui.QColor(0, 200, 0, 160)); normal_pen.setWidthF(1.0)
+        normal_brush = QtGui.QBrush(QtGui.QColor(0, 200, 0, 80))
+        for items in self._overlay_intersections.values():
+            for it in items:
+                it.setPen(normal_pen)
+                it.setBrush(normal_brush)
+                it.setZValue(-50)
+
+        # brighten any selected rows
+        sel_rows = sorted(set(ix.row() for ix in self.pairTable.selectedIndexes()))
+        if not sel_rows:
+            return
+        sel_pen   = QtGui.QPen(QtGui.QColor(0, 255, 0, 255)); sel_pen.setWidthF(2.0)
+        sel_brush = QtGui.QBrush(QtGui.QColor(0, 255, 0, 150))
+        for r in sel_rows:
+            aitem = self.pairTable.item(r, 0)
+            bitem = self.pairTable.item(r, 1)
+            if not aitem or not bitem:
+                continue
+            akey: ROIKey = aitem.data(QtCore.Qt.UserRole)
+            bkey: ROIKey = bitem.data(QtCore.Qt.UserRole)
+            key = (akey, bkey)
+            if key in self._overlay_intersections:
+                for it in self._overlay_intersections[key]:
+                    it.setPen(sel_pen)
+                    it.setBrush(sel_brush)
+                    it.setZValue(-45)  # slightly above normal patches
+
     def _save_range(self, which: str):
         vb = {'A': self.viewA, 'B': self.viewB, 'O': self.viewOverlay}[which].getViewBox()
         xr, yr = vb.viewRange()  # [[xMin,xMax],[yMin,yMax]]
@@ -977,7 +1166,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.refresh_controls()
         self.update_overlay_view()
-
+        if self.datasetA.df is not None and self.datasetB.df is not None:
+            self._autopair_by_labels()
 
 
     def load_tif(self, dataset: Dataset, which: str):
@@ -1086,8 +1276,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.centroidsA = self._draw_centroids(self.viewA, self.datasetA, is_A=True)
         self._draw_labels(self.viewA, self.datasetA, 'A')
         self.rebuild_hulls_for(self.datasetA, 'A')
-        if getattr(self, 'chkShowOutlineA', None) and self.chkShowOutlineA.isChecked():
-            self._draw_outlines('A')
+        # if getattr(self, 'chkShowOutlineA', None) and self.chkShowOutlineA.isChecked():
+        #     self._draw_outlines('A')
         self.update_overlay_on_A()
 
         if not self._restore_range('A'):   # keep user zoom if we have it
@@ -1116,8 +1306,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.centroidsB = self._draw_centroids(self.viewB, self.datasetB, is_A=False)
         self._draw_labels(self.viewB, self.datasetB, 'B')
         self.rebuild_hulls_for(self.datasetB, 'B')
-        if getattr(self, 'chkShowOutlineB', None) and self.chkShowOutlineB.isChecked():
-            self._draw_outlines('B')
+        # if getattr(self, 'chkShowOutlineB', None) and self.chkShowOutlineB.isChecked():
+        #     self._draw_outlines('B')
 
         if not self._restore_range('B'):
                 self.viewB.autoRange()
@@ -1304,12 +1494,12 @@ class MainWindow(QtWidgets.QMainWindow):
         for rid, path in hulls.items():
             if path.contains(qp):
                 return rid
-        XY = dataset.cur_centroid_array
-        if XY is not None and XY.size:
-            XY2 = self.apply_xy_options(XY)
-            d = np.linalg.norm(XY2 - np.array([x, y]), axis=1)
-            idx = int(np.argmin(d))
-            return dataset.cur_roi_ids_sorted[idx]
+        # XY = dataset.cur_centroid_array
+        # if XY is not None and XY.size:
+        #     XY2 = self.apply_xy_options(XY)
+        #     d = np.linalg.norm(XY2 - np.array([x, y]), axis=1)
+        #     idx = int(np.argmin(d))
+        #     return dataset.cur_roi_ids_sorted[idx]
         return None
 
     def _on_viewA_click(self, ev):
@@ -1367,7 +1557,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if which == 'B' and self.selOutlineB is not None:
             try: self.viewB.removeItem(self.selOutlineB)
             except Exception: pass
-        self.selOutlineB = None
+            self.selOutlineB = None
 
 
     # ------------------------ Click handlers on centroids ------------------------
@@ -1423,6 +1613,8 @@ class MainWindow(QtWidgets.QMainWindow):
             prev_a = self.B2A[bkey];
             if prev_a in self.A2B: del self.A2B[prev_a]
         self.A2B[akey] = bkey; self.B2A[bkey] = akey
+        self._assign_or_propagate_label_for_pair(akey, bkey)
+
         self.selA = None; self.selB = None
         self._clear_highlight('A'); self._clear_highlight('B')
         self.status.setText(f"Paired A {akey} ↔ B {bkey}")
@@ -1439,6 +1631,12 @@ class MainWindow(QtWidgets.QMainWindow):
             itemB = QtWidgets.QTableWidgetItem(f"({bkey[0]}, {bkey[1]})")
             itemA.setData(QtCore.Qt.UserRole, akey); itemB.setData(QtCore.Qt.UserRole, bkey)
             self.pairTable.setItem(i, 0, itemA); self.pairTable.setItem(i, 1, itemB)
+
+            cell_id = self._resolve_pair_label(akey, bkey)
+            itemC = QtWidgets.QTableWidgetItem("" if cell_id <= 0 else str(cell_id))
+            itemC.setData(QtCore.Qt.UserRole, cell_id)
+            self.pairTable.setItem(i, 2, itemC)
+
 
     def remove_selected_pair(self):
         rows = sorted(set([ix.row() for ix in self.pairTable.selectedIndexes()]), reverse=True)
@@ -1682,6 +1880,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_overlay_view(self):
         self._save_range('O')
         self.viewOverlay.clear()
+
+        for items in self._overlay_intersections.values():
+            for it in items:
+                try: self.viewOverlay.removeItem(it)
+                except Exception: pass
+        self._overlay_intersections = {}
+
         if self.datasetA.df is None or self.datasetB.df is None:
             return
 
@@ -1760,109 +1965,194 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penB))
 
 
-        # IoU labels for matched pairs (current slices)
-        show_iou = self.chkShowOutlineA.isChecked() and self.chkShowOutlineB.isChecked()
-        if show_iou:
-            pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
-            for (az, arid), (bz, brid) in pairs:
-                polyA = rid2polyA.get(arid)  # RAW
-                polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW
-                if polyA is None or polyB is None:
+        if SHAPELY:
+            # colors
+            base_pen   = QtGui.QPen(QtGui.QColor(0, 200, 0, 160)); base_pen.setWidthF(1.0)
+            base_brush = QtGui.QBrush(QtGui.QColor(0, 200, 0, 80))
+
+            # We already have sRt and rid2polyA (RAW). For each current-slice pair:
+            pairs_cur = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+            for (az, arid), (bz, brid) in pairs_cur:
+                polyA = rid2polyA.get(arid)                 # RAW A polygon
+                polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW B polygon
+                if polyA is None or polyB is None or polyA.shape[0] < 3 or polyB.shape[0] < 3:
                     continue
 
-                # similarity only (RAW → A frame)
+                # Transform B into A frame (RAW similarity only)
                 if sRt is not None:
                     s, R, t = sRt
                     polyB = apply_similarity_transform_2d(polyB, s, R, t)
 
-                iou = self.iou_between(polyA, polyB)
-                if iou is None:
+                # Shapely intersection (may be MultiPolygon)
+                pA = Polygon(polyA)
+                pB = Polygon(polyB)
+                inter = pA.intersection(pB)
+                if inter.is_empty or inter.area <= 0:
                     continue
 
-                # label at RAW A centroid (matches RAW overlay)
-                cA = self.datasetA.cur_roi_centroids_xy[arid]
-                ti = pg.TextItem(text=f"IoU {iou:.2f}", anchor=(0,1))
-                ti.setPos(cA[0] + 3, cA[1] - 3)
+                key = ((az, int(arid)), (bz, int(brid)))
+                self._overlay_intersections[key] = []
+
+                geoms = [inter] if inter.geom_type == "Polygon" else list(inter.geoms)
+                for g in geoms:
+                    try:
+                        coords = np.asarray(g.exterior.coords, dtype=float)
+                        if coords.shape[0] < 3:
+                            continue
+                        # Build a filled path item in data coords
+                        path = QtGui.QPainterPath()
+                        path.moveTo(coords[0,0], coords[0,1])
+                        for k in range(1, coords.shape[0]):
+                            path.lineTo(coords[k,0], coords[k,1])
+                        path.closeSubpath()
+
+                        gi = ClickablePathItem(path, on_click=self._on_intersection_clicked, key=key)
+                        gi.setPen(base_pen)
+                        gi.setBrush(base_brush)
+                        gi.setZValue(-50)  # above images, below outlines
+                        self.viewOverlay.addItem(gi)
+                        self._overlay_intersections[key].append(gi)
+                    except Exception:
+                        pass  # robust to odd geometries
+
+        # IoU labels for matched pairs (current slices)
+        pairs_sorted = sorted(self.A2B.items())
+
+        show_iou = self.chkShowOutlineA.isChecked() and self.chkShowOutlineB.isChecked()
+        if show_iou:
+            pairs_cur = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
+            for (az, arid), (bz, brid) in pairs_cur:
+                polyA = rid2polyA.get(arid)  # RAW polygon in A
+                polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW polygon in B
+                if polyA is None or polyB is None or polyA.shape[0] < 3 or polyB.shape[0] < 3:
+                    continue
+
+                # Transform B → A (similarity only)
+                if sRt is not None:
+                    s, R, t = sRt
+                    polyB = apply_similarity_transform_2d(polyB, s, R, t)
+
+                # Compute intersection center (fallback to A centroid if empty)
+                cx, cy = self.datasetA.cur_roi_centroids_xy[arid]
+                iou_val = self.iou_between(polyA, polyB) or 0.0
+
+                if SHAPELY:
+                    try:
+                        pA = Polygon(polyA)
+                        pB = Polygon(polyB)
+                        inter = pA.intersection(pB)
+                        if (not inter.is_empty) and inter.area > 0:
+                            pt = inter.representative_point()  # guaranteed inside
+                            cx, cy = float(pt.x), float(pt.y)
+                            # recompute IoU using shapely areas for consistency
+                            denom = pA.union(pB).area
+                            if denom > 0:
+                                iou_val = float(inter.area / denom)
+                    except Exception:
+                        pass
+
+                cell_id = self._resolve_pair_label((az, arid), (bz, brid))
+                label = f"IoU {iou_val:.2f}" + (f"\nID {cell_id}" if cell_id > 0 else "")
+                ti = pg.TextItem(text=label, anchor=(0.5, 0.5))  # center of block at (cx, cy)
+                ti.setColor('k')
+                ti.setZValue(-40)  # above the green patch
+                ti.setPos(cx, cy)
                 self.viewOverlay.addItem(ti)
+
+        self._on_pair_selection_changed()
 
         if not self._restore_range('O'):
             self.viewOverlay.autoRange()
 
     # ------------------------ Hungarian auto-match ------------------------
-    def run_hungarian(self):
+    def run_auto_iou(self):
         if self.datasetA.df is None or self.datasetB.df is None:
             return
 
-        # Unpaired lists on current slices
+        # Unpaired candidates on current slices only
+        zA = self.datasetA.current_z
+        zB = self.datasetB.current_z
         A_unpaired = [rid for rid in self.datasetA.cur_roi_ids_sorted
-                    if (self.datasetA.current_z, rid) not in self.A2B]
+                    if (zA, rid) not in self.A2B]
         B_unpaired = [rid for rid in self.datasetB.cur_roi_ids_sorted
-                    if (self.datasetB.current_z, rid) not in self.B2A]
+                    if (zB, rid) not in self.B2A]
 
         if not A_unpaired or not B_unpaired:
             QtWidgets.QMessageBox.information(self, "No unpaired ROIs", "Nothing to match on current slices.")
             return
 
-        # A: centroids -> user orientation
-        A_pts = []
-        for rid in A_unpaired:
-            xy = np.asarray(self.datasetA.cur_roi_centroids_xy[rid], dtype=float)
-            xy = self.apply_xy_options(xy)
-            xy = self._apply_user_affine_to_points('A', xy[None, :])[0]
-            A_pts.append(xy)
-        A_pts = np.asarray(A_pts, dtype=float)
-
-        # B: centroids -> user orientation -> (optional) similarity B→A
-        B_pts_user = []
-        for rid in B_unpaired:
-            xy = np.asarray(self.datasetB.cur_roi_centroids_xy[rid], dtype=float)
-            xy = self.apply_xy_options(xy)
-            xy = self._apply_user_affine_to_points('B', xy[None, :])[0]
-            B_pts_user.append(xy)
-        B_pts_user = np.asarray(B_pts_user, dtype=float)
-
-        if self.transform is not None:
-            s, R, t = self.transform
-            B_pts = apply_similarity_transform_2d(B_pts_user, s, R, t)
+        # Choose the same transform used in the overlay:
+        # manual override if enabled, else dynamic from current pairs (RAW coords)
+        if self.chkManualTRS.isChecked():
+            sRt = self._srt_from_ui()
         else:
-            B_pts = B_pts_user
+            sRt = self.dynamic_transform_from_pairs()
 
-        # Cost = Euclidean distances
-        dists = np.sqrt(((A_pts[:, None, :] - B_pts[None, :, :]) ** 2).sum(axis=2))
+        # If no transform, IoU is measured in RAW frames (likely small).
+        if sRt is None:
+            QtWidgets.QMessageBox.information(
+                self, "No transform in use",
+                "No manual or auto transform is active. IoU will be computed in raw coordinates and may be near zero. "
+                "Seed with 1–2 pairs or enter manual T/R/S, then try again."
+            )
 
-        # Hungarian assignment
-        row_ind, col_ind = linear_sum_assignment(dists)
+        # Precompute polygons (RAW). Skip unusable ones.
+        polysA = {rid: self.polygon_from_roi(self.datasetA, rid) for rid in A_unpaired}
+        polysB = {rid: self.polygon_from_roi(self.datasetB, rid) for rid in B_unpaired}
 
-        # Threshold by max distance
-        max_dist = float(self.spinMaxDist.value())
+        # Build all IoUs above (or near) threshold
+        tau = float(self.spinMaxDist.value())
+        tau = max(0.0, min(1.0, tau))
+
+        matches = []  # (iou, ridA, ridB)
+        if sRt is not None:
+            s, R, t = sRt
+        for ridA in A_unpaired:
+            pA = polysA.get(ridA)
+            if pA is None or pA.shape[0] < 3:
+                continue
+            for ridB in B_unpaired:
+                pB = polysB.get(ridB)
+                if pB is None or pB.shape[0] < 3:
+                    continue
+                pBt = apply_similarity_transform_2d(pB, s, R, t) if sRt is not None else pB
+                iou = self.iou_between(pA, pBt)
+                if iou is None:
+                    continue
+                if iou >= tau:
+                    matches.append((float(iou), ridA, ridB))
+
+        if not matches:
+            self.status.setText(f"IoU auto-match: no pairs found ≥ {tau:.2f}")
+            return
+
+        # Greedy 1:1: take global best IoU, then remove that A and B from consideration, repeat
+        matches.sort(key=lambda x: x[0], reverse=True)
+        usedA, usedB = set(), set()
         added = 0
-        for i, j in zip(row_ind, col_ind):
-            if dists[i, j] <= max_dist:
-                akey: ROIKey = (self.datasetA.current_z, int(A_unpaired[i]))
-                bkey: ROIKey = (self.datasetB.current_z, int(B_unpaired[j]))
-
-                # keep 1:1
-                if akey in self.A2B:
-                    prev_b = self.A2B[akey]
-                    if prev_b in self.B2A:
-                        del self.B2A[prev_b]
-                if bkey in self.B2A:
-                    prev_a = self.B2A[bkey]
-                    if prev_a in self.A2B:
-                        del self.A2B[prev_a]
-
-                self.A2B[akey] = bkey
-                self.B2A[bkey] = akey
-                added += 1
+        for iou, ridA, ridB in matches:
+            if ridA in usedA or ridB in usedB:
+                continue
+            akey = (zA, int(ridA))
+            bkey = (zB, int(ridB))
+            # (They’re unpaired by construction, but keep 1:1 guardrails anyway)
+            if akey in self.A2B or bkey in self.B2A:
+                continue
+            self.A2B[akey] = bkey
+            self.B2A[bkey] = akey
+            self._assign_or_propagate_label_for_pair(akey, bkey) 
+            usedA.add(ridA); usedB.add(ridB)
+            added += 1
 
         self.status.setText(
-            f"Hungarian added {added} pairs on zA={self.datasetA.current_z}, zB={self.datasetB.current_z} (≤ {max_dist:.1f} px)"
+            f"IoU auto-match added {added} pair(s) on zA={zA}, zB={zB} (≥ {tau:.2f})"
         )
         self.update_pair_table()
         self.refresh_controls()
         self.update_overlay_on_A()
         self.populate_view_B()
         self.update_overlay_view()
+
 
     # ------------------------ Export ------------------------
     def export_labeled_csvs(self):
@@ -1871,16 +2161,46 @@ class MainWindow(QtWidgets.QMainWindow):
         if len(self.A2B) == 0:
             QtWidgets.QMessageBox.warning(self, "No pairs", "Create at least one pair before exporting.")
             return
+
         pairs_sorted = sorted(self.A2B.items())
-        label_map_A: Dict[ROIKey, int] = {}; label_map_B: Dict[ROIKey, int] = {}
-        for k, (akey, bkey) in enumerate(pairs_sorted, start=1):
-            label_map_A[akey] = k; label_map_B[bkey] = k
-        def map_label(row, which: str):
-            z = norm_z(row['z']); rid = int(row['ROI_ID'])
-            return int((label_map_A if which=='A' else label_map_B).get((z, rid), 0))
-        dfA = self.datasetA.df.copy(); dfB = self.datasetB.df.copy()
-        dfA['label'] = dfA.apply(lambda r: map_label(r, 'A'), axis=1)
-        dfB['label'] = dfB.apply(lambda r: map_label(r, 'B'), axis=1)
+
+        # Ensure 'label' column exists in both dataframes
+        for ds in (self.datasetA, self.datasetB):
+            if ds.df is not None and 'label' not in ds.df.columns:
+                ds.df['label'] = 0
+
+        # Determine labels pair-by-pair:
+        next_new = 1 + max(
+            int(self.datasetA.df['label'].max()) if self.datasetA.df is not None else 0,
+            int(self.datasetB.df['label'].max()) if self.datasetB.df is not None else 0,
+        )
+
+        conflict_cnt = 0
+        for (akey, bkey) in pairs_sorted:
+            az, arid = akey; bz, brid = bkey
+            labA = self.datasetA.get_label(az, arid)
+            labB = self.datasetB.get_label(bz, brid)
+
+            if labA > 0 and labB > 0:
+                # if both present but differ, prefer A deterministically, update B (rare)
+                label = labA
+                if labA != labB:
+                    conflict_cnt += 1
+                    self.datasetB.set_label(bz, brid, label)
+            elif labA > 0:
+                label = labA
+                self.datasetB.set_label(bz, brid, label)
+            elif labB > 0:
+                label = labB
+                self.datasetA.set_label(az, arid, label)
+            else:
+                # both zero: mint a new label
+                label = next_new
+                next_new += 1
+                self.datasetA.set_label(az, arid, label)
+                self.datasetB.set_label(bz, brid, label)
+
+        # Now write both CSVs (their df already updated in-place)
         out_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output directory", os.getcwd())
         if not out_dir:
             return
@@ -1888,10 +2208,16 @@ class MainWindow(QtWidgets.QMainWindow):
         outA = os.path.join(out_dir, f"{baseA}_labeled.csv")
         outB = os.path.join(out_dir, f"{baseB}_labeled.csv")
         try:
-            dfA.to_csv(outA, index=False); dfB.to_csv(outB, index=False)
+            self.datasetA.df.to_csv(outA, index=False)
+            self.datasetB.df.to_csv(outB, index=False)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Export error", str(e)); return
-        self.status.setText(f"Exported:{outA}{outB}")
+
+        msg = f"Exported:\n{outA}\n{outB}"
+        if conflict_cnt:
+            msg += f"\n(Resolved {conflict_cnt} label conflicts by preferring A)"
+        self.status.setText(msg)
+
 
 
 # ---------------------------- main ----------------------------
