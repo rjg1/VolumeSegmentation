@@ -17,7 +17,12 @@ except Exception:
     from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
     QT_LIB = 'PyQt5'
 
-
+try:
+    from skimage import measure as skmeasure  # type: ignore
+    SKIMAGE_AVAILABLE = True
+except Exception:
+    SKIMAGE_AVAILABLE = False
+    skmeasure = None  # type: ignore
 
 # Optional Hungarian
 try:
@@ -303,6 +308,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("ROI Registration GUI")
         self.resize(2100, 1100)
 
+        # Composite image of A and B
+        self._additiveItem = None
+
         # Cached zoomed values of plots
         self._savedRanges = {'A': None, 'B': None, 'O': None}  # overlay=O
 
@@ -378,25 +386,23 @@ class MainWindow(QtWidgets.QMainWindow):
         ctrl = QtWidgets.QWidget(); ctrl.setFixedWidth(600); layout.addWidget(ctrl)
         f = QtWidgets.QFormLayout(ctrl)
 
-        # ---------------- CSV loaders ----------------
-        self.btnLoadA = QtWidgets.QPushButton("Load CSV A…")
-        self.btnLoadB = QtWidgets.QPushButton("Load CSV B…")
-        self.lblA = QtWidgets.QLabel("<i>Not loaded</i>")
-        self.lblB = QtWidgets.QLabel("<i>Not loaded</i>")
-        self.btnLoadA.clicked.connect(lambda: self.load_csv(self.datasetA, self.lblA, which='A'))
-        self.btnLoadB.clicked.connect(lambda: self.load_csv(self.datasetB, self.lblB, which='B'))
-        f.addRow(self.btnLoadA, self.lblA)
-        f.addRow(self.btnLoadB, self.lblB)
+        self.btnLoadMasksA = QtWidgets.QPushButton("Load Masks (A)…")
+        self.btnLoadMasksB = QtWidgets.QPushButton("Load Masks (B)…")
+        self.lblMasksA = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.lblMasksB = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.btnLoadMasksA.clicked.connect(lambda: self.load_masks(self.datasetA, self.lblMasksA, which='A'))
+        self.btnLoadMasksB.clicked.connect(lambda: self.load_masks(self.datasetB, self.lblMasksB, which='B'))
+        f.addRow(self.btnLoadMasksA, self.lblMasksA)
+        f.addRow(self.btnLoadMasksB, self.lblMasksB)
 
-        # ---------------- TIF loaders + filenames ----------------
-        self.btnLoadTifA = QtWidgets.QPushButton("Load TIF A…")
-        self.btnLoadTifB = QtWidgets.QPushButton("Load TIF B…")
-        self.lblTifA = QtWidgets.QLabel("<i>Not loaded</i>")
-        self.lblTifB = QtWidgets.QLabel("<i>Not loaded</i>")
-        self.btnLoadTifA.clicked.connect(lambda: self.load_tif(self.datasetA, which='A'))
-        self.btnLoadTifB.clicked.connect(lambda: self.load_tif(self.datasetB, which='B'))
-        f.addRow(self.btnLoadTifA, self.lblTifA)
-        f.addRow(self.btnLoadTifB, self.lblTifB)
+        self.btnLoadImageA = QtWidgets.QPushButton("Load Image (A)…")
+        self.btnLoadImageB = QtWidgets.QPushButton("Load Image (B)…")
+        self.lblImageA = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.lblImageB = QtWidgets.QLabel("<i>Not loaded</i>")
+        self.btnLoadImageA.clicked.connect(lambda: self.load_image(self.datasetA, self.lblImageA, which='A'))
+        self.btnLoadImageB.clicked.connect(lambda: self.load_image(self.datasetB, self.lblImageB, which='B'))
+        f.addRow(self.btnLoadImageA, self.lblImageA)
+        f.addRow(self.btnLoadImageB, self.lblImageB)
 
         # Show image + Show outlines (same row per dataset)
         self.chkShowImgA = QtWidgets.QCheckBox("Show image (A)")
@@ -501,6 +507,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chkShowOverlay.setChecked(True)
         self.chkShowOverlay.toggled.connect(self.toggle_overlay_visible)
         f.addRow(self.chkShowOverlay)
+
+        self.chkCompositeAdd = QtWidgets.QCheckBox("Single composite (sum colors)")
+        self.chkCompositeAdd.setChecked(True)
+        self.chkCompositeAdd.toggled.connect(self.update_overlay_view)
+        f.addRow(self.chkCompositeAdd)
+
 
         # --- Manual T/R/S override ---
         self.chkManualTRS = QtWidgets.QCheckBox("Manual T / R / S override")
@@ -614,6 +626,473 @@ class MainWindow(QtWidgets.QMainWindow):
         self.colorA: Dict[int, QtGui.QColor] = {}
         self.colorB: Dict[int, QtGui.QColor] = {}
     # ------------------------ Utility ------------------------
+    def _outline_from_xy_pixels(self, xpix: np.ndarray, ypix: np.ndarray,
+                                H: int, W: int) -> np.ndarray:
+        """
+        Build a 2D polygon outline from Suite2P ROI pixels.
+        Returns Nx2 float array in the SAME oriented frame as your pre-oriented images
+        (we apply the same CW rot + horiz flip you used for rasters, which is
+        equivalent to swapping x/y).
+        """
+        xpix = np.asarray(xpix).astype(int)
+        ypix = np.asarray(ypix).astype(int)
+        if xpix.size == 0:
+            return np.zeros((0, 2), dtype=float)
+
+        # Preferred: exact contour via marching squares
+        if SKIMAGE_AVAILABLE:
+            mask = np.zeros((H, W), dtype=np.uint8)
+            mask[ypix, xpix] = 1
+            pad = np.pad(mask, 1, mode='constant')
+            contours = skmeasure.find_contours(pad, level=0.5)
+            if len(contours) > 0:
+                # pick longest contour (outer boundary)
+                c = max(contours, key=lambda a: a.shape[0])
+                c = c - 1.0  # undo padding
+                # skimage gives (row, col) = (y, x). Convert to (x, y):
+                poly = np.stack([c[:,1], c[:,0]], axis=1)
+            else:
+                poly = np.stack([xpix, ypix], axis=1).astype(float)
+        # Fallback: convex hull of pixels (coarser but dependency-free)
+        elif HULL_AVAILABLE and xpix.size >= 3:
+            pts = np.stack([xpix, ypix], axis=1).astype(float)
+            try:
+                hull = ConvexHull(pts)
+                poly = pts[hull.vertices]
+            except Exception:
+                poly = pts
+        else:
+            pts = np.stack([xpix, ypix], axis=1).astype(float)
+            if pts.shape[0] == 0:
+                return np.zeros((0,2), float)
+            mn = pts.min(axis=0); mx = pts.max(axis=0)
+            poly = np.array([[mn[0], mn[1]],[mx[0], mn[1]],[mx[0], mx[1]],[mn[0], mx[1]]], float)
+
+        # IMPORTANT: apply the same one-time raster orientation you do for TIFs
+        # (90° CW + horizontal flip). For points this is equivalent to swapping axes.
+        # See your S matrix derivation; the net effect is (x, y) -> (y, x).
+        poly = poly[:, ::-1]  # swap columns
+
+        return poly
+
+
+    def _load_suite2p_stat_into_dataset(self, dataset: Dataset, stat_path: str, ops_path: Optional[str] = None):
+        """
+        Read Suite2P stat.npy (and optionally ops.npy for exact image size),
+        extract an outline polygon per ROI, and populate the Dataset the same way
+        your CSV loader does (roi_to_points_by_z, centroids, df, etc).
+        """
+        # Read stat
+        stats = np.load(stat_path, allow_pickle=True)
+        stats_list = list(stats) if isinstance(stats, (list, tuple)) else list(stats.ravel())
+
+        # Image size (preferred from ops.npy; else from max coords)
+        H = W = None
+        if ops_path and os.path.exists(ops_path):
+            ops = np.load(ops_path, allow_pickle=True).item()
+            H = int(ops.get('Ly', 0)) or None
+            W = int(ops.get('Lx', 0)) or None
+        if H is None or W is None:
+            all_x = np.concatenate([np.asarray(s['xpix']).ravel() for s in stats_list]) if stats_list else np.array([0])
+            all_y = np.concatenate([np.asarray(s['ypix']).ravel() for s in stats_list]) if stats_list else np.array([0])
+            W = int(all_x.max()) + 2
+            H = int(all_y.max()) + 2
+
+        # Reset dataset and fill
+        dataset.clear()
+        dataset.name = os.path.basename(stat_path)
+        z = 0.0
+        dataset.z_values = [z]
+        dataset.roi_to_points_by_z = {z: {}}
+        dataset.roi_centroids_xy_by_z = {z: {}}
+        dataset.labels_by_z = {z: {}}
+        dataset.has_labels = False
+
+        rows = []
+        rid_counter = 1
+        for s in stats_list:
+            xpix = np.asarray(s.get('xpix', []))
+            ypix = np.asarray(s.get('ypix', []))
+            if xpix.size == 0:
+                continue
+            poly = self._outline_from_xy_pixels(xpix, ypix, H, W)
+            if poly.shape[0] < 3:
+                continue
+
+            rid = rid_counter; rid_counter += 1
+            pts3 = np.c_[poly, np.full((poly.shape[0],), z, dtype=float)]
+            dataset.roi_to_points_by_z[z][rid] = pts3
+            dataset.roi_centroids_xy_by_z[z][rid] = poly.mean(axis=0)
+
+            # populate df rows so the rest of your pipeline works unchanged
+            for (x, y) in poly:
+                rows.append({"x": float(x), "y": float(y), "z": z, "ROI_ID": rid, "label": 0})
+
+        dataset.df = pd.DataFrame(rows, columns=["x", "y", "z", "ROI_ID", "label"])
+        dataset.set_current_z(z)
+
+
+    def _load_suite2p_ops_array(self, ops_path: str) -> np.ndarray:
+        """Return 2D or 3D array from ops.npy (meanImgE preferred), no pre-orientation here."""
+        raw = np.load(ops_path, allow_pickle=True)
+        # ops can be dict, 0-d object array of dict, or 1-d array/list of dicts (multi-plane)
+        def to_ops_list(obj):
+            if isinstance(obj, dict):
+                return [obj]
+            if isinstance(obj, np.ndarray) and obj.dtype == object:
+                if obj.ndim == 0:
+                    return [obj.item()]
+                if obj.ndim == 1:
+                    return list(obj)
+            if isinstance(obj, list):
+                return obj
+            raise ValueError("Unrecognized ops.npy format")
+
+        ops_list = to_ops_list(raw)
+
+        imgs = []
+        for op in ops_list:
+            # img = op.get('meanImgE', None)
+            img = None
+            if img is None:
+                img = op.get('meanImg', None)
+            if img is None:
+                continue
+            img = np.asarray(img, dtype=np.float32)
+            imgs.append(img)
+
+        if not imgs:
+            raise ValueError("ops.npy has no meanImg/meanImgE")
+
+        if len(imgs) == 1:
+            return imgs[0]
+        else:
+            # stack along Z: (Z,H,W)
+            # ensure same shape
+            H, W = imgs[0].shape
+            imgs = [im if im.shape == (H, W) else np.resize(im, (H, W)) for im in imgs]
+            return np.stack(imgs, axis=0).astype(np.float32)
+
+
+
+    def _purge_pairs_for_dataset(self, which: str):
+        """Remove pairs tied to the dataset being (re)loaded, keep the other side's labels intact."""
+        if which == 'A':
+            # remove all A-side keys
+            for akey, bkey in list(self.A2B.items()):
+                del self.A2B[akey]
+                if bkey in self.B2A:
+                    del self.B2A[bkey]
+        else:
+            for bkey, akey in list(self.B2A.items()):
+                del self.B2A[bkey]
+                if akey in self.A2B:
+                    del self.A2B[akey]
+        self.update_pair_table()
+        self.refresh_controls()
+        self.update_overlay_view()
+
+    def load_masks(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
+        """CSV (legacy) or Suite2P stat.npy."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, f"Load masks for {dataset.name or which}", os.getcwd(),
+            "Masks (*.csv *.npy);;CSV (*.csv);;Suite2P stat (*.npy)"
+        )
+        if not path:
+            return
+
+        try:
+            if path.lower().endswith(".csv"):
+                dataset.load_csv(path)
+            elif path.lower().endswith(".npy"):
+                self._load_suite2p_stat_into_dataset(dataset, path)
+            else:
+                raise ValueError("Unsupported masks file. Use .csv or Suite2P stat.npy")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Load error", str(e))
+            return
+
+        # show filename
+        label_widget.setText(os.path.basename(path))
+
+        # clear pairs tied to this dataset (keep the other dataset's labels for propagation)
+        self._purge_pairs_for_dataset(which)
+
+        # draw views
+        if which == 'A':
+            self.editZA.setText(str(dataset.current_z) if dataset.current_z is not None else "")
+            self.populate_view_A()
+        else:
+            self.editZB.setText(str(dataset.current_z) if dataset.current_z is not None else "")
+            self.populate_view_B()
+
+        self.status.setText(
+            f"Loaded masks {os.path.basename(path)} → {len(dataset.df) if dataset.df is not None else 0} points, "
+            f"{len(dataset.z_values)} z-levels"
+        )
+        self.refresh_controls()
+        self.update_overlay_view()
+
+        # If both datasets present, try autopair by labels (still works with CSV)
+        if self.datasetA.df is not None and self.datasetB.df is not None:
+            self._autopair_by_labels()
+
+    def load_image(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
+        """TIFF (legacy) or Suite2P ops.npy."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, f"Load image for {dataset.name or which}", os.getcwd(),
+            "Images (*.tif *.tiff *.npy);;TIFF (*.tif *.tiff);;Suite2P ops (*.npy)"
+        )
+        if not path:
+            return
+
+        try:
+            if path.lower().endswith((".tif", ".tiff")):
+                dataset.load_tif(path)
+                # match orientation used elsewhere
+                dataset.tif_stack = self._pre_orient_tif_stack(dataset.tif_stack)
+            elif path.lower().endswith(".npy"):
+                arr = self._load_suite2p_ops_array(path)  # raw array(s)
+                dataset.tif_stack = arr                  # ← no pre-orient for Suite2P
+                dataset.tif_path = path
+            else:
+                raise ValueError("Unsupported image file. Use .tif/.tiff or Suite2P ops.npy")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Image load error", str(e))
+            return
+
+        # Seed z if needed (for 2D: 0)
+        if dataset.current_z is None:
+            dataset.set_current_z(0.0)
+            if which == 'A': self.editZA.setText(str(dataset.current_z))
+            else:            self.editZB.setText(str(dataset.current_z))
+
+        label_widget.setText(os.path.basename(path))
+
+        # Try to fit & render immediately
+        try:
+            self.auto_fit_image_to_points(which)
+        except Exception:
+            pass
+
+        if which == 'A':
+            self.chkShowImgA.blockSignals(True); self.chkShowImgA.setChecked(True); self.chkShowImgA.blockSignals(False)
+            self.populate_view_A()
+        else:
+            self.chkShowImgB.blockSignals(True); self.chkShowImgB.setChecked(True); self.chkShowImgB.blockSignals(False)
+            self.populate_view_B()
+
+        self.update_overlay_view()
+        self.status.setText(f"Loaded image for {dataset.name or which}: {os.path.basename(path)}")
+
+    def _levels_for_array(self, which: str, slc: np.ndarray, z: float) -> Tuple[float, float]:
+        if slc is None:
+            return (0.0, 1.0)
+        self._ensure_base_levels_for_z(which, z, slc)  # seeds caches, robust range
+        v = slc[np.isfinite(slc)].astype(np.float32)
+        if v.size == 0:
+            return (0.0, 1.0)
+
+        wide_lo, wide_hi   = float(np.percentile(v, 0.2)),  float(np.percentile(v, 99.8))
+        tight_lo, tight_hi = float(np.percentile(v, 10.0)), float(np.percentile(v, 90.0))
+        if tight_hi <= tight_lo:
+            tight_lo, tight_hi = wide_lo, wide_hi
+        if wide_hi <= wide_lo:
+            wide_lo, wide_hi = float(np.min(v)), float(np.max(v))
+            if wide_hi <= wide_lo:
+                wide_hi = wide_lo + 1.0
+
+        f   = self._get_intensity_factor(which)      # 0.05..5.0
+        mix = (f - 0.05) / (5.0 - 0.05)
+        mix = max(0.0, min(1.0, mix))
+        lo = (1.0 - mix) * wide_lo + mix * tight_lo
+        hi = (1.0 - mix) * wide_hi + mix * tight_hi
+
+        full = float(np.max(v) - np.min(v))
+        minw = max(1e-6, 0.001 * full)
+        if (hi - lo) < minw:
+            c = 0.5 * (hi + lo)
+            lo, hi = c - 0.5 * minw, c + 0.5 * minw
+        return (float(lo), float(hi))
+
+    def _normalize_image(self, which: str, slc: np.ndarray, z: float) -> np.ndarray:
+        lo, hi = self._levels_for_array(which, slc, z)
+        arr = (slc.astype(np.float32) - lo) / max(hi - lo, 1e-6)
+        return np.clip(arr, 0.0, 1.0)
+
+    def _world_to_indices(self, X: np.ndarray, Y: np.ndarray,
+                        rect: QtCore.QRectF, H: int, W: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Map world coords (X,Y) to (row i, col j) indices of an image placed by `rect`.
+        Uses pixel centers, so j = round((x - x0) * W/rect.w - 0.5).
+        """
+        sx = W / max(rect.width(), 1e-12)
+        sy = H / max(rect.height(), 1e-12)
+        j = np.rint((X - rect.x()) * sx - 0.5).astype(int)  # columns (x)
+        i = np.rint((Y - rect.y()) * sy - 0.5).astype(int)  # rows (y)
+        return i, j
+
+
+    def _draw_additive_composite(self):
+        """
+        Build ONE RGB image on A's canvas by resampling B into A using the
+        current B→A similarity, then additively blending:
+            A -> blue,  B -> orange, overlap -> yellow.
+
+        Only includes A and/or B if their "Show image" checkboxes are checked.
+        """
+        # --- Respect 'Show image (A/B)' checkboxes ---
+        useA = self.chkShowImgA.isChecked()
+        useB = self.chkShowImgB.isChecked()
+
+        # If neither should draw, remove existing composite and bail
+        if not (useA or useB):
+            if hasattr(self, "_additiveItem") and self._additiveItem is not None:
+                try: self.viewOverlay.removeItem(self._additiveItem)
+                except Exception: pass
+                self._additiveItem = None
+            return
+
+        # --- Guards (keep existing expectations: both stacks present) ---
+        if self.datasetA.tif_stack is None or self.datasetB.tif_stack is None:
+            return
+        slcA = self.oriented_slice(self.datasetA, 'A')
+        slcB = self.oriented_slice(self.datasetB, 'B')
+        if slcA is None or slcB is None:
+            return
+
+        # --- Rects as-is (A is the canvas) ---
+        rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
+        if rectA is None:
+            Ha, Wa = slcA.shape[:2]
+            rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
+        else:
+            Ha, Wa = slcA.shape[:2]
+
+        rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
+        if rectB is None:
+            Hb, Wb = slcB.shape[:2]
+            rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
+        else:
+            Hb, Wb = slcB.shape[:2]
+
+        # --- Transform choice (unchanged) ---
+        if self.chkManualTRS.isChecked():
+            sRt = self._srt_from_ui()
+        else:
+            sRt = self.dynamic_transform_from_pairs()
+
+        # Pre-orientation matrix (unchanged)
+        S = np.array([[0.0, 1.0],
+                    [1.0, 0.0]], dtype=float)
+
+        if sRt is None:
+            s, R_img, t_img = 1.0, np.eye(2), np.zeros(2, dtype=float)
+        else:
+            s_raw, R_raw, t_raw = sRt
+            R_img = S @ R_raw @ S
+            t_img = S @ t_raw
+            s = float(s_raw)
+
+        # --- World grid on A’s canvas (unchanged) ---
+        xs = rectA.x() + (np.arange(Wa, dtype=float) + 0.5) * (rectA.width()  / Wa)
+        ys = rectA.y() + (np.arange(Ha, dtype=float) + 0.5) * (rectA.height() / Ha)
+        X, Y = np.meshgrid(xs, ys)                 # (Ha, Wa)
+        XY = np.vstack([X.ravel(), Y.ravel()])     # (2, Ha*Wa)
+
+        # --- Map A centers → B image frame (unchanged math) ---
+        XYB = (1.0 / max(s, 1e-12)) * (R_img.T @ (XY - t_img.reshape(2, 1)))
+        XB = XYB[0, :].reshape(Ha, Wa)
+        YB = XYB[1, :].reshape(Ha, Wa)
+
+        # --- Convert world coords to B fractional indices (unchanged) ---
+        dxB = rectB.width()  / Wb
+        dyB = rectB.height() / Hb
+        ix = (XB - rectB.x()) / max(dxB, 1e-12) - 0.5
+        iy = (YB - rectB.y()) / max(dyB, 1e-12) - 0.5
+
+        # --- Normalization helpers (unchanged) ---
+        def _levels_for(which: str, slc: np.ndarray) -> Tuple[float, float]:
+            v = slc.astype(np.float32, copy=False)
+            v = v[np.isfinite(v)]
+            if v.size == 0:
+                return 0.0, 1.0
+            p = np.percentile
+            wide_lo, wide_hi   = float(p(v, 0.2)),  float(p(v, 99.8))
+            tight_lo, tight_hi = float(p(v, 10.0)), float(p(v, 90.0))
+            if tight_hi <= tight_lo: tight_lo, tight_hi = wide_lo, wide_hi
+            if wide_hi <= wide_lo:
+                wide_lo, wide_hi = float(np.min(v)), float(np.max(v))
+            f = self._get_intensity_factor(which)  # 0.05..5.00 → 0..1
+            mix = (f - 0.05) / (5.0 - 0.05); mix = max(0.0, min(1.0, mix))
+            lo = (1.0 - mix) * wide_lo + mix * tight_lo
+            hi = (1.0 - mix) * wide_hi + mix * tight_hi
+            if hi <= lo: hi = lo + 1.0
+            return float(lo), float(hi)
+
+        # --- Normalize A (only if enabled) ---
+        A01 = None
+        if useA:
+            loA, hiA = _levels_for('A', slcA)
+            A01 = np.clip((slcA.astype(np.float32) - loA) / (hiA - loA), 0.0, 1.0)
+        opaA = self._get_opacity('A') if useA else 0.0
+
+        # --- Sample & normalize B (only if enabled) ---
+        B01 = None
+        opaB = 0.0
+        if useB:
+            # Bilinear sampling
+            ix0 = np.floor(ix).astype(np.int32); iy0 = np.floor(iy).astype(np.int32)
+            ix1 = ix0 + 1;                         iy1 = iy0 + 1
+            wx = ix - ix0;                         wy = iy - iy0
+
+            def clip_idx(i, imax): return np.clip(i, 0, imax - 1)
+            ix0c = clip_idx(ix0, Wb); ix1c = clip_idx(ix1, Wb)
+            iy0c = clip_idx(iy0, Hb); iy1c = clip_idx(iy1, Hb)
+
+            v00 = slcB[iy0c, ix0c]; v10 = slcB[iy0c, ix1c]
+            v01 = slcB[iy1c, ix0c]; v11 = slcB[iy1c, ix1c]
+            w00 = (1.0 - wx) * (1.0 - wy); w10 = wx * (1.0 - wy)
+            w01 = (1.0 - wx) * wy;         w11 = wx * wy
+
+            sampB = (w00 * v00 + w10 * v10 + w01 * v01 + w11 * v11)
+
+            # true OOB → zero
+            oob = (ix < 0) | (iy < 0) | (ix > (Wb - 1)) | (iy > (Hb - 1))
+            sampB[oob] = 0.0
+
+            loB, hiB = _levels_for('B', slcB)
+            B01 = np.clip((sampB.astype(np.float32) - loB) / (hiB - loB), 0.0, 1.0)
+            opaB = self._get_opacity('B')
+
+        # --- Colorize & additive blend (now gated) ---
+        comp = np.zeros((Ha, Wa, 3), dtype=np.float32)
+        if useA:
+            comp[..., 2] += (A01 * opaA)              # A → blue
+        if useB:
+            comp[..., 0] += (B01 * opaB)              # B → red
+            comp[..., 1] += (B01 * opaB * 0.55)       # B → green (to make orange)
+        np.clip(comp, 0.0, 1.0, out=comp)
+
+        rgb8 = (comp * 255.0 + 0.5).astype(np.uint8)
+
+        # --- Show it in the overlay as a single ImageItem pinned to A's rect ---
+        if hasattr(self, "_additiveItem") and self._additiveItem is not None:
+            try:
+                self.viewOverlay.removeItem(self._additiveItem)
+            except Exception:
+                pass
+            self._additiveItem = None
+
+        img = pg.ImageItem(rgb8)
+        img.setRect(rectA)
+        img.setZValue(-210)  # beneath outlines & intersection patches
+        self.viewOverlay.addItem(img)
+        self._additiveItem = img
+
+
+   
+
     def _on_intersection_clicked(self, key: Tuple[ROIKey, ROIKey]):
         """Select the pair row and highlight the two ROIs in A/B views."""
         akey, bkey = key
@@ -917,6 +1396,84 @@ class MainWindow(QtWidgets.QMainWindow):
 
         cache[z] = (float(lo), float(hi))
 
+    def _reset_pairs_on_dataset_load(self, which: str):
+        """
+        Called when either dataset A or B is (re)loaded.
+        Clears cross-dataset pair mappings and UI, but does NOT touch
+        labels stored inside either dataset (so they can seed the new file).
+        """
+        # Clear pair mappings and caches
+        self.A2B.clear()
+        self.B2A.clear()
+        self._two_pair_cache.clear()
+        self._best_combo_cache.clear()
+
+        # Clear selection & highlights
+        self.selA = None
+        self.selB = None
+        self._clear_highlight('A')
+        self._clear_highlight('B')
+
+        # Clear intersection overlays
+        for items in self._overlay_intersections.values():
+            for it in items:
+                try:
+                    self.viewOverlay.removeItem(it)
+                except Exception:
+                    pass
+        self._overlay_intersections = {}
+
+        # Clear table UI
+        self.pairTable.clearContents()
+        self.pairTable.setRowCount(0)
+
+        # Refresh views
+        self.update_overlay_view()
+        self.refresh_controls()
+
+        # Status message helps debugging
+        self.status.setText(
+            f"Cleared old A↔B pairs after loading dataset {which}. "
+            "Existing labels on the other dataset are preserved."
+        )
+
+    def _make_tint_lut(self, rgb, n=256, alpha_mode='constant', max_alpha=220):
+        """Return (n,4) uint8 LUT. alpha_mode: 'constant' or 'ramp' (intensity-weighted)."""
+        rgb = np.array(rgb, dtype=float)[None, :] / 255.0          # (1,3)
+        ramp = np.linspace(0.0, 1.0, n)[:, None]                   # (n,1)
+        rgb_part = (ramp * rgb * 255.0).astype(np.uint8)           # (n,3)
+
+        if alpha_mode == 'ramp':
+            a = np.clip(ramp * max_alpha, 0, 255).astype(np.uint8) # brighter ⇒ more opaque
+        else:
+            a = np.full((n,1), int(max_alpha), dtype=np.uint8)     # fixed opacity per pixel
+
+        return np.hstack([rgb_part, a])                            # (n,4)
+
+    def _apply_tinted_lut(self, img_item: pg.ImageItem, which: str, alpha_mode='constant'):
+        if which == 'A':
+            if alpha_mode == 'ramp':
+                if getattr(self, "_lutA_ramp", None) is None:
+                    self._lutA_ramp = self._make_tint_lut((0,120,255), alpha_mode='ramp',  max_alpha=220)
+                lut = self._lutA_ramp
+            else:
+                if getattr(self, "_lutA_const", None) is None:
+                    self._lutA_const = self._make_tint_lut((0,120,255), alpha_mode='constant', max_alpha=220)
+                lut = self._lutA_const
+        else:
+            if alpha_mode == 'ramp':
+                if getattr(self, "_lutB_ramp", None) is None:
+                    self._lutB_ramp = self._make_tint_lut((255,140,0), alpha_mode='ramp',  max_alpha=220)
+                lut = self._lutB_ramp
+            else:
+                if getattr(self, "_lutB_const", None) is None:
+                    self._lutB_const = self._make_tint_lut((255,140,0), alpha_mode='constant', max_alpha=220)
+                lut = self._lutB_const
+
+        img_item.setLookupTable(lut)
+
+
+
 
     def _apply_image_levels(self, imgItem: pg.ImageItem, which: str, slc: np.ndarray, z: Optional[float] = None):
         """
@@ -1141,6 +1698,9 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load error", str(e))
             return
+
+        # Reset pairs
+        self._reset_pairs_on_dataset_load(which)
 
         # Show filename beside the Load button
         label_widget.setText(os.path.basename(path))
@@ -1903,39 +2463,49 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._set_ui_from_srt(s, R, t, block_signals=True)
 
         # ---- draw images (overlay should be in RAW frame; no user-affine here) ----
-        # A image (identity transform)
-        if self.chkShowImgA.isChecked() and self.datasetA.tif_stack is not None:
-            slcA = self.oriented_slice(self.datasetA, 'A')
-            if slcA is not None:
-                imgA = pg.ImageItem(slcA); imgA.setZValue(-200)
-                imgA.setOpacity(self._get_opacity('A')) 
-                self._apply_image_levels(imgA, 'A', slcA, z=self.datasetA.current_z)
-                rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
-                if rectA is None:
-                    Ha, Wa = slcA.shape[0], slcA.shape[1]
-                    rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
-                imgA.setRect(rectA)
-                imgA.setTransform(QtGui.QTransform())  # RAW frame
-                self.viewOverlay.addItem(imgA)
+        if self.chkCompositeAdd.isChecked():
+            # Single summed-RGB composite
+            self._draw_additive_composite()
+        else:
+            # A image (identity transform)
+            if self.chkShowImgA.isChecked() and self.datasetA.tif_stack is not None:
+                slcA = self.oriented_slice(self.datasetA, 'A')
+                if slcA is not None:
+                    imgA = pg.ImageItem(slcA); imgA.setZValue(-200)
+                    imgA.setOpacity(self._get_opacity('A')) 
+                    self._apply_image_levels(imgA, 'A', slcA, z=self.datasetA.current_z)
+                    # Apply blend
+                    self._apply_tinted_lut(imgA, 'A',
+                        alpha_mode='constant')
+                    rectA = self.imgRectA_by_z.get(self.datasetA.current_z)
+                    if rectA is None:
+                        Ha, Wa = slcA.shape[0], slcA.shape[1]
+                        rectA = QtCore.QRectF(-0.5, -0.5, Wa, Ha)
+                    imgA.setRect(rectA)
+                    imgA.setTransform(QtGui.QTransform())  # RAW frame
+                    self.viewOverlay.addItem(imgA)
 
-        # B image (apply only the chosen similarity)
-        if self.chkShowImgB.isChecked() and self.datasetB.tif_stack is not None:
-            slcB = self.oriented_slice(self.datasetB, 'B')
-            if slcB is not None:
-                imgB = pg.ImageItem(slcB); imgB.setZValue(-190)
-                imgB.setOpacity(self._get_opacity('B'))  # <— use slider value
-                self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z)
-                rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
-                if rectB is None:
-                    Hb, Wb = slcB.shape[0], slcB.shape[1]
-                    rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
-                imgB.setRect(rectB)
-                T_total_B = QtGui.QTransform()
-                if sRt is not None:
-                    s, R, t = sRt
-                    T_total_B = self.qtransform_from_similarity(s, R, t)
-                imgB.setTransform(T_total_B)
-                self.viewOverlay.addItem(imgB)
+            # B image (apply only the chosen similarity)
+            if self.chkShowImgB.isChecked() and self.datasetB.tif_stack is not None:
+                slcB = self.oriented_slice(self.datasetB, 'B')
+                if slcB is not None:
+                    imgB = pg.ImageItem(slcB); imgB.setZValue(-190)
+                    imgB.setOpacity(self._get_opacity('B'))  # <— use slider value
+                    self._apply_image_levels(imgB, 'B', slcB, z=self.datasetB.current_z)
+                    self._apply_tinted_lut(imgB, 'B',
+                        alpha_mode='constant')
+                    rectB = self.imgRectB_by_z.get(self.datasetB.current_z)
+                    if rectB is None:
+                        Hb, Wb = slcB.shape[0], slcB.shape[1]
+                        rectB = QtCore.QRectF(-0.5, -0.5, Wb, Hb)
+                    imgB.setRect(rectB)
+                    T_total_B = QtGui.QTransform()
+                    if sRt is not None:
+                        s, R, t = sRt
+                        T_total_B = self.qtransform_from_similarity(s, R, t)
+                    imgB.setTransform(T_total_B)
+                    self.viewOverlay.addItem(imgB)
+                
         # Draw polygons & centroids
         # A in blue; B in orange (transformed by dynamic transform)
         dyn = sRt
@@ -1964,11 +2534,13 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.chkShowOutlineB.isChecked():
                 self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penB))
 
-
-        if SHAPELY:
+        show_overlap = self.chkShowOutlineA.isChecked() or self.chkShowOutlineB.isChecked()
+        if SHAPELY and show_overlap:
             # colors
-            base_pen   = QtGui.QPen(QtGui.QColor(0, 200, 0, 160)); base_pen.setWidthF(1.0)
-            base_brush = QtGui.QBrush(QtGui.QColor(0, 200, 0, 80))
+            # base_pen   = QtGui.QPen(QtGui.QColor(0, 200, 0, 160)); base_pen.setWidthF(1.0)
+            # base_brush = QtGui.QBrush(QtGui.QColor(0, 200, 0, 80))
+            base_pen   = QtGui.QPen(QtGui.QColor(255, 220, 0, 220)); base_pen.setWidthF(1.2)
+            base_brush = QtGui.QBrush(QtGui.QColor(255, 220, 0, 110))
 
             # We already have sRt and rid2polyA (RAW). For each current-slice pair:
             pairs_cur = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
