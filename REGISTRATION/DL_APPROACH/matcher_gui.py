@@ -112,6 +112,120 @@ ROIKey = Tuple[float, int]  # (z, ROI_ID)
 def norm_z(zval: float) -> float:
     return float(np.round(float(zval), 6))
 
+# ---------------------------- Atlas ----------------------------
+@dataclass
+class Atlas:
+    """Holds a many-dataset mapping to a shared Common_ID."""
+    # columns are dataset labels, e.g. ["Session1","Session2",...]
+    columns: List[str] = field(default_factory=list)
+    # rows are Common_ID -> { dataset_label: "z,ROI" }
+    rows: Dict[int, Dict[str, str]] = field(default_factory=dict)
+
+    def _next_common_id(self) -> int:
+        return (max(self.rows.keys()) + 1) if self.rows else 1
+
+    @staticmethod
+    def roikey(z: float, rid: int) -> str:
+        return f"{float(z)},{int(rid)}"  # CSV-friendly
+
+    @staticmethod
+    def parse_roikey(s: str) -> Optional[Tuple[float,int]]:
+        s = (s or "").strip()
+        if not s: return None
+        try:
+            z_str, rid_str = s.split(",")
+            return float(z_str), int(rid_str)
+        except Exception:
+            return None
+
+    def ensure_column(self, label: str):
+        if label not in self.columns:
+            self.columns.append(label)
+            # ensure all existing rows have an empty cell for the new column
+            for row in self.rows.values():
+                row.setdefault(label, "")
+
+    def add_pair(self, labelA: str, zA: float, ridA: int,
+                 labelB: str, zB: float, ridB: int,
+                 prefer_existing='atlas') -> int:
+        """
+        Insert/merge a pair (A,B) into the atlas; returns the Common_ID used.
+
+        Rules:
+        - If either ROI already exists in some row, use that Common_ID.
+        - If both exist but in different rows:
+            - If prefer_existing='atlas' -> merge rows using the Common_ID where A/B were found first.
+            - If prefer_existing='tool'  -> let the second override the first.
+        - Otherwise mint a new Common_ID.
+        """
+        self.ensure_column(labelA)
+        self.ensure_column(labelB)
+        ra = self.roikey(zA, ridA)
+        rb = self.roikey(zB, ridB)
+
+        # Find rows containing ra/rb
+        row_a = None; row_b = None
+        for cid, row in self.rows.items():
+            if row.get(labelA, "") == ra:
+                row_a = cid
+            if row.get(labelB, "") == rb:
+                row_b = cid
+
+        # Case: neither exists → new row
+        if row_a is None and row_b is None:
+            cid = self._next_common_id()
+            self.rows[cid] = {col: "" for col in self.columns}
+            self.rows[cid][labelA] = ra
+            self.rows[cid][labelB] = rb
+            return cid
+
+        # Case: one side exists → extend that row
+        if row_a is not None and row_b is None:
+            cid = row_a
+            self.rows[cid][labelB] = rb
+            return cid
+        if row_b is not None and row_a is None:
+            cid = row_b
+            self.rows[cid][labelA] = ra
+            return cid
+
+        # Case: both exist
+        if row_a == row_b:
+            return row_a  # already consistent
+        # conflict: two rows for the same cell → merge policy
+        keep, drop = (row_a, row_b) if prefer_existing == 'atlas' else (row_b, row_a)
+        # merge all columns from drop into keep (prefer keep's non-empty)
+        for col in self.columns:
+            v_keep = self.rows[keep].get(col, "")
+            v_drop = self.rows[drop].get(col, "")
+            if not v_keep and v_drop:
+                self.rows[keep][col] = v_drop
+        # delete dropped row
+        del self.rows[drop]
+        return keep
+
+    def to_dataframe(self) -> pd.DataFrame:
+        cols = self.columns + ["Common_ID"]
+        data = []
+        for cid, row in sorted(self.rows.items()):
+            rec = {c: row.get(c, "") for c in self.columns}
+            rec["Common_ID"] = cid
+            data.append(rec)
+        return pd.DataFrame(data, columns=cols)
+
+    @classmethod
+    def from_csv(cls, path: str) -> "Atlas":
+        df = pd.read_csv(path)
+        cols = [c for c in df.columns if c != "Common_ID"]
+        atlas = cls(columns=cols, rows={})
+        for _, r in df.iterrows():
+            cid = int(r["Common_ID"])
+            atlas.rows[cid] = {c: str(r.get(c, "") if not pd.isna(r.get(c, "")) else "") for c in cols}
+        return atlas
+
+    def save_csv(self, path: str):
+        self.to_dataframe().to_csv(path, index=False)
+
 
 @dataclass
 class Dataset:
@@ -198,6 +312,8 @@ class Dataset:
                                     in subz.groupby('ROI_ID')['label'].first().items()}
             else:
                 self.labels_by_z[z] = {}
+
+    
 
     def get_label(self, z: float, rid: int) -> int:
         z = norm_z(z)
@@ -311,6 +427,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Composite image of A and B
         self._additiveItem = None
 
+        # --- Atlas state ---
+        self.atlas = Atlas()   # auto-created on startup
+        self.dataset_labels: Dict[str, Optional[str]] = {'A': None, 'B': None}
+
         # Cached zoomed values of plots
         self._savedRanges = {'A': None, 'B': None, 'O': None}  # overlay=O
 
@@ -403,6 +523,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btnLoadImageB.clicked.connect(lambda: self.load_image(self.datasetB, self.lblImageB, which='B'))
         f.addRow(self.btnLoadImageA, self.lblImageA)
         f.addRow(self.btnLoadImageB, self.lblImageB)
+
+         # --- Atlas controls ---
+        self.btnAtlasNew  = QtWidgets.QPushButton("New")
+        self.btnAtlasLoad = QtWidgets.QPushButton("Load")
+        self.btnAtlasSave = QtWidgets.QPushButton("Export")
+
+        self.btnAtlasNew.clicked.connect(self._atlas_new)
+        self.btnAtlasLoad.clicked.connect(self._atlas_load)
+        self.btnAtlasSave.clicked.connect(self._atlas_export)
+
+        atlas_row = QtWidgets.QWidget()
+        hb = QtWidgets.QHBoxLayout(atlas_row); hb.setContentsMargins(0,0,0,0); hb.setSpacing(8)
+        hb.addWidget(self.btnAtlasNew); hb.addWidget(self.btnAtlasLoad); hb.addWidget(self.btnAtlasSave)
+        f.addRow(QtWidgets.QLabel("<b>Atlas</b>"), atlas_row)
 
         # Show image + Show outlines (same row per dataset)
         self.chkShowImgA = QtWidgets.QCheckBox("Show image (A)")
@@ -626,6 +760,193 @@ class MainWindow(QtWidgets.QMainWindow):
         self.colorA: Dict[int, QtGui.QColor] = {}
         self.colorB: Dict[int, QtGui.QColor] = {}
     # ------------------------ Utility ------------------------
+    def _atlas_new(self):
+        self.atlas = Atlas()
+        self.status.setText("Created new empty atlas.")
+        # keep existing dataset labels so we can start filling rows
+
+    def _atlas_load(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Atlas CSV", os.getcwd(), "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            self.atlas = Atlas.from_csv(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Atlas load error", str(e)); return
+        self.status.setText(f"Loaded atlas: {os.path.basename(path)}")
+
+        # Prompt labels for any loaded datasets and try to apply pairs
+        for which in ('A','B'):
+            ds_loaded = (self.datasetA.df is not None) if which=='A' else (self.datasetB.df is not None)
+            if ds_loaded:
+                self._prompt_dataset_label(which)
+
+        la = self.dataset_labels.get('A'); lb = self.dataset_labels.get('B')
+        if la and (la not in self.atlas.columns):
+            self.atlas.ensure_column(la)
+        if lb and (lb not in self.atlas.columns):
+            self.atlas.ensure_column(lb)
+
+        if la and lb:
+            # Ask user whether to load pairs (replace/merge)
+            has_pairs = (len(self.A2B) > 0)
+            default = QtWidgets.QMessageBox.No if has_pairs else QtWidgets.QMessageBox.Yes
+            choice = QtWidgets.QMessageBox.question(
+                self, "Apply atlas pairs?",
+                "Apply atlas pairs for the current A & B labels to this session?\n"
+                "Yes = REPLACE current pairs, No = MERGE (add non-conflicting).",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel,
+                default
+            )
+            if choice != QtWidgets.QMessageBox.Cancel:
+                mode = 'replace' if choice == QtWidgets.QMessageBox.Yes else 'merge'
+                self._apply_pairs_from_atlas(la, lb, mode)
+
+        # Also ingest any current matches into the atlas (fills missing cells/rows)
+        self._atlas_ingest_current_pairs()
+
+    def _atlas_export(self):
+        if not self.atlas.columns:
+            QtWidgets.QMessageBox.information(self, "Empty atlas", "Nothing to export yet.")
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Atlas CSV", os.getcwd(), "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            self.atlas.save_csv(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Atlas export error", str(e)); return
+        self.status.setText(f"Exported atlas to {os.path.basename(path)}")
+
+    def _prompt_dataset_label(self, which: str) -> Optional[str]:
+        current = self.dataset_labels.get(which) or ""
+        text, ok = QtWidgets.QInputDialog.getText(self, "Dataset label",
+                                                  f"Enter atlas label for dataset {which} (column name):",
+                                                  QtWidgets.QLineEdit.Normal, current)
+        if not ok: 
+            return None
+        label = text.strip()
+        if not label:
+            return None
+        self.dataset_labels[which] = label
+        self.atlas.ensure_column(label)
+        return label
+
+    def _atlas_after_dataset_loaded(self, which: str):
+        """Called whenever A or B finishes loading (CSV / Suite2P)."""
+        # Ask user to name this dataset for the atlas
+        label = self._prompt_dataset_label(which)
+        if not label:
+            return  # atlas still exists; dataset just not labeled yet
+
+        # If label already exists in atlas, we may be able to prefill matches
+        # If both datasets are labeled, offer to load/merge/replace pairs from the atlas.
+        other = 'B' if which == 'A' else 'A'
+        label_other = self.dataset_labels.get(other)
+
+        if label_other:
+            # Check if the atlas has any rows containing either column
+            has_any_for_both = any( (row.get(label) and row.get(label_other)) for row in self.atlas.rows.values() )
+            if has_any_for_both:
+                # If user has already made matches, ask merge/replace
+                has_pairs = (len(self.A2B) > 0)
+                if has_pairs:
+                    choice = QtWidgets.QMessageBox.question(
+                        self, "Atlas pairs found",
+                        "This atlas already contains matches for these two dataset labels.\n"
+                        "Do you want to REPLACE your current matches with atlas pairs?\n"
+                        "Choose 'No' to MERGE (keep yours, add missing atlas pairs).",
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel,
+                        QtWidgets.QMessageBox.No
+                    )
+                    if choice == QtWidgets.QMessageBox.Cancel:
+                        return
+                    mode = 'replace' if choice == QtWidgets.QMessageBox.Yes else 'merge'
+                else:
+                    mode = 'replace'  # nothing made yet, just load atlas pairs
+
+                self._apply_pairs_from_atlas(labelA=self.dataset_labels['A'],
+                                             labelB=self.dataset_labels['B'],
+                                             mode=mode)
+
+        # If label was new to atlas, fold in any existing tool pairs
+        self._atlas_ingest_current_pairs()
+
+
+    def _apply_pairs_from_atlas(self, labelA: Optional[str], labelB: Optional[str], mode: str):
+        """Load pairs for current z-slices from atlas rows where both columns are populated."""
+        if not labelA or not labelB:
+            return
+        zA = self.datasetA.current_z; zB = self.datasetB.current_z
+        added = 0
+        atlas_pairs = []
+        for cid, row in self.atlas.rows.items():
+            a = self.atlas.parse_roikey(row.get(labelA, ""))
+            b = self.atlas.parse_roikey(row.get(labelB, ""))
+            if not a or not b:
+                continue
+            za, ra = a; zb, rb = b
+            if (np.isclose(za, zA) and np.isclose(zb, zB)):
+                atlas_pairs.append( ((za,int(ra)), (zb,int(rb)), cid) )
+
+        if mode == 'replace':
+            self.clear_pairs()
+
+        # Apply pairs (respect 1:1)
+        for (az, arid), (bz, brid), cid in atlas_pairs:
+            akey = (az, arid); bkey = (bz, brid)
+            if akey in self.A2B or bkey in self.B2A:
+                continue
+            self.A2B[akey] = bkey
+            self.B2A[bkey] = akey
+            # also set dataset 'label' = Common_ID
+            self.datasetA.set_label(az, arid, cid)
+            self.datasetB.set_label(bz, brid, cid)
+            added += 1
+
+        if added:
+            self.update_pair_table(); self.refresh_controls(); self.update_overlay_view()
+            self.status.setText(f"Loaded {added} pair(s) from atlas for zA={zA}, zB={zB}")
+
+    def _atlas_ingest_current_pairs(self):
+        la = self.dataset_labels.get('A'); lb = self.dataset_labels.get('B')
+        if not la and not lb:
+            return
+
+        for akey, bkey in list(self.A2B.items()):
+            # New guard: skip stale pairs that don't exist in the current files
+            if not self._roi_exists_in_dataset(self.datasetA, akey): 
+                continue
+            if not self._roi_exists_in_dataset(self.datasetB, bkey): 
+                continue
+
+            (az, arid), (bz, brid) = akey, bkey
+
+            if la and lb:
+                cid = self.atlas.add_pair(la, az, arid, lb, bz, brid, prefer_existing='atlas')
+                # Force both datasets’ labels to the atlas Common_ID (prevents drift/dupes)
+                self.datasetA.set_label(az, arid, cid)
+                self.datasetB.set_label(bz, brid, cid)
+            elif la:
+                cid = self.atlas.add_pair(la, az, arid, la, az, arid)
+                self.datasetA.set_label(az, arid, cid)
+            elif lb:
+                cid = self.atlas.add_pair(lb, bz, brid, lb, bz, brid)
+                self.datasetB.set_label(bz, brid, cid)
+
+
+    def _atlas_add_pair_incremental(self, akey: ROIKey, bkey: ROIKey):
+        """Call this whenever the user creates a new pair."""
+        la = self.dataset_labels.get('A'); lb = self.dataset_labels.get('B')
+        if not la or not lb:
+            return
+        (az, arid), (bz, brid) = akey, bkey
+        cid = self.atlas.add_pair(la, az, arid, lb, bz, brid, prefer_existing='atlas')
+        # sync dataset 'label' fields
+        self.datasetA.set_label(az, arid, cid)
+        self.datasetB.set_label(bz, brid, cid)
+
+
     def _outline_from_xy_pixels(self, xpix: np.ndarray, ypix: np.ndarray,
                                 H: int, W: int) -> np.ndarray:
         """
@@ -792,6 +1113,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_controls()
         self.update_overlay_view()
 
+    def _roi_exists_in_dataset(self, ds: Dataset, key: ROIKey) -> bool:
+        z, rid = key
+        z = norm_z(z); rid = int(rid)
+        return (z in (ds.roi_to_points_by_z or {})) and (rid in (ds.roi_to_points_by_z[z] or {}))
+
+
     def load_masks(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
         """CSV (legacy) or Suite2P stat.npy."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -812,11 +1139,15 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Load error", str(e))
             return
 
+        
+        # clear pairs tied to this dataset (keep the other dataset's labels for propagation)
+        self._purge_pairs_for_dataset(which)
+        self._atlas_after_dataset_loaded(which)
+
         # show filename
         label_widget.setText(os.path.basename(path))
 
-        # clear pairs tied to this dataset (keep the other dataset's labels for propagation)
-        self._purge_pairs_for_dataset(which)
+
 
         # draw views
         if which == 'A':
@@ -836,6 +1167,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # If both datasets present, try autopair by labels (still works with CSV)
         if self.datasetA.df is not None and self.datasetB.df is not None:
             self._autopair_by_labels()
+        
 
     def load_image(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
         """TIFF (legacy) or Suite2P ops.npy."""
@@ -2173,6 +2505,7 @@ class MainWindow(QtWidgets.QMainWindow):
             prev_a = self.B2A[bkey];
             if prev_a in self.A2B: del self.A2B[prev_a]
         self.A2B[akey] = bkey; self.B2A[bkey] = akey
+        self._atlas_add_pair_incremental(akey, bkey) # Update current atlas
         self._assign_or_propagate_label_for_pair(akey, bkey)
 
         self.selA = None; self.selB = None
@@ -2712,6 +3045,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             self.A2B[akey] = bkey
             self.B2A[bkey] = akey
+            # atlas sync
+            self._atlas_add_pair_incremental(akey, bkey)
             self._assign_or_propagate_label_for_pair(akey, bkey) 
             usedA.add(ridA); usedB.add(ridB)
             added += 1
