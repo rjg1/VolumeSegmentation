@@ -6,6 +6,7 @@ import math
 import numpy as np
 import itertools
 import pandas as pd
+from collections import deque
 import pyqtgraph as pg
 import tifffile as tiff
 
@@ -61,7 +62,6 @@ except Exception:
 
 
 # ---------------------------- Math utils ----------------------------
-
 def estimate_similarity_transform_2d(src: np.ndarray, dst: np.ndarray, allow_reflection: bool = False):
     """Return (s, R, t) such that approx: dst ≈ s * R @ src + t."""
     assert src.shape == dst.shape and src.shape[1] == 2 and src.shape[0] >= 2
@@ -1308,6 +1308,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_image_for_dataset(which)
         self._purge_pairs_for_dataset(which)
         self._atlas_after_dataset_loaded(which)
+
+        # Clear pairing cache 
+        self._two_pair_cache = {}
+        self._best_combo_cache = {}
 
         # show filename
         label_widget.setText(os.path.basename(path))
@@ -2736,33 +2740,24 @@ class MainWindow(QtWidgets.QMainWindow):
         return
 
     # ------------------------ Live overlay view (A+B) with IoU ------------------------
-    # def dynamic_transform_from_pairs(self):
-    #     pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
-    #     n = len(pairs)
-    #     if n == 0:
-    #         return None
-
-    #     # RAW centroids (no user affine)
-    #     A_pts = np.array([ self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs ], float)
-    #     B_pts = np.array([ self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs ], float)
-
-    #     if n == 1:
-    #         p1, q1 = B_pts[0], A_pts[0]
-    #         s, R, t = 1.0, np.eye(2), q1 - p1
-    #     elif n == 2:
-    #         s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
-    #     else:
-    #         s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
-    #     return (s, R, t)
-    def dynamic_transform_from_pairs(self):
+    def dynamic_transform_from_pairs(
+        self,
+        *,
+        bucket_tx: float = 5.0,       # px
+        bucket_ty: float = 5.0,       # px
+        bucket_scale: float = 0.10,   # Δs around 1.0 -> bucket on (s-1)/bucket_scale
+        bucket_deg: float = 1.0,      # degrees
+        bucket_votes: int = 6         # total votes needed for one bucket to early-stop
+    ):
         """
         1 pair  -> translation only
         2 pairs -> similarity from those two pairs
-        3+      -> choose the best 2 pairs (i,j) that maximize mean IoU across all current pairs.
-                - cache per (pair_i, pair_j)
-                - early stop when (t_x, t_y, s, theta) stabilizes.
-        NOTE: This operates in RAW coordinates (no user-affine) so overlay should not apply user transforms.
+        3+      -> evaluate two-pair candidates (i,j); each hypothesis casts a vote
+                into a discretized (tx, ty, s, theta) bucket. When any bucket
+                accumulates `bucket_votes`, stop early and return the best-scoring
+                hypothesis within that bucket.
         """
+
         # Collect valid current-slice pairs
         pairs = [(ak, bk) for ak, bk in self.A2B.items() if self.is_key_on_current_slices(ak, bk)]
         n = len(pairs)
@@ -2784,7 +2779,7 @@ class MainWindow(QtWidgets.QMainWindow):
             s, R, t = two_point_similarity(B_pts[0], B_pts[1], A_pts[0], A_pts[1])
             return (s, R, t)
 
-        # ---- 3+ pairs: choose the best (i, j) by IoU over ALL pairs ----
+        # ---- 3+ pairs: vote-based early stopping on discretized TRSθ buckets ----
 
         # Precompute raw polygons (no user affine)
         polyA = []
@@ -2800,7 +2795,6 @@ class MainWindow(QtWidgets.QMainWindow):
             s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
             return (s, R, t)
 
-        # Helper: mean IoU across all matched polygons (skip Nones)
         def score_transform(s: float, R: np.ndarray, t: np.ndarray) -> float:
             scores = []
             for k in range(n):
@@ -2812,43 +2806,47 @@ class MainWindow(QtWidgets.QMainWindow):
                 if val is not None:
                     scores.append(val)
             if not scores:
-                return -1.0  # nothing to score on
+                return -1.0
             return float(np.mean(scores))
+
+        # Discretize params into buckets; returns a hashable tuple
+        def bucketize(s: float, R: np.ndarray, t: np.ndarray):
+            theta = math.degrees(math.atan2(R[1, 0], R[0, 0]))  # [-180, 180]
+            b_tx = int(round((t[0]) / bucket_tx)) if bucket_tx > 0 else 0
+            b_ty = int(round((t[1]) / bucket_ty)) if bucket_ty > 0 else 0
+            b_s  = int(round((s - 1.0) / bucket_scale)) if bucket_scale > 0 else 0
+            b_th = int(round(theta / bucket_deg)) if bucket_deg > 0 else 0
+            return (b_tx, b_ty, b_s, b_th)
 
         # Candidate combos of two pairs
         idx_pairs = list(itertools.combinations(range(n), 2))
 
-        # Cache key for current set of pairs (so we can reuse the best result if nothing changed)
+        # Cache key for current set of pairs
         set_key = frozenset(pairs)
-        if set_key in self._best_combo_cache:
+        if hasattr(self, "_best_combo_cache") and set_key in self._best_combo_cache:
             s0, R0, t0, _ = self._best_combo_cache[set_key]
             return (s0, R0, t0)
 
-        best_score = -1.0
-        best_sRt = None  # (s,R,t)
+        # Ensure caches exist
+        if not hasattr(self, "_best_combo_cache"):
+            self._best_combo_cache = {}
+        if not hasattr(self, "_two_pair_cache"):
+            self._two_pair_cache = {}
 
-        # Early stopping settings (convergence on parameters)
-        k_window = 6
-        tol_t = 0.25      # px
-        tol_s = 1e-3
-        tol_theta = 1e-3  # rad ~ 0.057deg
-        stable_hits = 0
-        param_window = []
-
-        def params_of(R: np.ndarray, t: np.ndarray, s: float) -> np.ndarray:
-            theta = math.atan2(R[1, 0], R[0, 0])  # rotation from R
-            return np.array([t[0], t[1], s, theta], dtype=float)
-
-        # For large n, evaluating all C(n,2) can be costly—iterate in a deterministic but
-        # semi-spread order (middle, edges) to find good candidates early.
-        # (Simple heuristic: evaluate mid indices first.)
+        # Heuristic ordering to find good candidates early
         mid = n // 2
-        idx_pairs.sort(key=lambda ij: abs((ij[0]+ij[1]) * 0.5 - mid))
+        idx_pairs.sort(key=lambda ij: abs((ij[0] + ij[1]) * 0.5 - mid))
+
+        # Track overall best and per-bucket votes
+        best_score = -1.0
+        best_sRt = None  # (s, R, t)
+
+        # votes[bucket] = {"count": int, "best_score": float, "best_sRt": (s,R,t)}
+        votes = {}
 
         for (i, j) in idx_pairs:
-            # Per-two-pair cache key (order-invariant)
-            key = (pairs[i][0], pairs[i][1], pairs[j][0], pairs[j][1])
-            # normalize to keep (i,j) vs (j,i) identical
+            key = frozenset((pairs[i], pairs[j]))
+
             if key not in self._two_pair_cache:
                 s, R, t = two_point_similarity(B_pts[i], B_pts[j], A_pts[i], A_pts[j])
                 sc = score_transform(s, R, t)
@@ -2856,38 +2854,36 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 s, R, t, sc = self._two_pair_cache[key]
 
-            # Track best
+            # Global best (for fallback)
             if sc > best_score:
                 best_score = sc
                 best_sRt = (s, R, t)
 
-            # ---- Early stopping on parameter stability ----
-            p = params_of(R, t, s)
-            param_window.append(p)
-            if len(param_window) > k_window:
-                param_window.pop(0)
+            # --- Vote into the discretized bucket ---
+            b = bucketize(s, R, t)
+            info = votes.get(b)
+            if info is None:
+                votes[b] = {"count": 1, "best_score": sc, "best_sRt": (s, R, t)}
+            else:
+                info["count"] += 1
+                if sc > info["best_score"]:
+                    info["best_score"] = sc
+                    info["best_sRt"] = (s, R, t)
 
-            if len(param_window) == k_window:
-                span = np.ptp(np.stack(param_window, axis=0), axis=0)
-                # if translation, scale and angle are all stable for a couple of consecutive windows
-                if (max(span[0], span[1]) < tol_t) and (span[2] < tol_s) and (span[3] < tol_theta):
-                    stable_hits += 1
-                    if stable_hits >= 2:  # "majority" convergence proxy
-                        break
-                else:
-                    stable_hits = 0
+            # Early stop: if any bucket reaches threshold, return that bucket's best
+            if votes[b]["count"] >= max(1, int(bucket_votes)):
+                s_w, R_w, t_w = votes[b]["best_sRt"]
+                self._best_combo_cache[set_key] = (s_w, R_w, t_w, votes[b]["best_score"])
+                return (s_w, R_w, t_w)
 
-        # Fallback if somehow nothing scored
+        # Fallback if no bucket hit threshold: use global best or SVD
         if best_sRt is None:
             s, R, t = estimate_similarity_transform_2d(B_pts, A_pts, allow_reflection=False)
             return (s, R, t)
 
-        # Remember the best for this exact set of pairs
         s, R, t = best_sRt
         self._best_combo_cache[set_key] = (s, R, t, best_score)
         return (s, R, t)
-
-
 
     def polygon_from_roi(self, dataset: Dataset, rid: int) -> Optional[np.ndarray]:
         pts3 = dataset.roi_to_points_by_z.get(dataset.current_z, {}).get(int(rid))
