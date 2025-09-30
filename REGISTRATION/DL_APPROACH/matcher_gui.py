@@ -11,12 +11,12 @@ import pyqtgraph as pg
 import tifffile as tiff
 
 # --- Qt / Graph imports (try PySide6, fall back to PyQt5) ---
-try:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    QT_LIB = 'PySide6'
-except Exception:
-    from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
-    QT_LIB = 'PyQt5'
+# try:
+#     from PySide6 import QtWidgets, QtCore, QtGui
+#     QT_LIB = 'PySide6'
+# except Exception:
+from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
+QT_LIB = 'PyQt5'
 
 try:
     from skimage import measure as skmeasure  # type: ignore

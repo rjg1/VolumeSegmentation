@@ -2,4 +2,7 @@ build/
 dist/
 spec/
 _pyi*/
+venv-min/
+venv/
+.env/
 *.exe
