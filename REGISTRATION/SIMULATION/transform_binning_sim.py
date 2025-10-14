@@ -14,7 +14,8 @@ from plane import Plane
 from registration_utils import extract_zstack_plane, match_zstacks_2d
 from collections import  deque
 from itertools import product
-
+from shapely.geometry import Polygon as ShPolygon
+from scipy.spatial import cKDTree
 
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split(".csv")[0] + "_planes.csv"
@@ -427,47 +428,54 @@ def _match_in_bin(m: TransformMatch, bucket) -> bool:
     # unknown bucket type
     return False
 
-
-
-def score_z_levels(matches: List[TransformMatch], params: ZScoreParams) -> Tuple[int, Dict[int, dict]]:
+def score_z_levels(matches, params: ZScoreParams, which="a"):
     """
-    Aggregate matches by z (for one side), compute weighted score, and return best z and the table.
+    Compute weighted z-scores for either zstack A or B.
+
+    Args:
+        matches: list of TransformMatch objects
+        params:  ZScoreParams (weights for count, mean, max)
+        which:   "a" or "b" -> use plane_a or plane_b
+
+    Returns:
+        best_z  (int)
+        table   (dict[z_level] = composite score)
     """
-    if not matches:
+    # --- Gather per-z scores ---
+    z_to_scores = defaultdict(list)
+    for m in matches:
+        plane = m.plane_a if which == "a" else m.plane_b
+        z_val = int(round(float(plane.anchor_point.position[2])))
+        z_to_scores[z_val].append(m.score)
+
+    if not z_to_scores:
         return None, {}
 
-    # group by z
-    z2scores = defaultdict(list)
-    for m in matches:
-        z2scores[m.z_a].append(m.score)  # for dataset A
-    # If you also want a best z for dataset B, just run this again on m.z_b.
+    # --- Compute components ---
+    z_levels = sorted(z_to_scores.keys())
+    counts = np.array([len(z_to_scores[z]) for z in z_levels], float)
+    means  = np.array([np.mean(z_to_scores[z]) for z in z_levels], float)
+    maxes  = np.array([np.max(z_to_scores[z]) for z in z_levels], float)
 
-    table = {}
-    for z, lst in z2scores.items():
-        cnt  = len(lst)
-        mean = float(np.mean(lst)) if lst else 0.0
-        mx   = float(np.max(lst))  if lst else 0.0
-        total= params.w_count*cnt + params.w_mean*mean + params.w_max*mx
-        table[z] = {"count": cnt, "mean": mean, "max": mx, "score": total}
+    # --- Normalize each component 0–1 ---
+    def minmax(x):
+        rng = x.max() - x.min()
+        return (x - x.min()) / (rng + 1e-9)
 
-    best_z = max(table.items(), key=lambda kv: kv[1]["score"])[0]
-    return best_z, table
+    counts_n, means_n, maxes_n = map(minmax, [counts, means, maxes])
 
-def score_z_levels_for_b(matches: List[TransformMatch], params: ZScoreParams) -> Tuple[int, Dict[int, dict]]:
-    z2scores = defaultdict(list)
-    for m in matches:
-        z2scores[m.z_b].append(m.score)
-    table = {}
-    for z, lst in z2scores.items():
-        cnt  = len(lst)
-        mean = float(np.mean(lst)) if lst else 0.0
-        mx   = float(np.max(lst))  if lst else 0.0
-        total= params.w_count*cnt + params.w_mean*mean + params.w_max*mx
-        table[z] = {"count": cnt, "mean": mean, "max": mx, "score": total}
-    if not table:
-        return None, {}
-    best_z = max(table.items(), key=lambda kv: kv[1]["score"])[0]
-    return best_z, table
+    # --- Weighted linear score ---
+    total = (
+        params.w_count * counts_n +
+        params.w_mean  * means_n +
+        params.w_max   * maxes_n
+    )
+
+    # --- Pick best ---
+    z_scores = {z: float(s) for z, s in zip(z_levels, total)}
+    best_z = z_levels[int(np.argmax(total))]
+    return best_z, z_scores
+
 
 
 def filter_matches_in_bucket(matches: List[TransformMatch], bucket) -> List[TransformMatch]:
@@ -485,14 +493,114 @@ def choose_best_transform_fast(cands: List[TransformMatch]) -> TransformMatch | 
 
 
 # ---- IoU evaluation (placeholder) ----
-def compute_plane_iou(zstack_a: ZStack, zstack_b: ZStack, plane_a: Plane, plane_b: Plane,
-                      tx: float, ty: float, ang_deg: float, scale: float) -> float:
+def _transform_xy(coords_2d: np.ndarray, ang_deg: float, scale: float, tx: float, ty: float) -> np.ndarray:
     """
-    TODO: implement your real IoU eval by transforming B into A's 2D plane, rasterizing polygons,
-    and computing intersection/union. Returning NaN/0.0 is acceptable for wiring at first.
+    coords_2d: (N,2) array of [x,y] in A's plane frame.
+    Applies: u' = R(ang_deg) * (scale * u) + [tx,ty]
     """
-    # Stub so the "slow" path runs without crashing; replace with real IoU calc.
-    return 0.0
+    if coords_2d.size == 0:
+        return coords_2d
+    th = np.deg2rad(ang_deg)
+    c, s = np.cos(th), np.sin(th)
+    R = np.array([[c, -s], [s, c]], dtype=float)
+    U = coords_2d.astype(float).T  # (2,N)
+    U2 = (R @ (scale * U)).T       # (N,2)
+    U2[:, 0] += tx
+    U2[:, 1] += ty
+    return U2
+
+def _polys_at_z(zstack: ZStack, z_level: int):
+    """Return list of (roi_id, np.array Nx2) for the given integer z."""
+    out = []
+    layer = zstack.z_planes.get(float(z_level), None)
+    if not layer:
+        return out
+    for roi_id, roi_data in layer.items():
+        coords = roi_data.get("coords")
+        if not coords or len(coords) < 3:
+            continue
+        arr = np.asarray(coords, dtype=float)
+        if arr.shape[1] == 2:
+            xy = arr
+        else:
+            # coords may be [[x,y,z], ...]
+            xy = arr[:, :2]
+        out.append((roi_id, xy))
+    return out
+
+def _avg_pairwise_iou(polysA: list[tuple[int, np.ndarray]],
+                      polysB: list[tuple[int, np.ndarray]],
+                      max_nn_dist: float = np.inf) -> float:
+    """
+    polysA/B: lists of (roi_id, Nx2 coords)
+    Match B to A by nearest centroid (1-to-1 via KD-tree). 
+    Compute IoU per pair; return mean IoU over matched pairs.
+    """
+    if not polysA or not polysB:
+        return 0.0
+
+    # centroids
+    A_xy   = [p for _, p in polysA]
+    A_cent = np.array([xy.mean(axis=0) for xy in A_xy])  # (NA,2)
+
+    B_xy   = [p for _, p in polysB]
+    B_cent = np.array([xy.mean(axis=0) for xy in B_xy])  # (NB,2)
+
+    tree = cKDTree(B_cent)
+    dists, idxs = tree.query(A_cent, k=1)
+    pairs = []
+    usedB = set()
+    for iA, (d, jB) in enumerate(zip(dists, idxs)):
+        if max_nn_dist < np.inf and d > max_nn_dist:
+            continue
+        if jB in usedB:
+            # enforce 1-to-1: skip this A if its nearest B already taken
+            continue
+        usedB.add(jB)
+        pairs.append((iA, jB))
+
+    if not pairs:
+        return 0.0
+
+    ious = []
+    for iA, jB in pairs:
+        polyA = ShPolygon(A_xy[iA])
+        polyB = ShPolygon(B_xy[jB])
+        if not polyA.is_valid or not polyB.is_valid:
+            continue
+        inter = polyA.intersection(polyB).area
+        uni   = polyA.union(polyB).area
+        if uni <= 0:
+            continue
+        ious.append(inter / uni)
+
+    return float(np.mean(ious)) if ious else 0.0
+
+def compute_plane_iou(zstack_a: ZStack, zstack_b: ZStack, 
+                      plane_a: Plane, plane_b: Plane,
+                      tx: float, ty: float, ang_deg: float, scale: float,
+                      max_nn_dist: float = np.inf) -> float:
+    """
+    Average pairwise IoU of nearest-neighbour matched ROIs (by centroid)
+    between z-slice of A and transformed z-slice of B.
+    """
+    zA = int(round(float(plane_a.anchor_point.position[2])))
+    zB = int(round(float(plane_b.anchor_point.position[2])))
+
+    # Polygons at those z-levels
+    polysA = _polys_at_z(zstack_a, zA)          # [(roi_id, Nx2)]
+    polysB = _polys_at_z(zstack_b, zB)
+    if not polysA or not polysB:
+        return 0.0
+
+    # Transform B polygons into A's 2D frame using candidate (R,S,T)
+    transB = []
+    for rid, xy in polysB:
+        xy2 = _transform_xy(xy, ang_deg=ang_deg, scale=scale, tx=tx, ty=ty)
+        transB.append((rid, xy2))
+
+    # Average IoU over NN centroid matches
+    return _avg_pairwise_iou(polysA, transB, max_nn_dist=max_nn_dist)
 
 
 def choose_best_transform_slow(zstack_a: ZStack, zstack_b: ZStack,
@@ -1022,8 +1130,8 @@ def main():
 
     # 3) best z-plane (dataset A and B) with weighted scoring
     params = ZScoreParams(w_count=1.0, w_mean=1.0, w_max=1.0) # TO BE TUNED
-    best_z_a, table_a = score_z_levels(matches_top, params)
-    best_z_b, table_b = score_z_levels_for_b(matches_top, params)
+    best_z_a, table_a = score_z_levels(matches_top, params, which="a")
+    best_z_b, table_b = score_z_levels(matches_top, params, which="b")
     print(f"[Z*] best_z_a={best_z_a}, best_z_b={best_z_b}")
 
     # 4) restrict to candidates that hit those z-levels
