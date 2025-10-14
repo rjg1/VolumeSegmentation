@@ -12,6 +12,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from zstack import ZStack
 from plane import Plane
 from registration_utils import extract_zstack_plane, match_zstacks_2d
+from collections import  deque
+from itertools import product
 
 
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
@@ -134,16 +136,21 @@ def float_range(bin_idx: int, step: float) -> tuple[float, float]:
 
 @dataclass(frozen=True)
 class TransformIndexBin:
-    tx_id: int
-    ty_id: int
-    ang_id: int
-    s_id: int
+    tx_id : int
+    ty_id : int
+    ang_id :int
+    s_id : int
+
+    tx_step : int
+    ty_step : int
+    ang_step : int
+    s_step :int
 
     def label(self) -> str:
-        tx_lo, tx_hi = int_like_range(self.tx_id, TX_STEP)
-        ty_lo, ty_hi = int_like_range(self.ty_id, TY_STEP)
-        ang_lo, ang_hi = int_like_range(self.ang_id, ANG_STEP)
-        s_lo,  s_hi  = float_range(self.s_id,  S_STEP)
+        tx_lo, tx_hi = int_like_range(self.tx_id, self.tx_step)
+        ty_lo, ty_hi = int_like_range(self.ty_id, self.ty_step)
+        ang_lo, ang_hi = int_like_range(self.ang_id, self.ang_step)
+        s_lo,  s_hi  = float_range(self.s_id,  self.s_step)
         # avoid "-0"
         def z(x): return 0 if abs(x) < 1e-12 else x
         return (f"tx={z(tx_lo)}–{z(tx_hi)}px | "
@@ -151,6 +158,12 @@ class TransformIndexBin:
                 f"θ={z(ang_lo)}–{z(ang_hi)}° | "
                 f"s={s_lo:.1f}–{s_hi:.1f}")
 
+
+@dataclass
+class ZScoreParams:
+    w_count: float = 1.0
+    w_mean:  float = 1.0
+    w_max:   float = 1.0
 
 def plot_zstack_planes_3d(zstack, title="Z-planes (ROI centroids)"):
     """
@@ -197,42 +210,78 @@ def plot_zstack_planes_3d(zstack, title="Z-planes (ROI centroids)"):
     plt.tight_layout()
     plt.show()
 
-def extract_transforms(matched_planes: Dict) -> List[Tuple[float, float, float, float]]:
+def extract_transforms(matched_planes: Dict) -> List[TransformMatch]:
     """
-    For each matched plane pair, derive (tx, ty, angle_deg, scale).
-    - angle_deg  := result['offset']  (deg)
-    - scale      := result['scale_factor']
-    - (tx, ty)   := from Plane.get_aligned_2d_projection(...), aligning anchors in local 2D
+    For each matched plane pair, derive a full TransformMatch:
+      - tx, ty: translation in A's local 2D
+      - ang_deg: rotation (degrees)
+      - scale: scale factor
+      - score: match score from the coarse step
+      - z_a, z_b: anchor z-levels (rounded ints)
+      - key_bin: TransformIndexBin computed with (TX_STEP, TY_STEP, ANG_STEP, S_STEP)
     """
-    transforms = []
-    for score, entry in matched_planes.items():
+    out = []
+    for score_key, entry in matched_planes.items():
         res = entry.get("result", {})
-        plane_a: Plane = entry["plane_a"]
-        plane_b: Plane = entry["plane_b"]
-
+        plane_a: Plane = entry.get("plane_a")
+        plane_b: Plane = entry.get("plane_b")
+        if not plane_a or not plane_b:
+            continue
         if not res or not res.get("match", False):
             continue
 
-        angle_deg = float(res.get("offset", 0.0))
-        scale = float(res.get("scale_factor", 1.0))
+        # score might be the dict key or stored in entry
+        try:
+            score = float(score_key)
+        except Exception:
+            score = float(res.get("score", np.nan))
+        if not np.isfinite(score):
+            continue
 
-        # Compute tx, ty consistent with your plane 2D frames
-        _, _, tinfo = plane_a.get_aligned_2d_projection(plane_b, angle_deg, scale)
-        tx, ty = tinfo["translation"]  # already A-anchored minus B-anchored in A's 2D frame
+        ang = float(res.get("offset", 0.0))
+        sc  = float(res.get("scale_factor", 1.0))
+        _, _, tinfo = plane_a.get_aligned_2d_projection(plane_b, ang, sc)
+        tx, ty = tinfo["translation"]
 
-        transforms.append((tx, ty, angle_deg, scale))
-
-    return transforms
-
-def bin_transforms_by_id(transforms):
-    counter = Counter()
-    for tx, ty, ang, sc in transforms:
-        ang = norm_angle_deg(ang)   # keep around zero, but still origin=0 for bins
+        # bin key (rigid)
+        ang_n = norm_angle_deg(ang)
         key = TransformIndexBin(
             tx_id = bin_id(tx,  TX_STEP),
             ty_id = bin_id(ty,  TY_STEP),
-            ang_id= bin_id(ang, ANG_STEP),
+            ang_id= bin_id(ang_n, ANG_STEP),
             s_id  = bin_id(sc,  S_STEP),
+            tx_step=TX_STEP, ty_step=TY_STEP, ang_step=ANG_STEP, s_step=S_STEP
+        )
+
+        out.append(TransformMatch(
+            tx=tx, ty=ty, ang_deg=ang, scale=sc, score=score,
+            plane_a=plane_a, plane_b=plane_b,
+            z_a=int(round(float(plane_a.anchor_point.position[2]))),
+            z_b=int(round(float(plane_b.anchor_point.position[2]))),
+            key_bin=key
+        ))
+    return out
+
+def bin_transforms_by_id(items):
+    """
+    Accepts a list of TransformMatch OR a list of (tx, ty, angle_deg, scale) tuples.
+    Returns Counter[TransformIndexBin] as before.
+    """
+    counter = Counter()
+    for it in items:
+        if isinstance(it, TransformMatch):
+            tx, ty, ang, sc = it.tx, it.ty, it.ang_deg, it.scale
+        else:
+            # assume tuple-like
+            tx, ty, ang, sc = it
+
+        ang_n = norm_angle_deg(ang)
+        key = TransformIndexBin(
+            tx_id = bin_id(tx,  TX_STEP),
+            ty_id = bin_id(ty,  TY_STEP),
+            ang_id= bin_id(ang_n, ANG_STEP),
+            s_id  = bin_id(sc,  S_STEP),
+            tx_step=TX_STEP, ty_step=TY_STEP, ang_step=ANG_STEP, s_step=S_STEP
         )
         counter[key] += 1
     return counter
@@ -253,31 +302,6 @@ def plot_top_bins(counter: Counter, top_k: int = 10, title: str = "Top Transform
     plt.title(title)
     plt.tight_layout()
     plt.show()
-
-def export_counter_to_csv(counter, out_path: str):
-    import csv, os
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            "tx_id","tx_low_px","tx_high_px",
-            "ty_id","ty_low_px","ty_high_px",
-            "ang_id","ang_low_deg","ang_high_deg",
-            "s_id","s_low","s_high","count"
-        ])
-        for key, cnt in counter.most_common():
-            tx_lo, tx_hi = int_like_range(key.tx_id, TX_STEP)
-            ty_lo, ty_hi = int_like_range(key.ty_id, TY_STEP)
-            ag_lo, ag_hi = int_like_range(key.ang_id, ANG_STEP)
-            s_lo,  s_hi  = float_range(key.s_id,  S_STEP)
-            w.writerow([
-                key.tx_id, tx_lo, tx_hi,
-                key.ty_id, ty_lo, ty_hi,
-                key.ang_id, ag_lo, ag_hi,
-                key.s_id,  round(s_lo, 1), round(s_hi, 1),
-                cnt
-            ])
-
 
 def is_flat_normal(n, max_tilt_deg=2.0):
     """
@@ -367,6 +391,481 @@ def plot_scores_vs_z(matched_dict, expected_z, aggregate="max", title="Plane-mat
     plt.tight_layout()
     plt.show()
 
+
+ANG_PERIOD_IDS = int(round(360.0 / ANG_STEP))  # e.g., 360/4 -> 90 angle bins
+
+# -- helpers for best plane picks --
+def most_represented_bucket(counter: Counter):
+    """Return (bucket_key, count)."""
+    if not counter:
+        return None, 0
+    return counter.most_common(1)[0]
+
+def _match_in_bin(m: TransformMatch, bucket) -> bool:
+    # support TransformIndexBin or MergedIndexRange
+    if isinstance(bucket, TransformIndexBin):
+        return (bin_id(m.tx, TX_STEP)  == bucket.tx_id and
+                bin_id(m.ty, TY_STEP)  == bucket.ty_id and
+                bin_id(norm_angle_deg(m.ang_deg), ANG_STEP) == bucket.ang_id and
+                bin_id(m.scale, S_STEP) == bucket.s_id)
+
+    # MergedIndexRange: ranges per axis (inclusive in bin-IDs)
+    if isinstance(bucket, MergedIndexRange):
+        tx_id = bin_id(m.tx, TX_STEP)
+        ty_id = bin_id(m.ty, TY_STEP)
+        s_id  = bin_id(m.scale, S_STEP)
+        ang_id= bin_id(norm_angle_deg(m.ang_deg), ANG_STEP) % ANG_PERIOD_IDS
+
+        if not (bucket.tx_min_id <= tx_id <= bucket.tx_max_id): return False
+        if not (bucket.ty_min_id <= ty_id <= bucket.ty_max_id): return False
+        if not (bucket.s_min_id  <= s_id  <= bucket.s_max_id):  return False
+
+        # angle: inside circular span?
+        span_ids = angle_ids_from_span(bucket.ang_start_id, bucket.ang_len)
+        return (ang_id % ANG_PERIOD_IDS) in span_ids
+
+    # unknown bucket type
+    return False
+
+
+
+def score_z_levels(matches: List[TransformMatch], params: ZScoreParams) -> Tuple[int, Dict[int, dict]]:
+    """
+    Aggregate matches by z (for one side), compute weighted score, and return best z and the table.
+    """
+    if not matches:
+        return None, {}
+
+    # group by z
+    z2scores = defaultdict(list)
+    for m in matches:
+        z2scores[m.z_a].append(m.score)  # for dataset A
+    # If you also want a best z for dataset B, just run this again on m.z_b.
+
+    table = {}
+    for z, lst in z2scores.items():
+        cnt  = len(lst)
+        mean = float(np.mean(lst)) if lst else 0.0
+        mx   = float(np.max(lst))  if lst else 0.0
+        total= params.w_count*cnt + params.w_mean*mean + params.w_max*mx
+        table[z] = {"count": cnt, "mean": mean, "max": mx, "score": total}
+
+    best_z = max(table.items(), key=lambda kv: kv[1]["score"])[0]
+    return best_z, table
+
+def score_z_levels_for_b(matches: List[TransformMatch], params: ZScoreParams) -> Tuple[int, Dict[int, dict]]:
+    z2scores = defaultdict(list)
+    for m in matches:
+        z2scores[m.z_b].append(m.score)
+    table = {}
+    for z, lst in z2scores.items():
+        cnt  = len(lst)
+        mean = float(np.mean(lst)) if lst else 0.0
+        mx   = float(np.max(lst))  if lst else 0.0
+        total= params.w_count*cnt + params.w_mean*mean + params.w_max*mx
+        table[z] = {"count": cnt, "mean": mean, "max": mx, "score": total}
+    if not table:
+        return None, {}
+    best_z = max(table.items(), key=lambda kv: kv[1]["score"])[0]
+    return best_z, table
+
+
+def filter_matches_in_bucket(matches: List[TransformMatch], bucket) -> List[TransformMatch]:
+    return [m for m in matches if _match_in_bin(m, bucket)]
+
+
+def select_matches_on_z(matches: List[TransformMatch], best_z_a: int, best_z_b: int) -> List[TransformMatch]:
+    return [m for m in matches if m.z_a == best_z_a and m.z_b == best_z_b]
+
+
+def choose_best_transform_fast(cands: List[TransformMatch]) -> TransformMatch | None:
+    if not cands:
+        return None
+    return max(cands, key=lambda m: m.score)
+
+
+# ---- IoU evaluation (placeholder) ----
+def compute_plane_iou(zstack_a: ZStack, zstack_b: ZStack, plane_a: Plane, plane_b: Plane,
+                      tx: float, ty: float, ang_deg: float, scale: float) -> float:
+    """
+    TODO: implement your real IoU eval by transforming B into A's 2D plane, rasterizing polygons,
+    and computing intersection/union. Returning NaN/0.0 is acceptable for wiring at first.
+    """
+    # Stub so the "slow" path runs without crashing; replace with real IoU calc.
+    return 0.0
+
+
+def choose_best_transform_slow(zstack_a: ZStack, zstack_b: ZStack,
+                               cands: List[TransformMatch],
+                               patience: int = 20) -> Tuple[TransformMatch | None, float]:
+    """
+    Evaluate IoU for each candidate (R,T,S). Early-stop if no improvement for 'patience' steps.
+    Returns (best_match, best_iou).
+    """
+    best = None
+    best_iou = -1.0
+    no_improve = 0
+
+    for m in sorted(cands, key=lambda x: -x.score):  # try high-scoring first
+        iou = compute_plane_iou(zstack_a, zstack_b, m.plane_a, m.plane_b, m.tx, m.ty, m.ang_deg, m.scale)
+        if iou > best_iou:
+            best_iou = iou
+            best = m
+            no_improve = 0
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                break
+    return best, best_iou
+
+
+# ---------- helpers for circular angle axis ----------
+def ang_mod_id(i: int) -> int:
+    return int(i % ANG_PERIOD_IDS)
+
+def angle_dilate(ids: set[int], N: int) -> set[int]:
+    """Dilate a set of angle IDs by N (circularly)."""
+    if N <= 0: return ids
+    out = set()
+    for v in ids:
+        for k in range(-N, N+1):
+            out.add((v + k) % ANG_PERIOD_IDS)
+    return out
+
+def angle_min_cover(ids: set[int]) -> tuple[int, int]:
+    """Smallest inclusive covering arc (start_id, length_in_bins)."""
+    P = ANG_PERIOD_IDS
+    if not ids: return 0, 0
+    if len(ids) >= P: return 0, P
+
+    arr = sorted({i % P for i in ids})
+    best_gap = -1; best_a = arr[0]; best_b = arr[0]
+    for i in range(len(arr)):
+        a = arr[i]; b = arr[(i+1) % len(arr)]
+        gap = (b - a) % P
+        if gap > best_gap:
+            best_gap = gap; best_a, best_b = a, b
+
+    start  = best_b % P
+    length = ((best_a - best_b) % P) + 1  # <-- inclusive (+1)
+    if length > P: length = P
+    return start, length
+
+# ---------- working bin (mutable while merging) ----------
+@dataclass
+class _WorkBin:
+    tx_min: int; tx_max: int
+    ty_min: int; ty_max: int
+    s_min:  int; s_max:  int
+    ang_start: int; ang_len: int        # circular span
+    count: int
+
+    @property
+    def size(self) -> int:
+        # product of 4D spans (angle uses number of angle bins in the span)
+        return (self.tx_max - self.tx_min + 1) * \
+               (self.ty_max - self.ty_min + 1) * \
+               (self.s_max  - self.s_min  + 1) * \
+               max(self.ang_len, 1)
+
+# ---------- public merged-key (hashable; with label() for your plotter/exporter) ----------
+@dataclass(frozen=True)
+class MergedIndexRange:
+    tx_min_id: int; tx_max_id: int
+    ty_min_id: int; ty_max_id: int
+    s_min_id: int;  s_max_id: int
+    ang_start_id: int; ang_len: int
+
+
+    def label(self) -> str:
+        tx_lo, tx_hi = int_like_range(self.tx_min_id, TX_STEP)[0], int_like_range(self.tx_max_id, TX_STEP)[1]
+        ty_lo, ty_hi = int_like_range(self.ty_min_id, TY_STEP)[0], int_like_range(self.ty_max_id, TY_STEP)[1]
+        s_lo,  _    = float_range(self.s_min_id, S_STEP)
+        _,    s_hi  = float_range(self.s_max_id, S_STEP)
+        ang_txt = angle_span_label(self.ang_start_id, self.ang_len)
+        return (f"tx={tx_lo}–{tx_hi}px | "
+                f"ty={ty_lo}–{ty_hi}px | "
+                f"{ang_txt} | "
+                f"s={s_lo:.1f}–{s_hi:.1f}")
+
+@dataclass
+class TransformMatch:
+    tx: float
+    ty: float
+    ang_deg: float
+    scale: float
+    score: float
+    plane_a: Plane
+    plane_b: Plane
+    z_a: int
+    z_b: int
+    key_bin: TransformIndexBin  # bin the match fell into (rigid binning)
+
+
+# ---------- interval compatibility on linear axes ----------
+def _gap_1d(a_min: int, a_max: int, b_min: int, b_max: int) -> int:
+    """0 if overlap, else positive gap between two closed integer intervals."""
+    if a_max < b_min:
+        return b_min - a_max
+    if b_max < a_min:
+        return a_min - b_max
+    return 0
+
+def _in_seed_window(seed: _WorkBin, cand: _WorkBin, bucket_dist: int) -> bool:
+    """
+    True if 'cand' lies within the frozen window of 'seed' expanded by ±bucket_dist
+    on linear axes and by bucket_dist in angle bin IDs (circularly).
+    """
+    # linear axes: intersection with seed±N
+    if _gap_1d(seed.tx_min - bucket_dist, seed.tx_max + bucket_dist, cand.tx_min, cand.tx_max) > 0: return False
+    if _gap_1d(seed.ty_min - bucket_dist, seed.ty_max + bucket_dist, cand.ty_min, cand.ty_max) > 0: return False
+    if _gap_1d(seed.s_min  - bucket_dist, seed.s_max  + bucket_dist, cand.s_min,  cand.s_max)  > 0: return False
+
+    # angle: candidate must intersect seed's dilated angle-ID set
+    seed_ids = angle_ids_from_span(seed.ang_start, seed.ang_len)
+    win_ids  = angle_dilate(seed_ids, bucket_dist)
+    cand_ids = angle_ids_from_span(cand.ang_start, cand.ang_len)
+    return bool(win_ids & cand_ids)
+
+def angle_ids_from_span(start_id: int, length: int) -> set[int]:
+    """Inclusive set of angle bin IDs covered by (start_id, length) on [0..P-1]."""
+    P = ANG_PERIOD_IDS
+    if length <= 0:
+        return set()
+    if length >= P:
+        return set(range(P))
+    start = start_id % P
+    return { (start + k) % P for k in range(length) }
+
+def angle_span_label(start_id: int, length: int) -> str:
+    """
+    Human-readable, always-inclusive angle label for a circular span.
+    Uses the start bin's *low-degree edge* as base, then adds length*ANG_STEP - 1
+    to get the inclusive 'hi' bound, finally wraps both to [-180, 180].
+    """
+    if length <= 0:
+        return "θ=∅"
+
+    # Bin low/high in degrees for an ID
+    def bin_deg_bounds(bid: int) -> tuple[int, int]:
+        lo, hi = int_like_range(bid, ANG_STEP)  # e.g. 176..179
+        return lo, hi
+
+    def wrap180(d: float) -> int:
+        d = ((d + 180) % 360) - 180
+        return int(d if d > -180 else d + 360)
+
+    start = start_id % ANG_PERIOD_IDS
+    lo_deg, _ = bin_deg_bounds(start)
+
+    # Prefer starting near 0/negative side for spans at the seam,
+    # so -4..7 appears instead of 176..-173 for short arcs.
+    if lo_deg > 180 - ANG_STEP:
+        lo_deg -= 360  # shift to negative side
+
+    hi_deg_unwrapped = lo_deg + length * ANG_STEP - 1  # inclusive upper degree
+    return f"θ={wrap180(lo_deg)}–{wrap180(hi_deg_unwrapped)}°"
+
+def _min_circ_dist_sets(A: set[int], B: set[int], P: int) -> int:
+    """
+    Minimum circular distance (in bins) between any a∈A and b∈B on [0..P-1].
+    0 => overlap/touch, 1 => immediate neighbours, etc.
+    """
+    if not A or not B:
+        return 10**9
+    best = 10**9
+    for a in A:
+        for b in B:
+            d = abs(a - b) % P
+            d = min(d, P - d)
+            if d < best:
+                best = d
+                if best == 0:
+                    return 0
+    return best
+
+def _ang_compatible(a_start: int, a_len: int,
+                    b_start: int, b_len: int,
+                    bucket_dist: int) -> bool:
+    A_ids = angle_ids_from_span(a_start, a_len)
+    B_ids = angle_ids_from_span(b_start, b_len)
+    return _min_circ_dist_sets(A_ids, B_ids, ANG_PERIOD_IDS) <= bucket_dist
+
+
+def _compatible(a: _WorkBin, b: _WorkBin, bucket_dist: int) -> bool:
+    # linear axes: overlap/touch or gap <= N
+    if _gap_1d(a.tx_min, a.tx_max, b.tx_min, b.tx_max) > bucket_dist: return False
+    if _gap_1d(a.ty_min, a.ty_max, b.ty_min, b.ty_max) > bucket_dist: return False
+    if _gap_1d(a.s_min,  a.s_max,  b.s_min,  b.s_max)  > bucket_dist: return False
+    # angular axis: circular adjacency/overlap
+    if not _ang_compatible(a.ang_start, a.ang_len, b.ang_start, b.ang_len, bucket_dist):
+        return False
+    return True
+
+def _merge_into(a: _WorkBin, b: _WorkBin) -> None:
+    a.tx_min = min(a.tx_min, b.tx_min); a.tx_max = max(a.tx_max, b.tx_max)
+    a.ty_min = min(a.ty_min, b.ty_min); a.ty_max = max(a.ty_max, b.ty_max)
+    a.s_min  = min(a.s_min,  b.s_min);  a.s_max  = max(a.s_max,  b.s_max)
+
+    # Inclusive angle union across the circle
+    A = angle_ids_from_span(a.ang_start, a.ang_len)
+    B = angle_ids_from_span(b.ang_start, b.ang_len)
+    ids = A | B
+    a.ang_start, a.ang_len = angle_min_cover(ids)  # must return inclusive length (+1)
+    a.count += b.count
+
+
+def merge_bins_with_groups(counter: Counter, bucket_dist: int = 1, passes: int = 3):
+    # same algorithm as your current merge_bins(...), but:
+    #  - keep track of member bins for each merged work bin
+    #  - return (merged_counter, groups) where groups is a list of dicts
+    if not counter:
+        return Counter(), []
+
+    # ---- seed work bins ----
+    work = []
+    groups = []  # parallel to work; each entry is dict{TransformIndexBin: count}
+    for k, c in counter.items():
+        work.append(_WorkBin(
+            tx_min=k.tx_id, tx_max=k.tx_id,
+            ty_min=k.ty_id, ty_max=k.ty_id,
+            s_min=k.s_id,   s_max=k.s_id,
+            ang_start=ang_mod_id(k.ang_id), ang_len=1,
+            count=int(c),
+        ))
+        groups.append({k: int(c)})
+
+    # ---- passes ----
+    for _ in range(max(1, passes)):
+        # stable order: smallest first (then by count)
+        order = list(range(len(work)))
+        order.sort(key=lambda i: (work[i].size, work[i].count))
+
+        # ordered views (indices for this pass are 0..n-1)
+        W = [work[i]   for i in order]
+        G = [groups[i] for i in order]
+        C = [w.count   for w in W]
+        n = len(W)
+        if n <= 1:
+            break
+
+        # ---- Phase 0: build FROZEN compatibility graph (undirected, no new nodes) ----
+        # edge if either node lies in the other's seed-window
+        adj = [set() for _ in range(n)]
+        for i in range(n):
+            for j in range(i+1, n):
+                if _in_seed_window(W[i], W[j], bucket_dist) or _in_seed_window(W[j], W[i], bucket_dist):
+                    adj[i].add(j)
+                    adj[j].add(i)
+
+        # ---- Phase 1: select disjoint pairs for degree-1 nodes ----
+        unmatched = set(range(n))
+        pairs = []  # list of (i,j) to merge this pass
+
+        # collect degree-1 edges
+        deg1_edges = []
+        for i in range(n):
+            if i not in unmatched:
+                continue
+            nbrs = adj[i] & unmatched
+            if len(nbrs) == 1:
+                j = next(iter(nbrs))
+                # weight = sum of counts; store as (weight, i, j) with i<j
+                a, b = (i, j) if i < j else (j, i)
+                deg1_edges.append((C[a] + C[b], a, b))
+
+        # select all degree-1 edges (they are disjoint by definition)
+        # to be extra safe, pick in descending weight so conflicts resolve best-possible
+        deg1_edges.sort(reverse=True)
+        taken = set()
+        for w, i, j in deg1_edges:
+            if i in unmatched and j in unmatched and i not in taken and j not in taken:
+                pairs.append((i, j))
+                unmatched.discard(i); unmatched.discard(j)
+                taken.add(i); taken.add(j)
+
+        # ---- Phase 2: greedy maximum-weight matching on remaining nodes ----
+        # build all candidate edges among unmatched nodes
+        edges = []
+        for i in sorted(unmatched):
+            for j in adj[i]:
+                if j in unmatched and i < j:
+                    edges.append((C[i] + C[j], i, j))
+
+        # Test
+        def _ang_gap_bins(a, b):
+            Ai = angle_ids_from_span(a.ang_start, a.ang_len)
+            Bi = angle_ids_from_span(b.ang_start, b.ang_len)
+            return _min_circ_dist_sets(Ai, Bi, ANG_PERIOD_IDS)
+
+        edges.sort(key=lambda e: (-(e[0]), _ang_gap_bins(W[e[1]], W[e[2]])))
+
+        # edges.sort(reverse=True)  # pick largest totals first
+
+        for w, i, j in edges:
+            if i in unmatched and j in unmatched:
+                pairs.append((i, j))
+                unmatched.discard(i); unmatched.discard(j)
+
+        merges_this_pass = len(pairs)
+
+        # ---- Phase 3: apply merges simultaneously to build next state ----
+        new_work, new_groups = [], []
+
+        # helper: merge two bins to a new _WorkBin and merged member-map
+        def _merge_pair(i, j):
+            acc = _WorkBin(**W[i].__dict__)  # shallow copy fields
+            _merge_into(acc, W[j])
+            grp = G[i].copy()
+            for k, c in G[j].items():
+                grp[k] = grp.get(k, 0) + c
+            return acc, grp
+
+        # add all merged pairs
+        for i, j in pairs:
+            acc, grp = _merge_pair(i, j)
+            new_work.append(acc)
+            new_groups.append(grp)
+
+        # carry over any unmatched nodes unchanged
+        for i in sorted(unmatched):
+            new_work.append(W[i])
+            new_groups.append(G[i])
+
+        work, groups = new_work, new_groups
+
+        if merges_this_pass == 0:
+            break  # early-exit if nothing merged this pass
+
+    # ---- emit merged counter and group list ----
+    merged = Counter()
+    merged_groups = []
+    for w, g in zip(work, groups):
+        key = MergedIndexRange(
+            tx_min_id=w.tx_min, tx_max_id=w.tx_max,
+            ty_min_id=w.ty_min, ty_max_id=w.ty_max,
+            s_min_id=w.s_min,   s_max_id=w.s_max,
+            ang_start_id=w.ang_start, ang_len=w.ang_len
+        )
+        total = sum(g.values())
+        merged[key] = total
+        merged_groups.append((key, g))
+    return merged, merged_groups
+
+def explain_merged_bar(merged_groups, target_key, top_n=20):
+    """
+    Print the member pre-merge bins (and counts) for a given merged key.
+    Pass the 'target_key' you see in the post-merge top-10 (the MergedIndexRange).
+    """
+    for key, members in merged_groups:
+        if key == target_key:
+            print(f"[GROUP] {key.label()}  -> total {sum(members.values())}")
+            top = sorted(members.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+            for (bin_key, cnt) in top:
+                print(f"  {bin_key.label():<50}  {cnt}")
+            break
+
+
 def main():
     random.seed(10)
     start = time.perf_counter()
@@ -431,8 +930,8 @@ def main():
     while attempt < MAX_ATTEMPTS:
         # selected_idx = random.choice(plane_ids)
         # selected_z = random.choice(list(flat_ids_by_z.keys()))
-        # selected_z = 30
-        selected_z = 32
+        selected_z = 30
+        # selected_z = 32
         # selected_z = 21
         # selected_z = 22
         # selected_z = 23
@@ -499,13 +998,54 @@ def main():
     transforms = extract_transforms(matched)
     print(f"[INFO] Extracted {len(transforms)} transforms.")
 
-    counter = bin_transforms_by_id(transforms)
-    os.makedirs(TRAIT_FOLDER, exist_ok=True)
-    csv_path = os.path.join(TRAIT_FOLDER, f"transform_bins_{selected_idx}.csv")
-    export_counter_to_csv(counter, csv_path)
+    pre = bin_transforms_by_id(transforms)                  # pre-merge
+    post, groups = merge_bins_with_groups(pre, bucket_dist=1, passes=2)
 
-    # Plot top-10
-    plot_top_bins(counter, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
+    # Show the post-merge top bar and its components
+    # top_key, _ = post.most_common(1)[0]
+    for key in post:
+        explain_merged_bar(groups, key)
+
+    # # Plot top-10
+    # plot_top_bins(post, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
+
+    # 1) find most represented bucket (use post-merge if you want the merged modes)
+    top_bucket, top_count = most_represented_bucket(post if post else pre)
+    if top_bucket is None:
+        print("[WARN] No buckets found.")
+        return
+
+    # 2) extract full matches and filter into that bucket
+    matches = extract_transforms(matched)           # rich records
+    matches_top = filter_matches_in_bucket(matches, top_bucket)
+    print(f"[INFO] Using top bucket ({top_bucket.label() if hasattr(top_bucket,'label') else top_bucket}) with {len(matches_top)} matches")
+
+    # 3) best z-plane (dataset A and B) with weighted scoring
+    params = ZScoreParams(w_count=1.0, w_mean=1.0, w_max=1.0) # TO BE TUNED
+    best_z_a, table_a = score_z_levels(matches_top, params)
+    best_z_b, table_b = score_z_levels_for_b(matches_top, params)
+    print(f"[Z*] best_z_a={best_z_a}, best_z_b={best_z_b}")
+
+    # 4) restrict to candidates that hit those z-levels
+    cands = select_matches_on_z(matches_top, best_z_a, best_z_b)
+    if not cands:
+        print("[WARN] No candidates at chosen z-levels; falling back to top by score in top bucket.")
+        cands = matches_top
+
+    # 5a) FAST: take highest coarse score
+    best_fast = choose_best_transform_fast(cands)
+    if best_fast:
+        print(f"[FAST] best score={best_fast.score:.6f}, "
+            f"R={best_fast.ang_deg:.2f}°, T=({best_fast.tx:.1f},{best_fast.ty:.1f}), S={best_fast.scale:.3f}, "
+            f"zA={best_fast.z_a}, zB={best_fast.z_b}")
+
+    # 5b) SLOW: refine by IoU (needs compute_plane_iou implementation)
+    best_slow, best_iou = choose_best_transform_slow(z_stack, new_stack, cands, patience=20)
+    if best_slow:
+        print(f"[SLOW] best IoU={best_iou:.4f}, "
+            f"R={best_slow.ang_deg:.2f}°, T=({best_slow.tx:.1f},{best_slow.ty:.1f}), S={best_slow.scale:.3f}, "
+            f"zA={best_slow.z_a}, zB={best_slow.z_b}")
+
 
     end = time.perf_counter()
     print(f"[TIMER] Total run time: {end - start:.2f}s")

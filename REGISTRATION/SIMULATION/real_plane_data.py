@@ -136,9 +136,6 @@ def main():
     # Start the clock
     start = time.perf_counter()
     z_stack = ZStack(data=STACK_IN_FILE) # Load z-stack of existing data
-
-    print(f"Z_planes: {z_stack.z_planes.keys()}")
-
     z_stack.generate_random_intensities(0,1000) # Generate random average intensities for it per ROI
     generation_start = time.perf_counter()
     z_stack.generate_planes_gpu(plane_gen_params)
