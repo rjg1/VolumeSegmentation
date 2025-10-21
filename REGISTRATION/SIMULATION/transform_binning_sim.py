@@ -19,6 +19,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon as ShMultiPoly
 from scipy.spatial import cKDTree
+import statistics
 
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
 PLANE_OUT_FILE = f"{STACK_IN_FILE}".split(".csv")[0] + "_planes.csv"
@@ -309,6 +310,7 @@ def _visualize_filtered_matches(matched_dict: Dict,
                                 zstack_a: ZStack,
                                 zstack_b: ZStack,
                                 same_z_level: bool = True,
+                                permitted_z = None, # list of permitted z values
                                 same_anchor_id: bool = True):
     """
     For each match passing the filters, plot:
@@ -370,6 +372,8 @@ def _visualize_filtered_matches(matched_dict: Dict,
         if same_z_level and _anchor_z_int(pa) != _anchor_z_int(pb):
             continue
         if same_anchor_id and _anchor_id_only(pa) != _anchor_id_only(pb):
+            continue
+        if permitted_z and not set([_anchor_z_int(pa)]).issubset(set(permitted_z)):
             continue
 
         ang = float(res.get("offset", 0.0))
@@ -619,12 +623,12 @@ def bin_transforms_by_id(items):
         counter[key] += 1
     return counter
 
-def plot_top_bins(counter: Counter, top_k: int = 10, title: str = "Top Transform Modes"):
-    if not counter:
+def plot_top_bins(post, top_k: int = 10, title: str = "Top Transform Modes"):
+    if not post:
         print("[WARN] No transform bins to plot.")
         return
 
-    top = counter.most_common(top_k)
+    top = sorted(post.items(), key = lambda item: item[1], reverse=True)[:top_k]
     labels = [tb.label() for tb, _ in top]
     counts = [c for _, c in top]
 
@@ -1016,6 +1020,22 @@ class MergedIndexRange:
     s_min_id: int;  s_max_id: int
     ang_start_id: int; ang_len: int
 
+    def get_ranges(self):
+        tx_lo, tx_hi = int_like_range(self.tx_min_id, TX_STEP)[0], int_like_range(self.tx_max_id, TX_STEP)[1]
+        ty_lo, ty_hi = int_like_range(self.ty_min_id, TY_STEP)[0], int_like_range(self.ty_max_id, TY_STEP)[1]
+        s_lo,  _    = float_range(self.s_min_id, S_STEP)
+        _,    s_hi  = float_range(self.s_max_id, S_STEP)
+        ang_lo, ang_hi = angle_span(self.ang_start_id, self.ang_len)
+        return {
+            "tx_lo" : tx_lo,
+            "tx_hi" : tx_hi,
+            "ty_lo" : ty_lo,
+            "ty_hi" : ty_hi,
+            "s_lo" : s_lo,
+            "s_hi" : s_hi,
+            "ang_lo" : ang_lo,
+            "ang_hi" : ang_hi
+        }
 
     def label(self) -> str:
         tx_lo, tx_hi = int_like_range(self.tx_min_id, TX_STEP)[0], int_like_range(self.tx_max_id, TX_STEP)[1]
@@ -1076,6 +1096,38 @@ def angle_ids_from_span(start_id: int, length: int) -> set[int]:
         return set(range(P))
     start = start_id % P
     return { (start + k) % P for k in range(length) }
+
+def angle_span(start_id: int, length: int):
+    if length <= 0:
+        return "θ=∅"
+
+    # Bin low/high in degrees for an ID
+    def bin_deg_bounds(bid: int) -> tuple[int, int]:
+        lo, hi = int_like_range(bid, ANG_STEP)  # e.g. 176..179
+        return lo, hi
+
+    def wrap180(d: float) -> int:
+        d = ((d + 180) % 360) - 180
+        return int(d if d > -180 else d + 360)
+
+    start = start_id % ANG_PERIOD_IDS
+    lo_deg, _ = bin_deg_bounds(start)
+
+    # Prefer starting near 0/negative side for spans at the seam,
+    # so -4..7 appears instead of 176..-173 for short arcs.
+    if lo_deg > 180 - ANG_STEP:
+        lo_deg -= 360  # shift to negative side
+
+    hi_deg = wrap180(lo_deg + length * ANG_STEP - 1)  # inclusive upper degree
+    lo_deg = wrap180(lo_deg)
+
+    if lo_deg < 0:
+        lo_deg += 360
+    
+    if hi_deg < 0:
+        hi_deg += 360
+
+    return lo_deg, hi_deg
 
 def angle_span_label(start_id: int, length: int) -> str:
     """
@@ -1431,8 +1483,9 @@ def main():
         matched_dict=matched,
         zstack_a=z_stack,
         zstack_b=new_stack,
-        same_z_level=True,
-        same_anchor_id=True
+        same_z_level=False,
+        permitted_z=[32],
+        same_anchor_id=False
     )
     # END DEBUG
 
@@ -1450,13 +1503,73 @@ def main():
     pre = bin_transforms_by_id(transforms)                  # pre-merge
     post, groups = merge_bins_with_groups(pre, bucket_dist=1, passes=2)
 
-    # Show the post-merge top bar and its components
-    # top_key, _ = post.most_common(1)[0]
-    for key in post:
-        explain_merged_bar(groups, key)
+    # Rescale count in bins by the median score per bin
+    def in_range(val, min, max):
+        return val >= min and val <= max
+    def all_in_range(vals, mins, maxes):
+        all_in = True
+        for i in range(len(vals)):
+            vali = vals[i]
+            mini = mins[i]
+            maxi = maxes[i]
+            if not in_range(vali, mini, maxi):
+                all_in = False
+        return all_in
+        
+    sorted_buckets = sorted(post.items(), key = lambda item: item[1], reverse=True)
+    # sorted_buckets = [sorted_buckets[0]] # debug extract one
+    scaled_post = {}
+    print(sorted_buckets)
+    for bucket, total in sorted_buckets:
+        # Find all matches in this bucket
+        ranges = bucket.get_ranges()
+        scores = []
+
+        # Search matches to find matches with transformations in this range
+        for score, entry in matched.items():
+            result = entry.get("result", {})
+
+            # Angle + Scale
+            angle = result.get("offset", 0)
+            scale = result.get("scale_factor", 1.0)
+
+            # Translation
+            plane_a: Plane = entry.get("plane_a")
+            plane_b: Plane = entry.get("plane_b")
+
+            _, _, tinfo = plane_a.get_aligned_2d_projection(plane_b, angle,scale)
+            tx, ty = tinfo["translation"]
+
+            # Check if this match is in the bin
+            vals = [angle, scale, tx, ty]
+            mins = [ranges["ang_lo"], ranges["s_lo"], ranges["tx_lo"], ranges["ty_lo"]]
+            maxes = [ranges["ang_hi"], ranges["s_hi"], ranges["tx_hi"], ranges["ty_hi"]]
+            print(vals, mins, maxes)
+            if all_in_range(vals, mins, maxes):
+                scores.append(score)
+
+        
+        # Sort ascending
+        if scores:
+            print(f"Found scores: {scores} in bucket")
+            score_median = statistics.median(scores)
+            print(f"median = {score_median}, total = {total}")
+            print(f"new bucket score = {score_median * total}")
+            # Add in scaled score
+            scaled_post[bucket] = score_median * total
+        
+        else:
+            print(f"No matches found for: {bucket}")
+
+
+
+    # # Show the post-merge top bar and its components
+    # # top_key, _ = post.most_common(1)[0]
+    # for key in post:
+    #     explain_merged_bar(groups, key)
 
     # # Plot top-10
-    plot_top_bins(post, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
+    plot_top_bins(scaled_post, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
 
     # 1) find most represented bucket (use post-merge if you want the merged modes)
     top_bucket, top_count = most_represented_bucket(post if post else pre)
