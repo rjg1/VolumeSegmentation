@@ -16,6 +16,9 @@ PLANE_GEN_PARAMS_DEFAULT = {
     "fixed_basis" : True, # define the projected 2d x-axis as [1,0,0]
     "regenerate_planes" : False, # always re-generate planes even if this z-stack has a set
     "max_alignments" : 500, # maximum number of alignment points allowed per plane
+    "combination_max_planes": 64,       # hard cap on number of sub-planes produced per anchor plane
+    "combination_sampling": "deterministic",  # "deterministic" | "random"
+    "combination_min_k": 2,             # minimum subset size for combinations (>=2 to define a plane)
     "z_guess": -1, # guess at the z-level where the plane match is located in stack-> -1 means no guess
     "z_range": 0, # +- tolerance to search for in z in both planes
     "n_threads" : 4, # number of threads to spawn when generating planes

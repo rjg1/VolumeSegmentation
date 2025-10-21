@@ -15,6 +15,9 @@ from registration_utils import extract_zstack_plane, match_zstacks_2d
 from collections import  deque
 from itertools import product
 from shapely.geometry import Polygon as ShPolygon
+from matplotlib.collections import LineCollection
+from matplotlib.patches import Polygon as MplPolygon
+from shapely.geometry import MultiPolygon as ShMultiPoly
 from scipy.spatial import cKDTree
 
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
@@ -34,14 +37,17 @@ plane_gen_params = {
     "align_intensity_threshold": 0,
     "z_threshold": 0,
     "max_tilt_deg": 30.0,
+    "max_alignments": 100,
+    "combination_max_planes": 1000,       # hard cap on number of sub-planes produced per anchor plane
+    "combination_sampling": "deterministic",  # "deterministic" | "random"
     "projection_dist_thresh": 0.5,
     "transform_intensity": "quantile",
     "plane_boundaries": [0, 1024, 0, 1024],
     "margin": 2,
     "match_anchors": True,
+    "anchor_dist_thresh": None,
     "fixed_basis": True,
     "regenerate_planes": False,
-    "max_alignments": 500,
     "z_guess": -1,
     "z_range": 0,
     "n_threads": 10,
@@ -58,8 +64,8 @@ match_plane_params = {
         "mse_threshold": 0.3,
     },
     "traits": {
-        "angle": {"weight": 0.35, "max_value": 0.1},
-        "magnitude": {"weight": 0.35, "max_value": 0.8},
+        "angle": {"weight": 0.45, "max_value": 0.1},
+        "magnitude": {"weight": 0.35, "max_value": 10},
         "avg_radius": {"weight": 0.05, "max_value": 1},
         "circularity": {"weight": 0.05, "max_value": 0.1},
         "area": {"weight": 0.1, "max_value": 5},
@@ -104,6 +110,332 @@ TX_STEP = 5.0
 TY_STEP = 5.0
 ANG_STEP = 4.0
 S_STEP = 0.1
+
+# Debug helpers
+from matplotlib.collections import LineCollection
+
+def _anchor_id_only(plane: Plane) -> int | str:
+    """
+    Return the 'ID' portion of the anchor (not the z). Your Plane.anchor_point.id
+    often looks like (z, id).
+    """
+    aid = plane.anchor_point.id
+    if isinstance(aid, (tuple, list)) and len(aid) >= 2:
+        return aid[1]
+    return aid
+
+def _anchor_z_int(plane: Plane) -> int:
+    return int(round(float(plane.anchor_point.position[2])))
+
+def _proj_points_local(plane: Plane) -> dict:
+    """
+    Return the plane's local 2D coords keyed by the *global* ROI id.
+    If Plane.get_local_2d_coordinates() is keyed by per-plane index,
+    remap those to PlanePoint.id; otherwise pass keys through.
+    """
+    local = plane.get_local_2d_coordinates()  # likely keyed by per-plane index (0,1,2,...)
+    out = {}
+
+    # Fast path: if keys match plane.plane_points indices, map to .id
+    if isinstance(plane.plane_points, dict):
+        for k, xy in local.items():
+            if k in plane.plane_points:          # per-plane index -> global id
+                gid = plane.plane_points[k].id
+            else:                                 # already a global id (e.g. (z, roi_id))
+                gid = k
+            out[gid] = xy
+        return out
+
+    # Fallback (shouldn't happen): just return as-is
+    return local
+
+def _nearest_pairs_2d(A_pts: np.ndarray, B_pts: np.ndarray) -> list[tuple[int,int]]:
+    """
+    Return 1-to-1 matches of A->nearest B by centroid (greedy).
+    A_pts/B_pts: (N,2)/(M,2)
+    """
+    if A_pts.size == 0 or B_pts.size == 0:
+        return []
+    tree = cKDTree(B_pts)
+    dists, idxs = tree.query(A_pts, k=1)
+    usedB = set()
+    pairs = []
+    for iA, jB in enumerate(idxs):
+        if jB in usedB:
+            continue
+        usedB.add(jB)
+        pairs.append((iA, jB))
+    return pairs
+
+def _plot_match_2d(ax, A_xy, A_ids, B_xy, B_ids, pairs,
+                   polysA=None, polysB=None,
+                   title=None, colorA="C0", colorB="C1", colorI="purple"):
+    """
+    Original behaviour (single axes) if polysA/polysB are None.
+
+    If polysA & polysB are provided (dicts {roi_id: Nx2 points} in A-frame),
+    this function internally creates a 1x2 subplot:
+      - Left: original centroid/labels view (what this function used to draw)
+      - Right: all ROI polygons (A solid, B dashed) with intersections
+               for matched pairs filled.
+
+    Args
+    ----
+    ax      : matplotlib Axes to draw on (kept for backward compatibility).
+              If polys provided, this 'ax' becomes the LEFT subplot.
+    A_xy    : (nA,2) ndarray of A points (usually centroids)
+    A_ids   : list/array of A ROI ids aligned with A_xy rows
+    B_xy    : (nB,2) ndarray of B points already transformed into A frame
+    B_ids   : list/array of B ROI ids aligned with B_xy rows
+    pairs   : list of (iA, jB) index pairs
+    polysA  : optional dict {roi_id: Nx2 array-like} (A polygons in A frame)
+    polysB  : optional dict {roi_id: Nx2 array-like} (B polygons in A frame)
+    """
+
+    def _draw_centroids(axc):
+        axc.scatter(A_xy[:,0], A_xy[:,1], s=25, marker='o', label='A (local)', alpha=0.9)
+        axc.scatter(B_xy[:,0], B_xy[:,1], s=25, marker='^', label='B→A (transformed)', alpha=0.9)
+
+        matched_A = set(i for i,_ in pairs)
+        matched_B = set(j for _,j in pairs)
+
+        # optional: lines between matches
+        segs = [[A_xy[i], B_xy[j]] for i,j in pairs]
+        if segs:
+            lc = LineCollection(segs, linewidths=0.6, alpha=0.4)
+            axc.add_collection(lc)
+
+        # labels
+        for i, (x,y) in enumerate(A_xy):
+            if i in matched_A:
+                j = next(j for ii,j in pairs if ii==i)
+                axc.text(x, y, f"A{A_ids[i]}<>B{B_ids[j]}", fontsize=7, ha='left', va='bottom')
+            else:
+                axc.text(x, y, f"A{A_ids[i]}", fontsize=7, ha='left', va='bottom')
+
+        for j, (x,y) in enumerate(B_xy):
+            if j not in matched_B:
+                axc.text(x, y, f"B{B_ids[j]}", fontsize=7, ha='left', va='bottom')
+
+        axc.set_aspect('equal', adjustable='box')
+        axc.grid(alpha=0.2)
+        axc.legend(loc='best')
+
+    # --- No polygons: keep legacy single-axes behaviour
+    if polysA is None or polysB is None:
+        _draw_centroids(ax)
+        return
+
+    # --- Polygons provided: make a twin subplot while preserving existing 'ax'
+    fig = ax.figure
+    fig.clf()  # clear and rebuild the 1x2 layout using the same figure
+    axL, axR = fig.subplots(1, 2, sharex=True, sharey=True)
+    if title:
+        fig.suptitle(title)
+
+    # Left: original view
+    _draw_centroids(axL)
+    axL.set_title("Centroids & pair links")
+
+    # Right: polygons + intersections
+    axR.set_title("ROI polygons with matched intersections")
+    axR.set_aspect("equal", adjustable="box")
+    axR.grid(alpha=0.2)
+
+    # Draw all A polygons (solid)
+    for rid, pts in polysA.items():
+        pts = np.asarray(pts)
+        if pts.shape[0] >= 3:
+            axR.add_patch(MplPolygon(pts, closed=True, fill=False,
+                                     edgecolor=colorA, linewidth=1.3, alpha=0.9))
+
+    # Draw all B polygons (dashed)
+    for rid, pts in polysB.items():
+        pts = np.asarray(pts)
+        if pts.shape[0] >= 3:
+            axR.add_patch(MplPolygon(pts, closed=True, fill=False, linestyle="--",
+                                     edgecolor=colorB, linewidth=1.1, alpha=0.9))
+
+    # Intersections for matched pairs
+    A_idx_to_id = {i: A_ids[i] for i in range(len(A_ids))}
+    B_idx_to_id = {j: B_ids[j] for j in range(len(B_ids))}
+
+    def _fill_shapely(poly, axp, fc, ec="none", alpha=0.35, lw=0.0):
+        if isinstance(poly, ShMultiPoly):
+            for p in poly.geoms:
+                x, y = p.exterior.xy
+                axp.fill(x, y, facecolor=fc, edgecolor=ec, alpha=alpha, linewidth=lw)
+        else:
+            x, y = poly.exterior.xy
+            axp.fill(x, y, facecolor=fc, edgecolor=ec, alpha=alpha, linewidth=lw)
+
+    for iA, jB in pairs:
+        ridA = A_idx_to_id[iA]
+        ridB = B_idx_to_id[jB]
+        ptsA = np.asarray(polysA.get(ridA, []))
+        ptsB = np.asarray(polysB.get(ridB, []))
+        if ptsA.shape[0] < 3 or ptsB.shape[0] < 3:
+            continue
+
+        polyA = ShPolygon(ptsA);  polyB = ShPolygon(ptsB)
+        if not polyA.is_valid: polyA = polyA.buffer(0)
+        if not polyB.is_valid: polyB = polyB.buffer(0)
+        if not polyA.is_valid or not polyB.is_valid:  # still invalid, skip
+            continue
+
+        inter = polyA.intersection(polyB)
+        if inter.is_empty:
+            continue
+
+        _fill_shapely(inter, axR, fc=colorI, alpha=0.35)
+        # optional label on intersection
+        try:
+            cx, cy = inter.representative_point().xy
+            axR.text(cx[0], cy[0], f"A{ridA}∩B{ridB}", fontsize=7, color=colorI)
+        except Exception:
+            pass
+
+    # Legend proxies
+    A_proxy = plt.Line2D([0],[0], color=colorA, lw=1.5, label="A ROI")
+    B_proxy = plt.Line2D([0],[0], color=colorB, lw=1.2, ls="--", label="B ROI (transformed)")
+    I_proxy = plt.Line2D([0],[0], color=colorI, lw=6, alpha=0.35, label="Intersection")
+    axR.legend(handles=[A_proxy, B_proxy, I_proxy], loc="best", fontsize=8)
+
+    plt.tight_layout(rect=[0,0,1,0.95])
+    plt.show()
+
+
+def _visualize_filtered_matches(matched_dict: Dict,
+                                zstack_a: ZStack,
+                                zstack_b: ZStack,
+                                same_z_level: bool = True,
+                                same_anchor_id: bool = True):
+    """
+    For each match passing the filters, plot:
+      - Left: A centroids + B centroids (transformed into A), labels 'Axx<>Byy'
+      - Right: all ROI polygons (A solid, B dashed) with shaded intersections.
+
+    Assumes (common in your pipeline) these planes are flat slices so polygons
+    can be taken from z-plane boundaries and transformed via 2D R·S + T.
+    """
+
+    def _anchor_z_int(pl: Plane) -> int:
+        return int(round(float(pl.anchor_point.position[2])))
+
+    def _anchor_id_only(pl: Plane):
+        # keep whatever your existing convention is; often plane_point.id is (z, rid)
+        pid = pl.anchor_point.id
+        return pid[1] if isinstance(pid, (tuple, list)) and len(pid) >= 2 else pid
+
+    def _rotation_matrix(deg: float) -> np.ndarray:
+        th = np.deg2rad(deg)
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s], [s, c]], dtype=float)
+
+    def _build_polys_for_z(zstack: ZStack, z_level: int) -> dict:
+        """Return {roi_id: Nx2 np.array} from zstack’s raw coords at z_level."""
+        out = {}
+        layer = zstack.z_planes.get(float(z_level))
+        if not layer:
+            return out
+        for rid, rdata in layer.items():
+            coords = rdata.get("coords", [])
+            if not coords or len(coords) < 3:
+                continue
+            arr = np.asarray(coords, float)
+            # coords may be Nx2 already; ensure Nx2
+            if arr.ndim == 2 and arr.shape[1] >= 2:
+                out[rid] = arr[:, :2]
+        return out
+
+    def _transform_polys(polys: dict, R: np.ndarray, scale: float, t: np.ndarray) -> dict:
+        """Apply p' = R @ (scale * p) + t to every polygon point."""
+        out = {}
+        for rid, xy in polys.items():
+            P = (R @ (scale * xy.T)).T + t  # (N,2)
+            out[rid] = P
+        return out
+
+    # Collect candidate matches after filters
+    candidates = []
+    for k, entry in matched_dict.items():
+        res = entry.get("result", {})
+        if not res or not res.get("match", False):
+            continue
+        pa: Plane = entry.get("plane_a")
+        pb: Plane = entry.get("plane_b")
+        if not pa or not pb:
+            continue
+
+        if same_z_level and _anchor_z_int(pa) != _anchor_z_int(pb):
+            continue
+        if same_anchor_id and _anchor_id_only(pa) != _anchor_id_only(pb):
+            continue
+
+        ang = float(res.get("offset", 0.0))
+        sc  = float(res.get("scale_factor", 1.0))
+
+        # Compute the intended global translation (anchor-to-anchor) after R·S:
+        R = _rotation_matrix(ang)
+        anchorA = np.array(pa.anchor_point.position[:2], float)
+        anchorB = np.array(pb.anchor_point.position[:2], float)
+        t = anchorA - (R @ (sc * anchorB))
+
+        # Score
+        try:
+            score = float(k)
+        except Exception:
+            score = float(res.get("score", 0.0))
+
+        print(entry)
+
+        candidates.append((pa, pb, ang, sc, t, score))
+
+    if not candidates:
+        print("[INFO] No matches satisfied the filters.")
+        return
+
+    for idx, (pa, pb, ang, sc, t, score) in enumerate(candidates, start=1):
+        zA = _anchor_z_int(pa)
+        zB = _anchor_z_int(pb)
+
+        # Build polygons in A frame
+        polysA = _build_polys_for_z(zstack_a, zA)                  # already in A’s global XY
+        polysB_raw = _build_polys_for_z(zstack_b, zB)              # B in its own global XY
+        R = _rotation_matrix(ang)
+        t = np.asarray(t, float).reshape(1, 2)
+        polysB = _transform_polys(polysB_raw, R, sc, t)            # into A frame
+
+        if not polysA or not polysB:
+            print(f"[WARN] Missing polygons at zA={zA}, zB={zB} for match {idx}")
+            continue
+
+        # Centroids (in A frame) for pairing/labels
+        A_ids = list(polysA.keys())
+        B_ids = list(polysB.keys())
+        A_xy  = np.array([polysA[rid].mean(axis=0) for rid in A_ids], float)
+        B_xy  = np.array([polysB[rid].mean(axis=0) for rid in B_ids], float)
+
+        # Nearest-neighbour pairs for labeling on the centroid plot
+        pr = _nearest_pairs_2d(A_xy, B_xy)  # expects (iA, jB) indexes
+
+        # Optional IoU line (uses your existing helper on raw stacks/planes)
+        tx, ty = float(t[0,0]), float(t[0,1])
+        iou0 = compute_plane_iou(zstack_a, zstack_b, pa, pb, tx, ty, ang, sc)
+
+        # Draw using your enhanced plotter (creates a 1x2 view internally)
+        fig, ax = plt.subplots(figsize=(7, 6))
+        _plot_match_2d(
+            ax, A_xy, A_ids, B_xy, B_ids, pr,
+            polysA=polysA, polysB=polysB,
+            title=(f"Match {idx}: "
+                   f"A(z={zA}, anc={_anchor_id_only(pa)}) vs "
+                   f"B(z={zB}, anc={_anchor_id_only(pb)})  |  "
+                   f"score={score:.3f}, R={ang:.1f}°, S={sc:.3f}, T=({tx:.1f},{ty:.1f})\n"
+                   f"IoU={iou0:.3f}")
+        )
+        plt.show()
+
 
 # ---------- Helpers ----------
 def norm_angle_deg(a: float) -> float:
@@ -799,17 +1131,6 @@ def _ang_compatible(a_start: int, a_len: int,
     B_ids = angle_ids_from_span(b_start, b_len)
     return _min_circ_dist_sets(A_ids, B_ids, ANG_PERIOD_IDS) <= bucket_dist
 
-
-def _compatible(a: _WorkBin, b: _WorkBin, bucket_dist: int) -> bool:
-    # linear axes: overlap/touch or gap <= N
-    if _gap_1d(a.tx_min, a.tx_max, b.tx_min, b.tx_max) > bucket_dist: return False
-    if _gap_1d(a.ty_min, a.ty_max, b.ty_min, b.ty_max) > bucket_dist: return False
-    if _gap_1d(a.s_min,  a.s_max,  b.s_min,  b.s_max)  > bucket_dist: return False
-    # angular axis: circular adjacency/overlap
-    if not _ang_compatible(a.ang_start, a.ang_len, b.ang_start, b.ang_len, bucket_dist):
-        return False
-    return True
-
 def _merge_into(a: _WorkBin, b: _WorkBin) -> None:
     a.tx_min = min(a.tx_min, b.tx_min); a.tx_max = max(a.tx_max, b.tx_max)
     a.ty_min = min(a.ty_min, b.ty_min); a.ty_max = max(a.ty_max, b.ty_max)
@@ -956,8 +1277,10 @@ def merge_bins_with_groups(counter: Counter, bucket_dist: int = 1, passes: int =
             ang_start_id=w.ang_start, ang_len=w.ang_len
         )
         total = sum(g.values())
+
         merged[key] = total
         merged_groups.append((key, g))
+
     return merged, merged_groups
 
 def explain_merged_bar(merged_groups, target_key, top_n=20):
@@ -1063,6 +1386,12 @@ def main():
         if mean_area > AREA_THRESHOLD and num_rois >= MIN_ROI_NUMBER:
             new_stack = temp_stack
             new_z = selected_plane.anchor_point.position[2] # extract z of anchor point
+            # APPLY AFFINE TRANSFORMATIONS
+            new_stack = new_stack.affine_transformed(
+                angle_deg=50,
+                t=(10,10),
+                s=1, # dont touch this unless you unfix scale estimation
+                origin=(0, 0))
             print(f"Selected plane ID {selected_idx} with mean ROI area {mean_area:.2f} and anchor z_level = {new_z}")
             break
 
@@ -1094,6 +1423,18 @@ def main():
     # Match planes (coarse step only)
     matched = match_zstacks_2d(zstack_a=z_stack, zstack_b=new_stack, match_params=match_params)
 
+    # DEBUG
+    # Visualize only "correct" style pairs:
+    #   - same z-level anchors
+    #   - same anchor IDs
+    _visualize_filtered_matches(
+        matched_dict=matched,
+        zstack_a=z_stack,
+        zstack_b=new_stack,
+        same_z_level=True,
+        same_anchor_id=True
+    )
+    # END DEBUG
 
     # Extract expected z from the sample plane used to build z_stack B
     expected_z = int(round(selected_plane.anchor_point.position[2]))
@@ -1115,7 +1456,7 @@ def main():
         explain_merged_bar(groups, key)
 
     # # Plot top-10
-    # plot_top_bins(post, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
+    plot_top_bins(post, top_k=10, title="Top 10 Transform Modes (tx/ty/θ/scale)")
 
     # 1) find most represented bucket (use post-merge if you want the merged modes)
     top_bucket, top_count = most_represented_bucket(post if post else pre)

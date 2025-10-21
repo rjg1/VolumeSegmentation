@@ -16,6 +16,7 @@ from tqdm import tqdm
 from param_handling import PLANE_GEN_PARAMS_DEFAULT, create_param_dict
 import threading
 import traceback
+import math
 
 def get_hull_boundary_points(hull):
     """Extract the list of boundary points of a 2D convex hull."""
@@ -63,6 +64,78 @@ class ZStack:
                 else:
                     roi_data["is_edge"] = False
         return self.z_planes
+
+
+    def affine_transform(
+        self,
+        angle_deg: float = 0.0,
+        t: tuple[float, float] = (0.0, 0.0),
+        s: float = 1.0,
+        origin: tuple[float, float] = (0.0, 0.0),
+        in_place: bool = True,
+    ):
+        """
+        Apply a 2D affine transform to *all* XY ROI coordinates across all z-planes:
+            XY' = R(angle_deg) * (s * (XY - origin)) + origin + t
+        Z is left unchanged.
+
+        Args
+        ----
+        angle_deg : rotation in degrees (counter-clockwise)
+        t         : translation (tx, ty)
+        s         : uniform scale factor
+        origin    : pivot for scale+rotation
+        in_place  : if False, returns a new transformed ZStack; if True, mutates self and returns self.
+        """
+        target = self if in_place else copy.deepcopy(self)
+
+        th = math.radians(angle_deg)
+        c, r = math.cos(th), math.sin(th)
+        R = np.array([[c, -r], [r, c]], dtype=float)
+        tx, ty = float(t[0]), float(t[1])
+        ox, oy = float(origin[0]), float(origin[1])
+
+        for z, roi_dict in target.z_planes.items():
+            for roi_id, info in roi_dict.items():
+                coords = info.get("coords", [])
+                if not coords:
+                    continue
+                P = np.asarray(coords, dtype=float)           # (N,2) or (N,>=2)
+                if P.ndim != 2 or P.shape[1] < 2:
+                    continue
+
+                XY = P[:, :2]
+                # shift to origin, scale, rotate, shift back, translate
+                XYp = (R @ (s * (XY - [ox, oy])).T).T + [ox + tx, oy + ty]
+
+                # write back
+                P[:, 0:2] = XYp
+                # if coords were 2D tuples, keep them 2D; else keep extra columns (e.g., z) intact
+                if P.shape[1] == 2:
+                    info["coords"] = [tuple(row.tolist()) for row in P]
+                else:
+                    # keep original z column untouched
+                    info["coords"] = [tuple(row.tolist()) for row in P]
+
+        # caches became stale: drop planes, recompute traits
+        target.planes = []
+        target.xy_rois = {}
+        target.xz_rois = {}
+        target._calculate_roi_traits()
+
+        return target
+
+    def affine_transformed(
+        self,
+        angle_deg: float = 0.0,
+        t: tuple[float, float] = (0.0, 0.0),
+        s: float = 1.0,
+        origin: tuple[float, float] = (0.0, 0.0),
+    ):
+        """
+        Functional (non-mutating) variant: returns a transformed copy.
+        """
+        return self.affine_transform(angle_deg, t, s, origin, in_place=False)
 
     def _from_zplane_dict(self, z_planes):
         """
@@ -550,26 +623,6 @@ class ZStack:
             angles = np.arccos(np.clip(dots, -1.0, 1.0))
             return np.any(angles <= angle_thresh_rad)
 
-        # def is_coplanar(normal, normals_list, angle_thresh_rad=0.017):
-        #     """
-        #     Return True if *normal* is within angle_thresh_rad of ANY vector in normals_list,
-        #     *ignoring* 180° flips.
-        #     """
-        #     if not normals_list:
-        #         return False
-
-        #     normals = np.stack(normals_list)            # shape (k, 3)
-
-        #     # |n·m| = cos(θ) with θ in [0, π/2] regardless of sign,
-        #     # so opposite directions collapse onto the same dot value.
-        #     dots = np.abs(normals @ normal)             # 1-liner for np.dot
-
-        #     # Clip for numeric safety and back-convert to angle
-        #     angles = np.arccos(np.clip(dots, -1.0, 1.0))
-
-        #     return np.any(angles <= angle_thresh_rad)
-
-
         def gpu_project_points(points, normal, anchor_pos, threshold):
             if len(points) == 0:
                 return np.array([]), np.array([])
@@ -816,7 +869,29 @@ class ZStack:
                         params=params     
                     )
 
-                anchor_planes.append(plane)
+                max_align = int(params.get("max_alignments", 500))
+                comb_budget = int(params.get("combination_max_planes", 64))
+                comb_mode = params.get("combination_sampling", "deterministic")
+                comb_min_k = int(params.get("combination_min_k", 2))
+
+                # Alignment point keys (exclude anchor index 0)
+                align_ids_all = plane._plane_align_ids()
+                if len(align_ids_all) > max_align and max_align >= comb_min_k:
+                    subsets = self._split_alignments_combinations_ids(
+                        align_ids_all,
+                        k_target=max_align,
+                        max_planes=comb_budget,
+                        sampling=comb_mode,
+                        k_min=comb_min_k
+                    )
+                    for keep_ids in subsets:
+                        sub_plane = plane._make_subplane_from_ids(keep_ids)
+                        sub_plane.angles_and_magnitudes()
+                        anchor_planes.append(sub_plane)
+                else:
+                    # Plane is within limit (or too small to split)
+                    anchor_planes.append(plane)
+
                 normals_seen.append(normal)
 
             return anchor_planes
@@ -914,6 +989,41 @@ class ZStack:
         # Step 3: Save to CSV
         df = pd.DataFrame(rows)
         df.to_csv(filename, index=False)
+
+    def _split_alignments_combinations_ids(self, all_ids, k_target, max_planes, sampling="deterministic", k_min=2, rng=None):
+        """
+        Produce up to `max_planes` subsets of `all_ids` each of size k_target (or >= k_min if fewer).
+        Deterministic: first combos in lexicographic order.
+        Random: sample quick size-k subsets (not enumerating nCk).
+        """
+        ids_sorted = sorted(all_ids)
+        n = len(ids_sorted)
+        k = max(min(int(k_target), n), int(k_min))
+
+        if n <= k:
+            return [ids_sorted]  # nothing to split
+
+        out = []
+        if sampling == "random":
+            rng = rng or random
+            pool = ids_sorted[:]
+            rng.shuffle(pool)
+            step = k
+            for i in range(0, len(pool), step):
+                if len(out) >= max_planes:
+                    break
+                chunk = pool[i:i+k]
+                if len(chunk) < k:
+                    chunk = chunk + pool[:(k - len(chunk))]
+                out.append(sorted(chunk))
+            return out
+
+        # deterministic: true lexicographic combinations
+        for comb in combinations(ids_sorted, k):
+            out.append(list(comb))
+            if len(out) >= max_planes:
+                break
+        return out
 
     def _compute_roi_traits(self, pts_3d, intensity_list=None):
         """

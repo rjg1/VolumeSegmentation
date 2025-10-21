@@ -36,6 +36,32 @@ class Plane:
         if self.normal[2] < 0:
             self.normal = -self.normal
 
+    def _make_subplane_from_ids(self, keep_ids):
+        """
+        Build a new Plane with the same anchor & normal, but only a subset of alignments.
+        The anchor is preserved as index 0; the rest are re-indexed 1..N in insertion order.
+        """
+        anchor_pp = self.plane_points[0]
+        new_align_pps = []
+        # preserve order stable by sorting the selected keys except 0
+        for k in sorted(keep_ids):
+            if k == 0: 
+                continue
+            new_align_pps.append(self.plane_points[k])
+
+        # Make a new Plane with identical max_alignments/fixed_basis
+        sub = Plane(
+            anchor_pp,
+            new_align_pps,
+            max_alignments=self.max_alignments,
+            fixed_basis=self.fixed_basis,
+        )
+        return sub
+
+    def _plane_align_ids(self):
+        """Return list of alignment point keys (exclude anchor index 0)."""
+        return [k for k in self.plane_points.keys() if k != 0]
+
     def get_normalised_magnitudes(self, recompute = True):
         if recompute:
             self.angles_and_magnitudes()
@@ -303,6 +329,12 @@ class Plane:
         for i, j in matches:
             og_matches.append((self.plane_points[i].id, plane_b.plane_points[j].id))
 
+        # debug
+        explain = all(id1 == id2 for (id1, id2) in og_matches)
+        # end debug
+
+
+
         # Check minimum match count
         if len(matches) < params["bin_match_params"]["min_matches"]:
             return {
@@ -321,7 +353,9 @@ class Plane:
             matches, plane_b, params["traits"], offset=offset, scale=scale
         )
 
-        score = self._compute_trait_score(trait_values, params["traits"])
+
+
+        score = self._compute_trait_score(trait_values, params["traits"], explain=explain)
         
         return {
                 "match": traits_passed, # True unless a trait exceeded a specified terminate_after threshold
@@ -333,16 +367,19 @@ class Plane:
                 "matches": matches,
                 "scale_factor": scale,
                 "trait_values": trait_values,
+                "magnitude_diffs": magnitude_diffs,
                 "trait_outcomes": trait_outcomes,
                 "mismatched_traits": mismatched_traits
         }
 
-    def _compute_trait_score(self, trait_values, trait_params):
+    def _compute_trait_score(self, trait_values, trait_params, explain = False):
         """
         Given trait error values and per-trait param dict, compute normalized and weighted total score.
         """
         total_score = 0.0
         total_weight = 0.0
+
+        score_contributions = {}
 
         for trait, value in trait_values.items():
             max_val = trait_params.get(trait, {}).get("max_value", 1.0)
@@ -357,8 +394,14 @@ class Plane:
             total_score += norm_score * weight
             total_weight += weight
 
+            # Debug output to work out the contribution of each score
+            score_contributions[trait] = norm_score * weight
+
         if total_weight == 0:
             return 0.0
+
+        if explain:
+            print(score_contributions)
 
         return total_score / total_weight
 
@@ -554,13 +597,20 @@ class Plane:
                     [np.sin(offset_rad),  np.cos(offset_rad)]])
         
         proj_b_transformed = {}
-        translation = np.array(proj_a[0]) - np.array(proj_b[0])  # match anchor points
+        # translation = np.array(proj_a[0]) - np.array(proj_b[0])  # match anchor points - incorrect will always evaluate to 0
+        
+        # Global anchor positions (in x,y)
+        anchorA = np.array(self.anchor_point.position[:2])
+        anchorB = np.array(plane_b.anchor_point.position[:2])
+
+        # True global translation after applying rotation/scale to plane B
+        translation = anchorA - (R @ (scale_factor * anchorB))
 
         for idx, (x, y) in proj_b.items():
             vec = np.array([x, y])
             rotated = R @ vec
             scaled = rotated * scale_factor
-            translated = scaled + translation
+            translated = scaled  #+ translation # translation is 0 in local coords
             proj_b_transformed[idx] = tuple(translated)
 
         return proj_a, proj_b_transformed, {
@@ -568,6 +618,7 @@ class Plane:
             "scale": scale_factor,
             "translation": tuple(translation)
         }
+
 
     # Projects a point onto the plane, projects it into 2d, applies transformations.
     # Can be used for any arbitrary point - used for all ROI points after matching before UoI calculation
