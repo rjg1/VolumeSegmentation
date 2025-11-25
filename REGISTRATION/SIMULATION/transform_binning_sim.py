@@ -38,7 +38,7 @@ plane_gen_params = {
     "align_intensity_threshold": 0,
     "z_threshold": 0,
     "max_tilt_deg": 30.0,
-    "max_alignments": 100,
+    "max_alignments": 3,
     "combination_max_planes": 1000,       # hard cap on number of sub-planes produced per anchor plane
     "combination_sampling": "deterministic",  # "deterministic" | "random"
     "projection_dist_thresh": 0.5,
@@ -48,7 +48,7 @@ plane_gen_params = {
     "match_anchors": True,
     "anchor_dist_thresh": None,
     "fixed_basis": True,
-    "regenerate_planes": False,
+    "regenerate_planes": True,
     "z_guess": -1,
     "z_range": 0,
     "n_threads": 10,
@@ -1484,7 +1484,7 @@ def main():
         zstack_a=z_stack,
         zstack_b=new_stack,
         same_z_level=False,
-        permitted_z=[32],
+        permitted_z=[30],
         same_anchor_id=False
     )
     # END DEBUG

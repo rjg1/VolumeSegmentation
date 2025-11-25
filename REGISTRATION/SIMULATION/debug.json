@@ -1,0 +1,3098 @@
+[
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    26
+                ],
+                [
+                    30.0,
+                    26
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 1.3726004457431003,
+        "magnitude_diffs": [
+            1.650003173985823,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8098540917189805,
+            1.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 1.3726004457431003,
+            "bbox_cy": 154567.19314865052,
+            "angle": 0.00035621703420120234,
+            "bbox_area": 6.526972020926234e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 79558.82005338406
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.3019589843989915,
+            "bbox_cy": 0.0,
+            "angle": 0.4483970233460946,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    26
+                ],
+                [
+                    30.0,
+                    26
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 1.3726004457431003,
+        "magnitude_diffs": [
+            1.650003173985823,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8098540917189805,
+            1.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 1.3726004457431003,
+            "bbox_cy": 154567.19314865052,
+            "angle": 0.00035621703420120234,
+            "bbox_area": 6.526972020926234e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 79558.82005338406
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.3019589843989915,
+            "bbox_cy": 0.0,
+            "angle": 0.4483970233460946,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 5.249451415223798,
+        "magnitude_diffs": [
+            3.2366977636357532,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.0572722634577687,
+            2.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 5.249451415223798,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0008043037993663791,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.16626920046716706,
+            "bbox_cy": 0.0,
+            "angle": 0.4463806329028513,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 5.249451415223798,
+        "magnitude_diffs": [
+            3.2366977636357532,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.0572722634577687,
+            2.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 5.249451415223798,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0008043037993663791,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.16626920046716706,
+            "bbox_cy": 0.0,
+            "angle": 0.4463806329028513,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    26
+                ],
+                [
+                    30.0,
+                    26
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 1.3726004457431003,
+        "magnitude_diffs": [
+            1.650003173985823,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8098540917189805,
+            1.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 1.3726004457431003,
+            "bbox_cy": 154567.19314865052,
+            "angle": 0.00035621703420120234,
+            "bbox_area": 6.526972020926234e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 79558.82005338406
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.3019589843989915,
+            "bbox_cy": 0.0,
+            "angle": 0.4483970233460946,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    26
+                ],
+                [
+                    30.0,
+                    26
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 1.3726004457431003,
+        "magnitude_diffs": [
+            1.650003173985823,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8098540917189805,
+            1.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 1.3726004457431003,
+            "bbox_cy": 154567.19314865052,
+            "angle": 0.00035621703420120234,
+            "bbox_area": 6.526972020926234e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 79558.82005338406
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.3019589843989915,
+            "bbox_cy": 0.0,
+            "angle": 0.4483970233460946,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 5.249451415223798,
+        "magnitude_diffs": [
+            3.2366977636357532,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.0572722634577687,
+            2.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 5.249451415223798,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0008043037993663791,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.16626920046716706,
+            "bbox_cy": 0.0,
+            "angle": 0.4463806329028513,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            533.5,
+            83.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 5.249451415223798,
+        "magnitude_diffs": [
+            3.2366977636357532,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.9427277365422313,
+            1.2972738468966867
+        ],
+        "trait_values": {
+            "magnitude": 5.249451415223798,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0003916854582480726,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.16626920046716706,
+            "bbox_cy": 0.0,
+            "angle": 0.4482374154378837,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ]
+        ],
+        "A_anch": [
+            578.5,
+            91.0,
+            30.0
+        ],
+        "B_anch": [
+            311.3016632987386,
+            512.1566618807958,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 3.400093570547027,
+        "magnitude_diffs": [
+            0.7417250847496177,
+            2.5000062079417376
+        ],
+        "angular_diffs": [
+            0.5390214393604538,
+            2.606128896766961
+        ],
+        "trait_values": {
+            "magnitude": 3.400093570547027,
+            "bbox_cy": 130413.28353527517,
+            "angle": 0.0010787191176580583,
+            "bbox_area": 1.0985992510469899e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 73004.42525511977
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.23099672503085403,
+            "bbox_cy": 0.0,
+            "angle": 0.44514576397053873,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ]
+        ],
+        "A_anch": [
+            578.5,
+            91.0,
+            30.0
+        ],
+        "B_anch": [
+            311.3016632987386,
+            512.1566618807958,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 3.400093570547027,
+        "magnitude_diffs": [
+            0.7417250847496177,
+            2.5000062079417376
+        ],
+        "angular_diffs": [
+            0.5390214393604538,
+            2.606128896766961
+        ],
+        "trait_values": {
+            "magnitude": 3.400093570547027,
+            "bbox_cy": 130413.28353527517,
+            "angle": 0.0010787191176580583,
+            "bbox_area": 1.0985992510469899e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 73004.42525511977
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.23099672503085403,
+            "bbox_cy": 0.0,
+            "angle": 0.44514576397053873,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            252.57472887166088,
+            454.7563355319211,
+            30.0
+        ],
+        "offset": 315,
+        "magnitude_mse": 10.971818568972395,
+        "magnitude_diffs": [
+            4.6835741205472345,
+            0.08815098005688782
+        ],
+        "angular_diffs": [
+            0.6139004039265572,
+            0.05075525558066829
+        ],
+        "trait_values": {
+            "magnitude": 10.971818568972395,
+            "bbox_cy": 153655.56534922862,
+            "angle": 5.779350979823824e-05,
+            "bbox_area": 2.1971985020939798e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 68621.43414254348
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44973992920590794,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            252.57472887166088,
+            454.7563355319211,
+            30.0
+        ],
+        "offset": 315,
+        "magnitude_mse": 10.971818568972395,
+        "magnitude_diffs": [
+            4.6835741205472345,
+            0.08815098005688782
+        ],
+        "angular_diffs": [
+            0.6139004039265572,
+            0.05075525558066829
+        ],
+        "trait_values": {
+            "magnitude": 10.971818568972395,
+            "bbox_cy": 153655.56534922862,
+            "angle": 5.779350979823824e-05,
+            "bbox_area": 2.1971985020939798e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 68621.43414254348
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44973992920590794,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            252.57472887166088,
+            454.7563355319211,
+            30.0
+        ],
+        "offset": 315,
+        "magnitude_mse": 10.971818568972395,
+        "magnitude_diffs": [
+            4.6835741205472345,
+            0.08815098005688782
+        ],
+        "angular_diffs": [
+            0.6139004039265572,
+            0.05075525558066829
+        ],
+        "trait_values": {
+            "magnitude": 10.971818568972395,
+            "bbox_cy": 153655.56534922862,
+            "angle": 5.779350979823824e-05,
+            "bbox_area": 2.1971985020939798e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 68621.43414254348
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44973992920590794,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 21,
+        "magnitude_mse": 589.2938191764549,
+        "magnitude_diffs": [
+            23.079494281529776,
+            25.4150463714262
+        ],
+        "angular_diffs": [
+            0.9116170115693123,
+            2.3488853300353867
+        ],
+        "trait_values": {
+            "magnitude": 589.2938191764549,
+            "bbox_cy": 153655.56534922862,
+            "angle": 0.0009669025815999085,
+            "bbox_area": 2.1971985020939798e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 68621.43414254348
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44564893838280045,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 273,
+        "magnitude_mse": 403.35718158722295,
+        "magnitude_diffs": [
+            28.390744197085418,
+            0.8246254362476293
+        ],
+        "angular_diffs": [
+            0.857654693690101,
+            1.6227835321717663
+        ],
+        "trait_values": {
+            "magnitude": 403.35718158722295,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0005131277338190193,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44769092519781445,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 273,
+        "magnitude_mse": 403.35718158722295,
+        "magnitude_diffs": [
+            28.390744197085418,
+            0.8246254362476293
+        ],
+        "angular_diffs": [
+            0.857654693690101,
+            1.6227835321717663
+        ],
+        "trait_values": {
+            "magnitude": 403.35718158722295,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0005131277338190193,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44769092519781445,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 273,
+        "magnitude_mse": 403.35718158722295,
+        "magnitude_diffs": [
+            28.390744197085418,
+            0.8246254362476293
+        ],
+        "angular_diffs": [
+            0.857654693690101,
+            1.6227835321717663
+        ],
+        "trait_values": {
+            "magnitude": 403.35718158722295,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0005131277338190193,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44769092519781445,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 273,
+        "magnitude_mse": 403.35718158722295,
+        "magnitude_diffs": [
+            28.390744197085418,
+            0.8246254362476293
+        ],
+        "angular_diffs": [
+            0.857654693690101,
+            1.6227835321717663
+        ],
+        "trait_values": {
+            "magnitude": 403.35718158722295,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0005131277338190193,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44769092519781445,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    40
+                ],
+                [
+                    30.0,
+                    40
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    43
+                ],
+                [
+                    30.0,
+                    43
+                ]
+            ]
+        ],
+        "A_anch": [
+            494.0,
+            95.5,
+            30.0
+        ],
+        "B_anch": [
+            289.0857356007665,
+            474.210958503882,
+            30.0
+        ],
+        "offset": 274,
+        "magnitude_mse": 403.35718158722295,
+        "magnitude_diffs": [
+            28.390744197085418,
+            0.8246254362476293
+        ],
+        "angular_diffs": [
+            0.14234530630989894,
+            2.6227835321717663
+        ],
+        "trait_values": {
+            "magnitude": 403.35718158722295,
+            "bbox_cy": 143208.76502708055,
+            "angle": 0.0010508167261884202,
+            "bbox_area": 1.6802106192483375e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 82613.612307058
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.44527132473215214,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.1709731743298164,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0002607755495806597,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.44882651002688706,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8290268256701836,
+            2.297273846896701
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0009084837741487186,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.4459118230163308,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.1709731743298164,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0002607755495806597,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.44882651002688706,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8290268256701836,
+            2.297273846896701
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0009084837741487186,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.4459118230163308,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    33
+                ],
+                [
+                    30.0,
+                    33
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 3.8494722892702935,
+        "magnitude_diffs": [
+            2.7706053781110143,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.39566965244432595,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 3.8494722892702935,
+            "bbox_cy": 126309.29705606442,
+            "angle": 0.00028016789776539973,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 57535.14023737441
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.21526846987553971,
+            "bbox_cy": 0.0,
+            "angle": 0.4487392444600557,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.1709731743298164,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0002607755495806597,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.44882651002688706,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8290268256701836,
+            2.297273846896701
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0009084837741487186,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.4459118230163308,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.1709731743298164,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0002607755495806597,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.44882651002688706,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    42
+                ],
+                [
+                    30.0,
+                    42
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 310,
+        "magnitude_mse": 0.7970552431624921,
+        "magnitude_diffs": [
+            1.253562949756443,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.8290268256701836,
+            2.297273846896701
+        ],
+        "trait_values": {
+            "magnitude": 0.7970552431624921,
+            "bbox_cy": 122665.35026402559,
+            "angle": 0.0009084837741487186,
+            "bbox_area": 5.816113682013476e-26,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 64665.04295308617
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.32210306648931275,
+            "bbox_cy": 0.0,
+            "angle": 0.4459118230163308,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    },
+    {
+        "og_matches": [
+            [
+                [
+                    30.0,
+                    27
+                ],
+                [
+                    30.0,
+                    27
+                ]
+            ],
+            [
+                [
+                    30.0,
+                    25
+                ],
+                [
+                    30.0,
+                    25
+                ]
+            ]
+        ],
+        "A_anch": [
+            531.0,
+            150.0,
+            30.0
+        ],
+        "B_anch": [
+            234.81983697275155,
+            512.9896037777474,
+            30.0
+        ],
+        "offset": 309,
+        "magnitude_mse": 12.477301217499674,
+        "magnitude_diffs": [
+            4.993186559470459,
+            0.15063338714544727
+        ],
+        "angular_diffs": [
+            0.12862216717249453,
+            1.2972738468967009
+        ],
+        "trait_values": {
+            "magnitude": 12.477301217499674,
+            "bbox_cy": 140860.08385742325,
+            "angle": 0.00025884303162202463,
+            "bbox_area": 1.6155871338926322e-25,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 59012.24709060523
+        },
+        "trait_outcomes": {
+            "magnitude": true,
+            "bbox_cy": true,
+            "angle": true,
+            "bbox_area": true,
+            "bbox_cz": true,
+            "n_pts": true,
+            "bbox_cx": true
+        },
+        "traits_passed": true,
+        "score_contributions": {
+            "magnitude": 0.0,
+            "bbox_cy": 0.0,
+            "angle": 0.4488352063577009,
+            "bbox_area": 0.0,
+            "bbox_cz": 0.0,
+            "n_pts": 0.0,
+            "bbox_cx": 0.0
+        }
+    }
+]

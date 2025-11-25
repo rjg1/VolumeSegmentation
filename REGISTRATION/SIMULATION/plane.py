@@ -303,7 +303,7 @@ class Plane:
         ]
 
         if len(clean_data) == 0:
-            return {"match":False}
+            return {"match":False}, None
 
         angles_a, mags_a, ids_a, ids_b = zip(*clean_data)
         # END TEST DEBUG
@@ -330,10 +330,18 @@ class Plane:
             og_matches.append((self.plane_points[i].id, plane_b.plane_points[j].id))
 
         # debug
-        explain = all(id1 == id2 for (id1, id2) in og_matches)
+        # Same OG ids and same z-plane makes us expect a perfect match and rotation
+        explain = all(id1 == id2 for (id1, id2) in og_matches) and (self.anchor_point.position[2] == plane_b.anchor_point.position[2])
+        debugOut = {}
+        if explain:
+            debugOut["og_matches"] = og_matches
+            debugOut["A_anch"] = self.anchor_point.position
+            debugOut["B_anch"] = plane_b.anchor_point.position
+            debugOut["offset"] = offset
+            debugOut["magnitude_mse"] = magnitude_mse
+            debugOut["magnitude_diffs"] = magnitude_diffs
+            debugOut["angular_diffs"] = angular_diffs
         # end debug
-
-
 
         # Check minimum match count
         if len(matches) < params["bin_match_params"]["min_matches"]:
@@ -346,33 +354,52 @@ class Plane:
                 "magnitude_diffs": magnitude_diffs,
                 "offset": offset,
                 "ang_cc_score": ang_score
-            }
+            }, None
 
         # Check traits
         traits_passed, trait_values, trait_outcomes, mismatched_traits = self._check_traits(
             matches, plane_b, params["traits"], offset=offset, scale=scale
         )
 
+        if explain:
+            debugOut["trait_values"] = trait_values
+            debugOut["trait_outcomes"] = trait_outcomes
+            debugOut["traits_passed"] = traits_passed
 
-
-        score = self._compute_trait_score(trait_values, params["traits"], explain=explain)
+        score = self._compute_trait_score(trait_values, params["traits"], explain=explain, debugOut = debugOut)
         
-        return {
-                "match": traits_passed, # True unless a trait exceeded a specified terminate_after threshold
-                "score" : score, # Final score match between planes
-                "reason": "Trait mismatch - see outcomes" if not traits_passed else "Trait matches all passed",
-                "offset": offset,
-                "ang_cc_score": ang_score,
-                "og_matches" : og_matches,
-                "matches": matches,
-                "scale_factor": scale,
-                "trait_values": trait_values,
-                "magnitude_diffs": magnitude_diffs,
-                "trait_outcomes": trait_outcomes,
-                "mismatched_traits": mismatched_traits
-        }
+        if explain:
+            return {
+                    "match": traits_passed, # True unless a trait exceeded a specified terminate_after threshold
+                    "score" : score, # Final score match between planes
+                    "reason": "Trait mismatch - see outcomes" if not traits_passed else "Trait matches all passed",
+                    "offset": offset,
+                    "ang_cc_score": ang_score,
+                    "og_matches" : og_matches,
+                    "matches": matches,
+                    "scale_factor": scale,
+                    "trait_values": trait_values,
+                    "magnitude_diffs": magnitude_diffs,
+                    "trait_outcomes": trait_outcomes,
+                    "mismatched_traits": mismatched_traits
+            }, debugOut
+        else:
+            return {
+                    "match": traits_passed, # True unless a trait exceeded a specified terminate_after threshold
+                    "score" : score, # Final score match between planes
+                    "reason": "Trait mismatch - see outcomes" if not traits_passed else "Trait matches all passed",
+                    "offset": offset,
+                    "ang_cc_score": ang_score,
+                    "og_matches" : og_matches,
+                    "matches": matches,
+                    "scale_factor": scale,
+                    "trait_values": trait_values,
+                    "magnitude_diffs": magnitude_diffs,
+                    "trait_outcomes": trait_outcomes,
+                    "mismatched_traits": mismatched_traits
+            }, None
 
-    def _compute_trait_score(self, trait_values, trait_params, explain = False):
+    def _compute_trait_score(self, trait_values, trait_params, explain = False, debugOut = None):
         """
         Given trait error values and per-trait param dict, compute normalized and weighted total score.
         """
@@ -401,7 +428,10 @@ class Plane:
             return 0.0
 
         if explain:
-            print(score_contributions)
+            if debugOut:
+                debugOut["score_contributions"] = score_contributions
+            else:
+                print(score_contributions)
 
         return total_score / total_weight
 
@@ -819,13 +849,17 @@ class Plane:
         outer = tqdm(planes_a, desc="Planes A", position=0)
         inner = tqdm(total=len(planes_b), position=1, leave=False, desc="Planes B")
 
+        # Debug
+        debugList = []
 
         for i, plane_a in enumerate(outer):
             inner.set_description(f"Planes B (A[{i}])")
             inner.reset() # Reset plane B progress bar
             for j, plane_b in enumerate(planes_b):
-                match_result = plane_a.match_planes(plane_b, 
+                match_result, debugOut = plane_a.match_planes(plane_b, 
                                                     match_plane_params = match_params)
+                if debugOut:
+                    debugList.append(debugOut)
 
                 # Set if early termination specified for specific traits, or if less than min_matches between planes
                 if not match_result["match"]:
@@ -876,6 +910,26 @@ class Plane:
             scaled_results = results # no scaling required
 
 
+        # write out debug lost
+        import json
+        class NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, np.bool_):
+                    return bool(obj)
+                return json.JSONEncoder.default(self, obj)
+        outfile = "debug.json"
+        out = ''
+        # for item in debugList:
+        #     print(item)
+        #     out += json.dump(item, cls=NumpyEncoder) + ",\n"
+        with open(outfile, "w") as file:
+            json.dump(debugList, file, indent = 4, cls=NumpyEncoder)
         # Re-make dict with scores sorted in ascending order
         return dict(sorted(scaled_results.items(), key=lambda item: item[0], reverse=True))
 
