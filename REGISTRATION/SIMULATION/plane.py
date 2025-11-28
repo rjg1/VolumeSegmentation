@@ -13,11 +13,12 @@ from param_handling import MATCH_PLANE_PARAM_DEFAULTS, PLANE_LIST_PARAM_DEFAULTS
 PLANE_ANCHOR_ID = 0
 
 class Plane:
-    def __init__(self, anchor_point, alignment_points, fixed_basis = True, max_alignments = 10):
+    def __init__(self, anchor_point, alignment_points, fixed_basis = True, max_alignments = 10, flat = False):
         self.anchor_point = anchor_point
         self.max_alignments = max_alignments
         self.alignment_points = alignment_points[:self.max_alignments]
         self.fixed_basis = fixed_basis
+        self.flat = flat
         if len(self.alignment_points) >= 2: # Make a plane from the anchor point and 2 alignment points
             self.normal, self.d = self._plane_from_points(self.anchor_point, *self.alignment_points[:2])
         else:
@@ -331,12 +332,15 @@ class Plane:
 
         # debug
         # Same OG ids and same z-plane makes us expect a perfect match and rotation
-        explain = all(id1 == id2 for (id1, id2) in og_matches) and (self.anchor_point.position[2] == plane_b.anchor_point.position[2])
+        explain = all(id1 == id2 for (id1, id2) in og_matches) and (self.anchor_point.position[2] == plane_b.anchor_point.position[2]) \
+                and (self.anchor_point.id == plane_b.anchor_point.id)
         debugOut = {}
         if explain:
             debugOut["og_matches"] = og_matches
             debugOut["A_anch"] = self.anchor_point.position
             debugOut["B_anch"] = plane_b.anchor_point.position
+            debugOut["A_points"] = [(self.plane_points[idx].id, self.plane_points[idx].position) for idx in list(self.plane_points.keys())]
+            debugOut["B_points"] = [(plane_b.plane_points[idx].id, plane_b.plane_points[idx].position) for idx in list(self.plane_points.keys())]
             debugOut["offset"] = offset
             debugOut["magnitude_mse"] = magnitude_mse
             debugOut["magnitude_diffs"] = magnitude_diffs
@@ -551,6 +555,10 @@ class Plane:
 
 
     def _plane_from_points(self, pp1, pp2, pp3):
+        if self.flat:
+            normal = np.array[0,0,1]
+            d = -np.dot(normal,pp1.position)
+            return normal, d
         p1, p2, p3 = pp1.position, pp2.position, pp3.position # Extract positions from planepoints
         v1 = np.array(p2) - np.array(p1)
         v2 = np.array(p3) - np.array(p1)
@@ -569,6 +577,8 @@ class Plane:
         return abs(np.dot(self.normal, point) + self.d) / np.linalg.norm(self.normal)
 
     def _project_point(self, point):
+        if self.flat:
+            return point
         point = np.array(point)
         distance = np.dot(self.normal, point) + self.d
         return point - distance * self.normal
@@ -600,7 +610,10 @@ class Plane:
         self.projected_2d = {}
         for idx, ppt in self.plane_points.items():
             pt = ppt.position
-            x, y = self._project_point_2d(pt, u=u, v=v)
+            if self.flat:
+                x, y = ppt.position[0], ppt.position[1]
+            else: 
+                x, y = self._project_point_2d(pt, u=u, v=v)
             self.projected_2d[idx] = (x, y)
         return self.projected_2d
     

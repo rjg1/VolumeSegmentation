@@ -19,6 +19,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon as ShMultiPoly
 from scipy.spatial import cKDTree
+from matplotlib.collections import PatchCollection
 import statistics
 
 STACK_IN_FILE = "real_data_filtered_algo_VOLUMES_g.csv"
@@ -1452,6 +1453,10 @@ def main():
     if new_stack is None:
         raise RuntimeError(f"Could not find a suitable plane with avg ROI area > {AREA_THRESHOLD} after {MAX_ATTEMPTS} attempts.")
 
+    # Test debug
+    plot_zstack_rois(new_stack)
+    return
+
     # Generate planes inside the extracted "B" stack (no IO)
     plane_gen_params_b = dict(plane_gen_params)
     plane_gen_params_b.update({
@@ -1612,6 +1617,52 @@ def main():
     end = time.perf_counter()
     print(f"[TIMER] Total run time: {end - start:.2f}s")
 
+def plot_zstack_rois(zstack, title="ZStack ROI Areas"):
+    zstack._build_xy_rois()  # Ensure ROI data is built
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    patches = []
+    areas = []
+
+    for roi in zstack.xy_rois.values():
+        boundary = roi.points
+        if not boundary:
+            continue
+        coords_2d = [(x, y) for x, y, _ in boundary]
+        coords_2d = get_ordered_boundary(coords_2d)
+        patch = MplPolygon(coords_2d, closed=True)
+        patches.append(patch)
+        areas.append(roi.get_area())
+
+    if not patches:
+        print("No valid ROI polygons to plot.")
+        return
+
+    collection = PatchCollection(patches, cmap='viridis', edgecolor='black', linewidths=0.5)
+    collection.set_array(np.array(areas))  # Color by area
+    ax.add_collection(collection)
+    ax.autoscale_view()
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    cbar = plt.colorbar(collection, ax=ax)
+    cbar.set_label("ROI Area")
+
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.tight_layout()
+    plt.show()
+
+def get_ordered_boundary(coords_2d):
+    """
+    Given a list of (x, y) points, return them ordered along the convex hull.
+    """
+    if len(coords_2d) < 3:
+        return coords_2d
+    try:
+        hull = ConvexHull(coords_2d)
+        return [coords_2d[i] for i in hull.vertices]
+    except:
+        return coords_2d
 
 if __name__ == "__main__":
     main()
