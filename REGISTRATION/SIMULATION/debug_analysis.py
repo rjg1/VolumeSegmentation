@@ -9,7 +9,7 @@ maxIterations = 500 # Maximum number of iterations to run while loop to prevent 
 verbose = True
 
 # Plots the 2D points passed in overlayed
-def plot_points(planeA2D, planeB2D, debugEntry, title =  None):
+def plot_points(planeA2D, planeB2D, planeAIdx, planeBIdx, debugEntry, title =  None):
     fig, ax =  plt.subplots(figsize = (6,6))
     if title:
         ax.set_title(title)
@@ -19,18 +19,20 @@ def plot_points(planeA2D, planeB2D, debugEntry, title =  None):
     for idx, point in enumerate(planeA2D):
         if idx == 0:
             # Special handling to label anchor points
-            ax.scatter(point[0], point[1], color = "red", s=60, label = "Anchor_A")
-            ax.text(point[0] + 1.5, point[1] + 1.5, f"Anchor_A", color='red')
+            ax.scatter(point[0], point[1], color = "red", s=60, label = f"Anchor_A [{planeAIdx[idx]}]")
+            ax.text(point[0] + 1.5, point[1] + 1.5, f"Anchor_A [{planeAIdx[idx]}]", color='red')
         else:
             ax.scatter(point[0], point[1], color = "red", s=30)
+            ax.text(point[0] + 1.5, point[1] + 1.5, f"{planeAIdx[idx]}", color='red')
     # Plane B pts
     for idx, point in enumerate(planeB2D):
         if idx == 0:
             # Special handling to label anchor points
-            ax.scatter(point[0], point[1], color = "blue", s=60, label = "Anchor_B")
-            ax.text(point[0] + 1.5, point[1] + 1.5, f"Anchor_B", color='blue')
+            ax.scatter(point[0], point[1], color = "blue", s=60, label = f"Anchor_B [{planeBIdx[idx]}]")
+            ax.text(point[0] + 1.5, point[1] + 1.5, f"Anchor_B [{planeBIdx[idx]}]", color='blue')
         else:
             ax.scatter(point[0], point[1], color = "blue", s=30)
+            ax.text(point[0] + 1.5, point[1] + 1.5, f"{planeBIdx[idx]}", color='blue')
 
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
@@ -52,18 +54,23 @@ def main():
     idx = 0
     debugEntry = None
     iterations = 0
-    while score > errorThreshold or iterations < maxIterations:
-        # Select a random entry in debug list
-        idx = random.randint(0, len(debug) - 1)
-        debugEntry = debug[idx]
+    # 20 is a correct index
+    # while score > errorThreshold or iterations < maxIterations:
+    #     # Select a random entry in debug list
+    #     idx = random.randint(0, len(debug) - 1)
+    #     debugEntry = debug[idx]
 
-        # Extract score
-        score = sum(list(debugEntry["score_contributions"].values()))
+    #     # Extract score
+    #     score = sum(list(debugEntry["score_contributions"].values()))
 
-        iterations += 1
+    #     iterations += 1
     
+    # Example
+    idx = 20
+    debugEntry = debug[idx]
+
     if verbose:
-        print(f"Selected debugEntry: {debugEntry}")
+        print(f"Selected debugEntry: {debugEntry} \n Debug index: {idx}")
     
     # Plot plane points raw
     planeA2D = [item[1][0:2] for item in debugEntry["A_points"]]
@@ -71,7 +78,7 @@ def main():
     planeB2D = [item[1][0:2] for item in debugEntry["B_points"]]
     planeBIdx = [item[0][1] for item in debugEntry["B_points"]]
 
-    plot_points(planeA2D, planeB2D, debugEntry, title = "Overlay of 2D planes pre transformation")
+    plot_points(planeA2D, planeB2D, planeAIdx, planeBIdx, debugEntry, title = "Overlay of 2D planes pre transformation")
 
     # Plot plane points with rotation fixed
     angleRadians = np.deg2rad(debugEntry["offset"]) # Could manually set to 310
@@ -95,7 +102,7 @@ def main():
 
         rotatedB2D.append(rotatedPoint)
 
-    plot_points(planeA2D, rotatedB2D, debugEntry, title = "Overlay of 2D planes post rotation")
+    plot_points(planeA2D, rotatedB2D, planeAIdx, planeBIdx, debugEntry, title = "Overlay of 2D planes post rotation")
 
     # Plot plane points with translation fixed
     translationPoint = debugEntry["A_anch"][0:2] # Translation to be applied to all b points
@@ -110,7 +117,7 @@ def main():
 
     print(rotatedTranslatedB2D)
 
-    plot_points(planeA2D, rotatedTranslatedB2D, debugEntry, title = "Overlay of 2D planes post rotation and translation")
+    plot_points(planeA2D, rotatedTranslatedB2D, planeAIdx, planeBIdx, debugEntry, title = "Overlay of 2D planes post rotation and translation")
 
 
 
