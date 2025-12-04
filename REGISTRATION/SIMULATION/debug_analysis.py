@@ -54,7 +54,7 @@ def main():
     idx = 0
     debugEntry = None
     iterations = 0
-    # 20 is a correct index
+
     # while score > errorThreshold or iterations < maxIterations:
     #     # Select a random entry in debug list
     #     idx = random.randint(0, len(debug) - 1)
@@ -65,8 +65,12 @@ def main():
 
     #     iterations += 1
     
-    # Example
-    idx = 20
+    # # Example correct
+    # idx = 20
+    # debugEntry = debug[idx]
+
+    # # Example incorrect
+    idx = 19
     debugEntry = debug[idx]
 
     if verbose:
