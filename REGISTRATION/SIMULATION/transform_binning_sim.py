@@ -1440,6 +1440,7 @@ def main():
             new_stack = temp_stack
             new_z = selected_plane.anchor_point.position[2] # extract z of anchor point
             # APPLY AFFINE TRANSFORMATIONS
+            new_stack.export_to_csv("pretrans_z_stack_b.csv")
             new_stack = new_stack.affine_transformed(
                 angle_deg=50,
                 t=(10,10),
@@ -1455,6 +1456,7 @@ def main():
 
     # Test debug
     plot_zstack_rois(new_stack)
+    new_stack.export_to_csv("z_stack_b.csv")
     return
 
     # Generate planes inside the extracted "B" stack (no IO)
