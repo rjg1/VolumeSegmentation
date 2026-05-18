@@ -1,6 +1,6 @@
 param(
   [ValidateSet('onedir','onefile')]
-  [string]$mode = 'onefile'
+  [string]$mode = 'onedir'
 )
 
 $ErrorActionPreference = 'Stop'

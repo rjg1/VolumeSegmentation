@@ -1,0 +1,12 @@
+numpy
+pandas
+torch
+torchvision
+cellpose
+pyqtgraph
+PyQt5
+scikit-image
+scipy
+shapely
+matplotlib
+tifffile

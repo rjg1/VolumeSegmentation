@@ -37,16 +37,28 @@ $common = @(
   '--hidden-import=numpy',
   '--collect-data', 'numpy',
 
+  # cellpose
+  '--collect-all=cellpose',
+
   # ✅ Strip unused junk (big size reduction)
   '--exclude-module', 'numpy.f2py',
   '--exclude-module', 'numpy.f2py.tests',
   '--exclude-module', 'numpy.tests',
   '--exclude-module', 'pytest',
-  '--exclude-module', 'unittest',
-
-  # Optional but helpful
-  '--strip'
+  '--exclude-module', 'unittest'
+  '--exclude-module', 'torch.cuda',
+  '--exclude-module', 'torch.backends.cuda',
+  '--exclude-module', 'torch.distributed'
 )
+
+$torchLib = python -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"
+$torchDlls = Get-ChildItem $torchLib -Filter *.dll
+foreach ($dll in $torchDlls) {
+    $common += @(
+        '--add-binary',
+        "$($dll.FullName);torch\lib"
+    )
+}
 
 if ($mode -eq 'onefile') {
   $args = @(
