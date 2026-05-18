@@ -2,10 +2,12 @@ import sys
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
+from cellpose import models, utils
 import math
 import numpy as np
 import itertools
 import pandas as pd
+import torch
 from collections import deque
 import pyqtgraph as pg
 import tifffile as tiff
@@ -15,7 +17,8 @@ import tifffile as tiff
 #     from PySide6 import QtWidgets, QtCore, QtGui
 #     QT_LIB = 'PySide6'
 # except Exception:
-from PyQt5 import QtWidgets, QtCore, QtGui  # type: ignore
+from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5.QtWidgets import QProgressDialog
 QT_LIB = 'PyQt5'
 
 try:
@@ -282,7 +285,7 @@ class Dataset:
 
     tif_path: Optional[str] = None
     tif_stack: Optional[np.ndarray] = None  # (H,W) or (Z,H,W)
-    def clear(self):
+    def clear(self, clearImage = True):
         self.df = None
         self.z_values = []
         self.roi_to_points_by_z = {}
@@ -291,8 +294,9 @@ class Dataset:
         self.cur_roi_ids_sorted = []
         self.cur_centroid_array = None
         self.cur_roi_centroids_xy = {}
-        self.tif_path = None
-        self.tif_stack = None
+        if clearImage:
+            self.tif_path = None
+            self.tif_stack = None
         self.labels_by_z = {}
     
     def get_label(self, z: float, rid: int) -> int:
@@ -315,10 +319,7 @@ class Dataset:
         except Exception:
             self.has_labels = False
 
-
-    def load_csv(self, path: str):
-        self.name = os.path.basename(path)
-        df = pd.read_csv(path)
+    def load_df(self, df: pd.DataFrame):
         required = {"x", "y", "z", "ROI_ID"}
         missing = required - set(map(str, df.columns))
         if missing:
@@ -362,6 +363,11 @@ class Dataset:
                                     in subz.groupby('ROI_ID')['label'].first().items()}
             else:
                 self.labels_by_z[z] = {}
+
+    def load_csv(self, path: str):
+        self.name = os.path.basename(path)
+        df = pd.read_csv(path)
+        self.load_df(df)
 
     def load_tif(self, path: str):
         arr = tiff.imread(path)
@@ -453,6 +459,9 @@ class ClickablePathItem(QtWidgets.QGraphicsPathItem):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.basePath = os.getcwd()
+
         self.setWindowTitle("ROI Registration GUI")
         self.resize(2100, 1100)
 
@@ -909,9 +918,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status.setText("Created new empty atlas. Cleared all pairs and table.")
 
     def _atlas_load(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Atlas CSV", os.getcwd(), "CSV Files (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Atlas CSV", self.basePath, "CSV Files (*.csv)")
         if not path:
             return
+        
+        self.basePath = os.path.dirname(path)
+
         try:
             self.atlas = Atlas.from_csv(path)
         except Exception as e:
@@ -956,9 +968,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.atlas.columns:
             QtWidgets.QMessageBox.information(self, "Empty atlas", "Nothing to export yet.")
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Atlas CSV", os.getcwd(), "CSV Files (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Atlas CSV", self.basePath, "CSV Files (*.csv)")
         if not path:
             return
+        
+        self.basePath = os.path.dirname(path)
         try:
             self.atlas.save_csv(path)
         except Exception as e:
@@ -967,6 +981,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.atlas_name = os.path.basename(path)
         self._refresh_atlas_badges()
         self.status.setText(f"Exported atlas to {os.path.basename(path)}")
+
+        # Export transform
+        self._export_transform()
 
 
     def _prompt_dataset_label(self, which: str) -> Optional[str]:
@@ -1161,7 +1178,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return poly
 
 
-    def _load_suite2p_stat_into_dataset(self, dataset: Dataset, stat_path: str, ops_path: Optional[str] = None):
+    def _load_suite2p_stat_into_dataset(self, dataset: Dataset, stat_path: str, ops_path: Optional[str] = None, clearImage = True):
         """
         Read Suite2P stat.npy (and optionally ops.npy for exact image size),
         extract an outline polygon per ROI, and populate the Dataset the same way
@@ -1184,7 +1201,7 @@ class MainWindow(QtWidgets.QMainWindow):
             H = int(all_y.max()) + 2
 
         # Reset dataset and fill
-        dataset.clear()
+        dataset.clear(clearImage)
         dataset.name = os.path.basename(stat_path)
         z = 0.0
         dataset.z_values = [z]
@@ -1194,7 +1211,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dataset.has_labels = False
 
         rows = []
-        rid_counter = 1
+        rid_counter = 0 # test TODO - set to 0, fix knockon bugs from sentinel 0 value
         for s in stats_list:
             xpix = np.asarray(s.get('xpix', []))
             ypix = np.asarray(s.get('ypix', []))
@@ -1283,20 +1300,165 @@ class MainWindow(QtWidgets.QMainWindow):
         return (z in (ds.roi_to_points_by_z or {})) and (rid in (ds.roi_to_points_by_z[z] or {}))
 
 
-    def load_masks(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
-        """CSV (legacy) or Suite2P stat.npy."""
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load masks for {dataset.name or which}", os.getcwd(),
-            "Masks (*.csv *.npy);;CSV (*.csv);;Suite2P stat (*.npy)"
+    def _segment_tif_into_dataset(self, dataset: Dataset, tif_stack: np.ndarray):
+        """
+        Segment a TIFF stack with Cellpose and populate Dataset
+        identically to load_masks().
+        """
+
+        use_gpu = (
+            torch.cuda.is_available() or
+            (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
         )
+        model = models.CellposeModel(gpu=use_gpu)
+
+        dataset.clear()
+
+        dataset.tif_stack = tif_stack
+        dataset.z_values = []
+        dataset.roi_to_points_by_z = {}
+        dataset.roi_centroids_xy_by_z = {}
+        dataset.labels_by_z = {}
+
+        rows = []
+
+        # Ensure stack shape = (Z,H,W)
+        if tif_stack.ndim == 2:
+            z_planes = [(0, tif_stack)]
+        else:
+            z_planes = [(z, tif_stack[z]) for z in range(tif_stack.shape[0])]
+
+        progress = QProgressDialog(
+            "Running Cellpose segmentation...",
+            "Cancel",
+            0,
+            len(z_planes),
+            self
+        )
+        progress.setWindowModality(QtCore.Qt.WindowModal)
+
+        rid_counter = 1
+
+        for z_idx, z_plane in z_planes:
+
+            if progress.wasCanceled():
+                return False
+
+            progress.setValue(z_idx)
+
+            masks, flows, styles = model.eval(
+                z_plane,
+                diameter=None,
+                flow_threshold=1,
+                cellprob_threshold=-6
+            )
+
+            outlines = utils.outlines_list(masks)
+
+            roi_dict = {}
+            cent_dict = {}
+
+            roi_ids = np.unique(masks)
+            roi_ids = roi_ids[roi_ids != 0]
+
+            mean_intensities = {
+                roi: float(z_plane[masks==roi].mean())
+                for roi in roi_ids
+            }
+
+            z = float(z_idx)
+
+            for roi_id, outline in enumerate(outlines, start=1):
+
+                if outline.size == 0:
+                    continue
+
+                outline = outline.astype(float)
+
+                # Cellpose returns row,col
+                x = outline[:,1]
+                y = outline[:,0]
+
+                poly = np.column_stack([x,y])
+
+                pts3 = np.column_stack([
+                    x,
+                    y,
+                    np.full(len(x), z)
+                ])
+
+                rid = rid_counter
+                rid_counter += 1
+
+                roi_dict[rid] = pts3
+                cent_dict[rid] = poly.mean(axis=0)
+
+                intensity = mean_intensities.get(
+                    roi_id,
+                    np.nan
+                )
+
+                for px, py in poly:
+                    rows.append({
+                        "x": float(px),
+                        "y": float(py),
+                        "z": z,
+                        "ROI_ID": rid,
+                        "intensity": intensity,
+                        "label": 0
+                    })
+
+            dataset.z_values.append(z)
+            dataset.roi_to_points_by_z[z] = roi_dict
+            dataset.roi_centroids_xy_by_z[z] = cent_dict
+            dataset.labels_by_z[z] = {}
+
+        progress.close()
+
+        dataset.df = pd.DataFrame(rows)
+
+        if dataset.z_values:
+            dataset.set_current_z(dataset.z_values[0])
+
+        dataset.has_labels = False
+
+        return True
+
+    def load_masks(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str, path = None):
+        """CSV (legacy) or Suite2P stat.npy."""
+        imgPath = None
+        clearImage = path is None
+        if path is None:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                "Load source",
+                "Load a Suite2P folder?",
+                QtWidgets.QMessageBox.Yes |
+                QtWidgets.QMessageBox.No
+            )
+
+            if choice == QtWidgets.QMessageBox.Yes: # Loade suite2p foler
+                suite2p_path = QtWidgets.QFileDialog.getExistingDirectory(
+                    self,
+                    "Select Suite2P folder"
+                )
+                path = os.path.join(suite2p_path, "plane0", "stat.npy")
+                imgPath = os.path.join(suite2p_path, "plane0", "ops.npy")
+            else:
+                path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                    self, f"Load masks for {dataset.name or which}", self.basePath,
+                    "Masks (*.csv *.npy);;CSV (*.csv);;Suite2P stat (*.npy)"
+            )
         if not path:
             return
+
+        self.basePath = os.path.dirname(path)
 
         try:
             if path.lower().endswith(".csv"):
                 dataset.load_csv(path)
             elif path.lower().endswith(".npy"):
-                self._load_suite2p_stat_into_dataset(dataset, path)
+                self._load_suite2p_stat_into_dataset(dataset, path, clearImage = clearImage)
             else:
                 raise ValueError("Unsupported masks file. Use .csv or Suite2P stat.npy")
         except Exception as e:
@@ -1305,10 +1467,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         
         # clear pairs tied to this dataset (keep the other dataset's labels for propagation)
-        self._clear_image_for_dataset(which)
+        if clearImage:
+            self._clear_image_for_dataset(which)
         self._purge_pairs_for_dataset(which)
         self._atlas_after_dataset_loaded(which)
-
         # Clear pairing cache 
         self._two_pair_cache = {}
         self._best_combo_cache = {}
@@ -1333,6 +1495,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_controls()
         self.update_overlay_view()
         self._refresh_atlas_badges()
+
+        if imgPath is not None:
+            if which == "A":
+                self.load_image(dataset, self.lblImageA, which, imgPath)
+            else:
+                self.load_image(dataset, self.lblImageB, which, imgPath)
 
 
     def _clear_image_for_dataset(self, which: str):
@@ -1379,20 +1547,80 @@ class MainWindow(QtWidgets.QMainWindow):
             self._additiveItem = None
 
 
-    def load_image(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
+    def load_image(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str, path = None):
         """TIFF (legacy) or Suite2P ops.npy."""
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load image for {dataset.name or which}", os.getcwd(),
-            "Images (*.tif *.tiff *.npy);;TIFF (*.tif *.tiff);;Suite2P ops (*.npy)"
-        )
+        maskPath = None
+        if path is None:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                "Load source",
+                "Load a Suite2P folder?",
+                QtWidgets.QMessageBox.Yes |
+                QtWidgets.QMessageBox.No
+            )
+            if choice == QtWidgets.QMessageBox.Yes: # Loade suite2p foler
+                suite2p_path = QtWidgets.QFileDialog.getExistingDirectory(
+                    self,
+                    "Select Suite2P folder"
+                )
+                path = os.path.join(suite2p_path, "plane0", "ops.npy")
+                maskPath = os.path.join(suite2p_path, "plane0", "stat.npy")
+            else:
+                path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                    self, f"Load image for {dataset.name or which}", self.basePath,
+                    "Images (*.tif *.tiff *.npy);;TIFF (*.tif *.tiff);;Suite2P ops (*.npy)"
+                )
         if not path:
             return
 
-        try:
+        self.basePath = os.path.dirname(path)
+
+        try:            
             if path.lower().endswith((".tif", ".tiff")):
                 dataset.load_tif(path)
                 # match orientation used elsewhere
                 dataset.tif_stack = self._pre_orient_tif_stack(dataset.tif_stack)
+
+                # prompt for optional segmentation
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Run segmentation?",
+                    "Run Cellpose and load extracted ROIs as masks?",
+                    QtWidgets.QMessageBox.Yes |
+                    QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes
+                )
+                # segment this tiff
+                if reply == QtWidgets.QMessageBox.Yes:
+
+                    self._segment_tif_into_dataset(
+                        dataset,
+                        dataset.tif_stack
+                    )
+
+                    # mirror existing mask-loading behaviour
+                    self._purge_pairs_for_dataset(which)
+                    self._atlas_after_dataset_loaded(which)
+
+                    self._two_pair_cache.clear()
+                    self._best_combo_cache.clear()
+
+                    if which == 'A':
+                        self.editZA.setText(
+                            str(dataset.current_z)
+                        )
+                        self.populate_view_A()
+
+                    else:
+                        self.editZB.setText(
+                            str(dataset.current_z)
+                        )
+                        self.populate_view_B()
+
+                    self.refresh_controls()
+                    self.update_overlay_view()
+                    self._refresh_atlas_badges()
+
             elif path.lower().endswith(".npy"):
                 arr = self._load_suite2p_ops_array(path)  # raw array(s)
                 dataset.tif_stack = arr                  # ← no pre-orient for Suite2P
@@ -1426,6 +1654,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.update_overlay_view()
         self.status.setText(f"Loaded image for {dataset.name or which}: {os.path.basename(path)}")
+
+
+        # update masks if suite2p folder loaded
+        if maskPath is not None:
+            if which == "A":
+                self.load_masks(dataset, self.lblMasksA, which, maskPath)
+            else:
+                self.load_masks(dataset, self.lblMasksB, which, maskPath)
 
     def _levels_for_array(self, which: str, slc: np.ndarray, z: float) -> Tuple[float, float]:
         if slc is None:
@@ -1524,36 +1760,59 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             sRt = self.dynamic_transform_from_pairs()
 
-        # Pre-orientation matrix (unchanged)
-        S = np.array([[0.0, 1.0],
-                    [1.0, 0.0]], dtype=float)
-
         if sRt is None:
-            s, R_img, t_img = 1.0, np.eye(2), np.zeros(2, dtype=float)
+            s_raw, R_raw, t_raw = 1.0, np.eye(2), np.zeros(2, dtype=float)
         else:
             s_raw, R_raw, t_raw = sRt
-            R_img = S @ R_raw @ S
-            t_img = S @ t_raw
-            s = float(s_raw)
 
-        # --- World grid on A’s canvas (unchanged) ---
+        Ua, ba = self._user_affine('A')
+        Ub, bb = self._user_affine('B')
+
+        # --- Output canvas: A's rect in world space ---
         xs = rectA.x() + (np.arange(Wa, dtype=float) + 0.5) * (rectA.width()  / Wa)
         ys = rectA.y() + (np.arange(Ha, dtype=float) + 0.5) * (rectA.height() / Ha)
-        X, Y = np.meshgrid(xs, ys)                 # (Ha, Wa)
-        XY = np.vstack([X.ravel(), Y.ravel()])     # (2, Ha*Wa)
 
-        # --- Map A centers → B image frame (unchanged math) ---
-        XYB = (1.0 / max(s, 1e-12)) * (R_img.T @ (XY - t_img.reshape(2, 1)))
-        XB = XYB[0, :].reshape(Ha, Wa)
-        YB = XYB[1, :].reshape(Ha, Wa)
+        X, Y = np.meshgrid(xs, ys)
+        XY = np.vstack([X.ravel(), Y.ravel()])  # (2, Ha*Wa)
+        YX = np.vstack([Y.ravel(), X.ravel()])
 
-        # --- Convert world coords to B fractional indices (unchanged) ---
+
+        # --- Sample A: world → A_raw ---
+        # Forward: A_raw → A_world via Ua @ x + ba
+        # Inverse: A_world → A_raw via Ua_inv @ (x - ba)
+        try:
+            Ua_inv = np.linalg.inv(Ua)
+        except np.linalg.LinAlgError:
+            Ua_inv = np.eye(2)
+        XY_world = YX
+        XYA_raw = Ua @ XY_world + ba.reshape(2, 1)
+        XA = XYA_raw[0, :].reshape(Ha, Wa)
+        YA = XYA_raw[1, :].reshape(Ha, Wa)
+
+        dxA = rectA.width()  / Wa
+        dyA = rectA.height() / Ha
+        iy_A = (XA - rectA.x()) / max(dxA, 1e-12) - 0.5
+        ix_A = (YA - rectA.y()) / max(dyA, 1e-12) - 0.5
+
+        # --- Sample B: world → RTS_inv → B_world → Ub_inv → B_raw ---
+        # RTS forward: B_world → A_world via s*R*x + t
+        # RTS inverse: A_world → B_world via (1/s)*R.T*(x - t)
+        R_rts_inv = (1.0 / max(s_raw, 1e-12)) * R_raw.T
+        B_world = R_rts_inv @ (YX - t_raw.reshape(2, 1))
+
+        try:
+            Ub_inv = np.linalg.inv(Ub)
+        except np.linalg.LinAlgError:
+            Ub_inv = np.eye(2)
+        XYB_raw = Ub @ B_world + bb.reshape(2, 1)
+        XB = XYB_raw[0, :].reshape(Ha, Wa)
+        YB = XYB_raw[1, :].reshape(Ha, Wa)
+
         dxB = rectB.width()  / Wb
         dyB = rectB.height() / Hb
-        ix = (XB - rectB.x()) / max(dxB, 1e-12) - 0.5
-        iy = (YB - rectB.y()) / max(dyB, 1e-12) - 0.5
+        iy_B = (XB - rectB.x()) / max(dxB, 1e-12) - 0.5
+        ix_B = (YB - rectB.y()) / max(dyB, 1e-12) - 0.5
 
-        # --- Normalization helpers (unchanged) ---
         def _levels_for(which: str, slc: np.ndarray) -> Tuple[float, float]:
             v = slc.astype(np.float32, copy=False)
             v = v[np.isfinite(v)]
@@ -1565,74 +1824,59 @@ class MainWindow(QtWidgets.QMainWindow):
             if tight_hi <= tight_lo: tight_lo, tight_hi = wide_lo, wide_hi
             if wide_hi <= wide_lo:
                 wide_lo, wide_hi = float(np.min(v)), float(np.max(v))
-            f = self._get_intensity_factor(which)  # 0.05..5.00 → 0..1
+            f = self._get_intensity_factor(which)
             mix = (f - 0.05) / (5.0 - 0.05); mix = max(0.0, min(1.0, mix))
             lo = (1.0 - mix) * wide_lo + mix * tight_lo
             hi = (1.0 - mix) * wide_hi + mix * tight_hi
             if hi <= lo: hi = lo + 1.0
             return float(lo), float(hi)
 
-        # --- Normalize A (only if enabled) ---
-        A01 = None
-        if useA:
-            loA, hiA = _levels_for('A', slcA)
-            A01 = np.clip((slcA.astype(np.float32) - loA) / (hiA - loA), 0.0, 1.0)
-        opaA = self._get_opacity('A') if useA else 0.0
-
-        # --- Sample & normalize B (only if enabled) ---
-        B01 = None
-        opaB = 0.0
-        if useB:
-            # Bilinear sampling
+        def _bilinear_sample(slc: np.ndarray, ix: np.ndarray, iy: np.ndarray,
+                            W: int, H: int) -> np.ndarray:
             ix0 = np.floor(ix).astype(np.int32); iy0 = np.floor(iy).astype(np.int32)
-            ix1 = ix0 + 1;                         iy1 = iy0 + 1
+            ix1 = ix0 + 1;                        iy1 = iy0 + 1
             wx = ix - ix0;                         wy = iy - iy0
-
             def clip_idx(i, imax): return np.clip(i, 0, imax - 1)
-            ix0c = clip_idx(ix0, Wb); ix1c = clip_idx(ix1, Wb)
-            iy0c = clip_idx(iy0, Hb); iy1c = clip_idx(iy1, Hb)
+            ix0c = clip_idx(ix0, W); ix1c = clip_idx(ix1, W)
+            iy0c = clip_idx(iy0, H); iy1c = clip_idx(iy1, H)
+            samp = ((1-wx)*(1-wy) * slc[iy0c, ix0c] +
+                    wx *(1-wy) * slc[iy0c, ix1c] +
+                    (1-wx)*   wy  * slc[iy1c, ix0c] +
+                    wx *   wy  * slc[iy1c, ix1c])
+            oob = (ix < 0) | (iy < 0) | (ix > W - 1) | (iy > H - 1)
+            samp[oob] = 0.0
+            return samp
 
-            v00 = slcB[iy0c, ix0c]; v10 = slcB[iy0c, ix1c]
-            v01 = slcB[iy1c, ix0c]; v11 = slcB[iy1c, ix1c]
-            w00 = (1.0 - wx) * (1.0 - wy); w10 = wx * (1.0 - wy)
-            w01 = (1.0 - wx) * wy;         w11 = wx * wy
-
-            sampB = (w00 * v00 + w10 * v10 + w01 * v01 + w11 * v11)
-
-            # true OOB → zero
-            oob = (ix < 0) | (iy < 0) | (ix > (Wb - 1)) | (iy > (Hb - 1))
-            sampB[oob] = 0.0
-
-            loB, hiB = _levels_for('B', slcB)
-            B01 = np.clip((sampB.astype(np.float32) - loB) / (hiB - loB), 0.0, 1.0)
-            opaB = self._get_opacity('B')
-
-        # --- Colorize & additive blend (now gated) ---
         comp = np.zeros((Ha, Wa, 3), dtype=np.float32)
-        if useA:
-            comp[..., 2] += (A01 * opaA)              # A → blue
-        if useB:
-            comp[..., 0] += (B01 * opaB)              # B → red
-            comp[..., 1] += (B01 * opaB * 0.55)       # B → green (to make orange)
-        np.clip(comp, 0.0, 1.0, out=comp)
 
+        if useA:
+            sampA = _bilinear_sample(slcA, ix_A, iy_A, Wa, Ha)
+            loA, hiA = _levels_for('A', slcA)
+            A01 = np.clip((sampA.astype(np.float32) - loA) / max(hiA - loA, 1e-6), 0.0, 1.0)
+            opaA = self._get_opacity('A')
+            comp[..., 2] += A01 * opaA                     # A → blue
+
+        if useB:
+            sampB = _bilinear_sample(slcB, ix_B, iy_B, Wb, Hb)
+            loB, hiB = _levels_for('B', slcB)
+            B01 = np.clip((sampB.astype(np.float32) - loB) / max(hiB - loB, 1e-6), 0.0, 1.0)
+            opaB = self._get_opacity('B')
+            comp[..., 0] += B01 * opaB                     # B → red
+            comp[..., 1] += B01 * opaB * 0.55              # B → green (orange)
+
+        np.clip(comp, 0.0, 1.0, out=comp)
         rgb8 = (comp * 255.0 + 0.5).astype(np.uint8)
 
-        # --- Show it in the overlay as a single ImageItem pinned to A's rect ---
         if hasattr(self, "_additiveItem") and self._additiveItem is not None:
-            try:
-                self.viewOverlay.removeItem(self._additiveItem)
-            except Exception:
-                pass
+            try: self.viewOverlay.removeItem(self._additiveItem)
+            except Exception: pass
             self._additiveItem = None
 
         img = pg.ImageItem(rgb8)
-        img.setRect(rectA)
-        img.setZValue(-210)  # beneath outlines & intersection patches
+        img.setRect(rectA)                  # canvas is A's rect, no extra transform needed
+        img.setZValue(-210)
         self.viewOverlay.addItem(img)
         self._additiveItem = img
-
-
    
 
     def _on_intersection_clicked(self, key: Tuple[ROIKey, ROIKey]):
@@ -2161,10 +2405,12 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------ File loading + z ------------------------
     def load_csv(self, dataset: Dataset, label_widget: QtWidgets.QLabel, which: str):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load {dataset.name} CSV", os.getcwd(), "CSV Files (*.csv)"
+            self, f"Load {dataset.name} CSV", self.basePath, "CSV Files (*.csv)"
         )
         if not path:
             return
+        
+        self.basePath = os.path.dirname(path)
 
         try:
             dataset.load_csv(path)
@@ -2205,10 +2451,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def load_tif(self, dataset: Dataset, which: str):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load {dataset.name} TIF", os.getcwd(), "TIFF Files (*.tif *.tiff)"
+            self, f"Load {dataset.name} TIF", self.basePath, "TIFF Files (*.tif *.tiff)"
         )
         if not path:
             return
+        
+        self.basePath = os.path.dirname(path)
 
         try:
             dataset.load_tif(path)
@@ -2424,13 +2672,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # User orientation (flip + any-angle rot) applied to the image
         T_user = self._user_qtransform(which)
 
-        # Optionally compose B→A similarity in B view
-        T = T_user
-        if which == 'B' and self.transform is not None and self.chkApplyTransformToB.isChecked():
-            s, R, t = self.transform
-            T = self.qtransform_from_similarity(s, R, t) * T_user
+        T_user = self._user_qtransform(which)
+        new_img.setTransform(T_user)   # user affine only — no RTS here
 
-        new_img.setTransform(T)
         cur_z = self.datasetA.current_z if which == 'A' else self.datasetB.current_z
         self._apply_image_levels(new_img, which, slc, z=cur_z)
         new_img.setZValue(-100)
@@ -2764,9 +3008,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if n == 0:
             return None
 
-        # Raw centroids (no user affine)
+        # Raw centroids
         A_pts = np.array([self.datasetA.cur_roi_centroids_xy[ak[1]] for ak, _ in pairs], dtype=float)
         B_pts = np.array([self.datasetB.cur_roi_centroids_xy[bk[1]] for _, bk in pairs], dtype=float)
+
+        # User affine
+        A_pts = self._apply_user_affine_to_points('A', A_pts)
+        B_pts = self._apply_user_affine_to_points('B', B_pts)
 
         # ---- 1 pair: translation ----
         if n == 1:
@@ -2781,12 +3029,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ---- 3+ pairs: vote-based early stopping on discretized TRSθ buckets ----
 
-        # Precompute raw polygons (no user affine)
+        # Precompute raw polygons
         polyA = []
         polyB = []
         for (ak, bk) in pairs:
             pA = self.polygon_from_roi(self.datasetA, ak[1])
             pB = self.polygon_from_roi(self.datasetB, bk[1])
+
+            # User affine
+            if pA is not None and pA.shape[0] >= 3:
+                pA = self._apply_user_affine_to_points('A', pA)
+            if pB is not None and pB.shape[0] >= 3:
+                pB = self._apply_user_affine_to_points('B', pB)
+
             polyA.append(pA if (pA is not None and pA.shape[0] >= 3) else None)
             polyB.append(pB if (pB is not None and pB.shape[0] >= 3) else None)
 
@@ -2951,6 +3206,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if sRt is not None:
                 s, R, t = sRt
                 self._last_auto_sRt = (s, R.copy(), t.copy())
+                self.transform = self._last_auto_sRt
                 # Only update fields if override is OFF (so the user sees the auto values)
                 self._set_ui_from_srt(s, R, t, block_signals=True)
 
@@ -3000,25 +3256,26 @@ class MainWindow(QtWidgets.QMainWindow):
                 
         # Draw polygons & centroids
         # A in blue; B in orange (transformed by dynamic transform)
-        dyn = sRt
-        sRt = None if dyn is None else dyn
         penA = pg.mkPen((0, 120, 255), width=2)
         penB = pg.mkPen((255, 140, 0), width=2)
 
-        # A polygons (RAW)
+        # A polygons 
         rid2polyA = {}
         for rid in self.datasetA.cur_roi_ids_sorted:
             poly = self.polygon_from_roi(self.datasetA, rid)   # RAW
+            if poly is not None:
+                poly = self._apply_user_affine_to_points('A', poly)
             rid2polyA[rid] = poly
             if poly is not None and poly.shape[0] >= 3 and self.chkShowOutlineA.isChecked():
                 poly2 = np.vstack([poly, poly[0]])
                 self.viewOverlay.addItem(pg.PlotDataItem(poly2[:,0], poly2[:,1], pen=penA))
 
-        # B polygons (RAW → similarity only)
+        # B polygons
         for rid in self.datasetB.cur_roi_ids_sorted:
-            poly = self.polygon_from_roi(self.datasetB, rid)   # RAW
-            if poly is None or poly.shape[0] < 3: 
+            poly = self.polygon_from_roi(self.datasetB, rid)
+            if poly is None or poly.shape[0] < 3:
                 continue
+            poly = self._apply_user_affine_to_points('B', poly)   # user affine first
             if sRt is not None:
                 s, R, t = sRt
                 poly = apply_similarity_transform_2d(poly, s, R, t)
@@ -3039,6 +3296,9 @@ class MainWindow(QtWidgets.QMainWindow):
             for (az, arid), (bz, brid) in pairs_cur:
                 polyA = rid2polyA.get(arid)                 # RAW A polygon
                 polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW B polygon
+                if polyB is not None:
+                    polyB = self._apply_user_affine_to_points('B', polyB)
+
                 if polyA is None or polyB is None or polyA.shape[0] < 3 or polyB.shape[0] < 3:
                     continue
 
@@ -3088,6 +3348,9 @@ class MainWindow(QtWidgets.QMainWindow):
             for (az, arid), (bz, brid) in pairs_cur:
                 polyA = rid2polyA.get(arid)  # RAW polygon in A
                 polyB = self.polygon_from_roi(self.datasetB, brid)  # RAW polygon in B
+                if polyB is not None:
+                    polyB = self._apply_user_affine_to_points('B', polyB)
+
                 if polyA is None or polyB is None or polyA.shape[0] < 3 or polyB.shape[0] < 3:
                     continue
 
@@ -3097,7 +3360,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     polyB = apply_similarity_transform_2d(polyB, s, R, t)
 
                 # Compute intersection center (fallback to A centroid if empty)
-                cx, cy = self.datasetA.cur_roi_centroids_xy[arid]
+                raw_cxy = np.array([self.datasetA.cur_roi_centroids_xy[arid]])
+                cx, cy = self._apply_user_affine_to_points('A', raw_cxy)[0]
                 iou_val = self.iou_between(polyA, polyB) or 0.0
 
                 if SHAPELY:
@@ -3160,9 +3424,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Seed with 1–2 pairs or enter manual T/R/S, then try again."
             )
 
-        # Precompute polygons (RAW). Skip unusable ones.
-        polysA = {rid: self.polygon_from_roi(self.datasetA, rid) for rid in A_unpaired}
-        polysB = {rid: self.polygon_from_roi(self.datasetB, rid) for rid in B_unpaired}
+        # Precompute polygons (RAW). Skip unusable ones. Applying user transform
+        # polysA = {rid: self.polygon_from_roi(self.datasetA, rid) for rid in A_unpaired}
+        # polysB = {rid: self.polygon_from_roi(self.datasetB, rid) for rid in B_unpaired}
+        polysA, polysB = {}, {}
+        for rid in A_unpaired:
+            p = self.polygon_from_roi(self.datasetA, rid)
+            polysA[rid] = self._apply_user_affine_to_points('A', p) if p is not None else None
+        for rid in B_unpaired:
+            p = self.polygon_from_roi(self.datasetB, rid)
+            polysB[rid] = self._apply_user_affine_to_points('B', p) if p is not None else None
+
 
         # Build all IoUs above (or near) threshold
         tau = float(self.spinMaxDist.value())
@@ -3267,9 +3539,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.datasetB.set_label(bz, brid, label)
 
         # Now write both CSVs (their df already updated in-place)
-        out_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output directory", os.getcwd())
+        out_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output directory", self.basePath)
         if not out_dir:
             return
+        
+        self.basePath = os.path.dirname(out_dir)
+
         baseA = os.path.splitext(self.datasetA.name)[0]; baseB = os.path.splitext(self.datasetB.name)[0]
         outA = os.path.join(out_dir, f"{baseA}_labeled.csv")
         outB = os.path.join(out_dir, f"{baseB}_labeled.csv")
@@ -3287,6 +3562,52 @@ class MainWindow(QtWidgets.QMainWindow):
         # Export atlas
         self._atlas_export()
 
+    def _export_transform(self):
+        """Export current B>A transform."""
+        s, R, t = self.transform
+
+        theta_deg = np.degrees(
+        np.arctan2(R[1,0], R[0,0])
+        )
+
+        rts_data = {
+            "scale": s,
+            "rotation_deg": theta_deg,
+            "tx": t[0],
+            "ty": t[1],
+        }
+
+        # User affine data
+        rts_data.update({
+            "A_flipH": self.chkFlipHA.isChecked(),
+            "A_flipV": self.chkFlipVA.isChecked(),
+            "A_rot": self.spinRotA.value(),
+
+            "B_flipH": self.chkFlipHB.isChecked(),
+            "B_flipV": self.chkFlipVB.isChecked(),
+            "B_rot": self.spinRotB.value(),
+        })
+
+        df = pd.DataFrame([rts_data])
+
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export transform",
+            self.basePath,
+            "CSV (*.csv)"
+        )
+
+        if not path:
+            return
+
+        self.basePath = os.path.dirname(path)
+
+        with open(path, "w") as f:
+            df.to_csv(path, index=False)
+
+        self.status.setText(
+            f"Exported transform: {os.path.basename(path)}"
+        )
 
 
 # ---------------------------- main ----------------------------

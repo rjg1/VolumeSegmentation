@@ -11,8 +11,10 @@ CSV_FILENAME = 'real_data_filtered_1_VOLUMES.csv'  # Ground truth CSV file path
 PLOT_TITLE = f'Plot of Ground Truth data for dataset: {DATA_FOLDER}'
 MAX_POINTS = 10000 # Maximum points to sample
 AX_LIMIT_MAX = 1024
+MIN_ROIS_PER_VOLUME = 5
+MAX_Z_GAP = 1.5
 
-def load_and_sample_data(filename, sample_point_max):
+def load_and_sample_data(filename, sample_point_max, min_rois_per_volume =  MIN_ROIS_PER_VOLUME, max_z_gap = MAX_Z_GAP):
     """Load the CSV data and sample a subset of points for visualization."""
     # Read CSV file into a pandas DataFrame
     df = pd.read_csv(filename)
@@ -28,12 +30,39 @@ def load_and_sample_data(filename, sample_point_max):
     # Check if volume IDs are present
     if 'VOLUME_ID' not in df.columns:
         raise ValueError("CSV does not contain VOLUME_ID column. Ensure export was done with volumes enabled.")
+    
+    if min_rois_per_volume > 0:
+        roi_counts = df.groupby('VOLUME_ID')['ROI_ID'].nunique()
+
+        valid_volumes = roi_counts[roi_counts >= min_rois_per_volume].index
+
+        before = df['VOLUME_ID'].nunique()
+        df = df[df['VOLUME_ID'].isin(valid_volumes)]
+        after = df['VOLUME_ID'].nunique()
+
+        print(f"Filtered volumes by ROI count >= {min_rois_per_volume}")
+        print(f"Volumes: {before} → {after}")
+
+    if max_z_gap is not None:
+        roi_z = df.groupby(['VOLUME_ID', 'ROI_ID'])['z'].mean().reset_index()
+
+        def z_gap(v):
+            z = np.sort(v['z'].values)
+            return np.mean(np.diff(z)) if len(z) > 1 else np.nan
+
+        z_gap_scores = roi_z.groupby('VOLUME_ID').apply(z_gap)
+
+        valid = z_gap_scores[z_gap_scores <= max_z_gap].index
+        df = df[df['VOLUME_ID'].isin(valid)]
+
+        print(f"Filtered by z-gap <= {max_z_gap}: {len(valid)} volumes remain")
 
     # Sample a subset of the data for visualization
     sampled_df = df.sample(frac=subset_ratio, random_state=42)  # Randomly sample a subset for plotting
     print(f"Sampled {len(sampled_df)} points out of {len(df)} total points.")
 
     return sampled_df
+
 
 def assign_colors_by_volume_id(df):
     """Assign colors to points based on their VOLUME_ID."""

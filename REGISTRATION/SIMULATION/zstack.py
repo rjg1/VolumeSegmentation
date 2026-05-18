@@ -857,7 +857,7 @@ class ZStack:
                         if keep:
                             point_projected = True # Projection occurred
                             original_z = candidate_pts[k][1][2] # Index into the kth candidate pts position ([1]), and extract z coordinate ([2])
-                            plane.plane_points[len(plane.plane_points)] = self.construct_planepoint(ids[k], projected_pts[k], idx_z = original_z)
+                            plane.plane_points[len(plane.plane_points)] = self.construct_planepoint(ids[k], projected_pts[k], idx_z = original_z) # TODO look into this - projecting a point on a diff z-plane?
                     if point_projected:
                         plane.angles_and_magnitudes() # Update circular list
 

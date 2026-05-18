@@ -6,3 +6,4 @@ venv-min/
 venv/
 .env/
 *.exe
+roi_matcher/
