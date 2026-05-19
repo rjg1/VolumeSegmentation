@@ -1,12 +1,12 @@
-numpy
-pandas
-torch
-torchvision
-cellpose
-pyqtgraph
-PyQt5
-scikit-image
-scipy
-shapely
-matplotlib
-tifffile
+numpy==2.2.6
+pandas==2.2.3
+torch==2.10.0
+torchvision==0.25.0
+cellpose @ git+https://www.github.com/mouseland/cellpose.git@4fbdc7cc5ec34c38c14258ac0e869a6bd802f3ca
+pyqtgraph==0.13.7
+PyQt5==5.15.11
+scikit-image==0.25.2
+scipy==1.14.1
+shapely==2.0.6
+matplotlib==3.9.2
+tifffile==2024.9.20

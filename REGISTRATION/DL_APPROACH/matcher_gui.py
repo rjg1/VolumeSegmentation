@@ -1310,6 +1310,7 @@ class MainWindow(QtWidgets.QMainWindow):
             torch.cuda.is_available() or
             (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
         )
+        use_gpu = False
         model = models.CellposeModel(gpu=use_gpu)
 
         dataset.clear()
