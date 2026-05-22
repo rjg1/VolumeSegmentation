@@ -1310,9 +1310,8 @@ class MainWindow(QtWidgets.QMainWindow):
             torch.cuda.is_available() or
             (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
         )
-        use_gpu = False
-        model = models.CellposeModel(gpu=use_gpu)
 
+        model = models.CellposeModel(gpu=use_gpu)
         dataset.clear()
 
         dataset.tif_stack = tif_stack
@@ -2538,9 +2537,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def populate_view_A(self):
         self._save_range('A') 
         self.viewA.clear(); self._clear_labels('A')
-        if self.datasetA.df is None:
-            return
         self.update_image_on_view('A')
+        if self.datasetA.df is None:
+            self.update_overlay_view()
+            return
+
         z = self.datasetA.current_z
         pts = self.apply_xy_options(self.datasetA.get_boundary_xy_for_z(z))
         pts = self._apply_user_affine_to_points('A', pts)
@@ -2568,9 +2569,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def populate_view_B(self):
         self._save_range('B')
         self.viewB.clear(); self._clear_labels('B')
-        if self.datasetB.df is None:
-            return
         self.update_image_on_view('B')
+        if self.datasetB.df is None:
+            self.update_overlay_view()
+            return
+
         z = self.datasetB.current_z
         pts = self.apply_xy_options(self.datasetB.get_boundary_xy_for_z(z))
         pts = self._apply_user_affine_to_points('B', pts)
@@ -3195,8 +3198,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception: pass
         self._overlay_intersections = {}
 
-        if self.datasetA.df is None or self.datasetB.df is None:
-            return
+        # if self.datasetA.df is None or self.datasetB.df is None:
+        #     return
 
         # Choose transform: manual override (UI) or auto (dynamic)
         if self.chkManualTRS.isChecked():
@@ -3614,6 +3617,7 @@ class MainWindow(QtWidgets.QMainWindow):
 # ---------------------------- main ----------------------------
 
 def main():
+
     app = QtWidgets.QApplication(sys.argv)
     pg.setConfigOptions(antialias=False, useOpenGL=False)
     w = MainWindow(); w.show()
